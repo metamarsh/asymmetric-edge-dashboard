@@ -223,6 +223,31 @@ STATIC_CHART_TOOLS_REMOVED = [
 ]
 
 
+LOCAL_TZ_NAME = "America/Denver"
+
+
+def local_now() -> datetime:
+    """Wall-clock time in the dashboard's home timezone.
+
+    Streamlit Community Cloud containers run on UTC, which rolls the calendar
+    date over at 6 p.m. Mountain. Left alone that makes every "today" default
+    on the page a day early all evening, including the as-of date used for the
+    partial-month extension. Everything user-facing goes through this instead
+    of datetime.now().
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo(LOCAL_TZ_NAME)).replace(tzinfo=None)
+    except Exception:
+        return datetime.now()
+
+
+def format_clock(moment: datetime, with_year: bool = False) -> str:
+    """Format a timestamp with lowercase a.m./p.m., house style."""
+    pattern = "%b %d, %Y %I:%M %p" if with_year else "%b %d, %I:%M %p"
+    return moment.strftime(pattern).replace("AM", "a.m.").replace("PM", "p.m.")
+
+
 def chart_config(chart_name, static=False):
     """Build the shared Plotly config for a chart.
 
@@ -238,7 +263,7 @@ def chart_config(chart_name, static=False):
     Pass static=True for table-style charts to hide the zoom/pan tools that
     don't apply to a static layout.
     """
-    now = datetime.now()
+    now = local_now()
     stamp = f"{now:%Y-%m-%d} {now.hour % 12 or 12}.{now:%M} {now:%p}"
     config = {
         "displaylogo": False,
@@ -332,9 +357,9 @@ def load_reconstruction_data():
 #   1. Yahoo, with one batch attempt followed by per-ticker retries.
 #   2. price_snapshot.csv, a committed long-history snapshot of adjusted
 #      closes regenerated on the PC whenever the pipeline runs.
-#   3. Stooq, which needs no API key and sits on a different network path
-#      than Yahoo. Stooq closes are split- but NOT dividend-adjusted, so they
-#      are only ever chained onto the end of an adjusted series as returns.
+#   3. Yahoo's chart endpoint hit directly with a browser-impersonating
+#      client, a different code path from the library call that often answers
+#      when yf.download has been throttled.
 #
 # Nothing in this layer raises, and nothing calls st.stop(). A ticker that
 # cannot be resolved is simply absent from the result and its chart line is
@@ -436,44 +461,59 @@ def _yahoo_closes(tickers, fetch_start, fetch_end, attempts: int = 3) -> dict:
     return collected
 
 
-_STOOQ_OVERRIDES = {
-    "CL=F": "cl.f",
-    "BTC-USD": "btcusd",
-    "DX-Y.NYB": None,
-}
+# Yahoo's public chart endpoint, hit directly with a browser-impersonating
+# client. This is a different code path from yf.download (no cookie/crumb
+# handshake, no batch endpoint), so it frequently answers on a host where the
+# library call has been rate limited. Used only to top up a series' tail.
+_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/%s"
+_BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+)
 
 
-def _stooq_symbol(ticker: str):
-    if ticker in _STOOQ_OVERRIDES:
-        return _STOOQ_OVERRIDES[ticker]
-    if any(ch in ticker for ch in ("=", "^")):
-        return None
-    return ticker.lower().replace(".", "-") + ".us"
+def _http_json(url, params):
+    """GET JSON, preferring curl_cffi's browser impersonation when available."""
+    try:
+        from curl_cffi import requests as cffi_requests
+        r = cffi_requests.get(url, params=params, impersonate="chrome", timeout=20)
+        if r.status_code == 200:
+            return r.json()
+    except Exception:
+        pass
+    try:
+        import requests as _requests
+        r = _requests.get(url, params=params, timeout=20,
+                          headers={"User-Agent": _BROWSER_UA})
+        if r.status_code == 200:
+            return r.json()
+    except Exception:
+        pass
+    return None
 
 
-def _stooq_closes(tickers, fetch_start, fetch_end) -> dict:
-    """Last-resort daily closes from Stooq. Returns {ticker: Series}."""
+def _fallback_closes(tickers, fetch_start, fetch_end) -> dict:
+    """Second-chance adjusted closes straight from Yahoo's chart endpoint."""
     collected = {}
-    d1 = pd.Timestamp(fetch_start).strftime("%Y%m%d")
-    d2 = pd.Timestamp(fetch_end).strftime("%Y%m%d")
+    p1 = int(pd.Timestamp(fetch_start).timestamp())
+    p2 = int((pd.Timestamp(fetch_end) + timedelta(days=1)).timestamp())
     for t in dict.fromkeys(tickers):
-        sym = _stooq_symbol(t)
-        if not sym:
-            continue
-        url = "https://stooq.com/q/d/l/?s=%s&d1=%s&d2=%s&i=d" % (sym, d1, d2)
+        data = _http_json(_CHART_URL % t, {
+            "period1": p1, "period2": p2, "interval": "1d",
+            "events": "div,splits", "includeAdjustedClose": "true",
+        })
         try:
-            df = pd.read_csv(url)
+            result = data["chart"]["result"][0]
+            stamps = result["timestamp"]
+            indicators = result["indicators"]
+            adj = indicators.get("adjclose")
+            values = adj[0]["adjclose"] if adj else indicators["quote"][0]["close"]
+            idx = pd.to_datetime(pd.Series(stamps), unit="s").dt.normalize()
+            s = _clean_series(pd.Series(values, index=idx))
         except Exception:
             continue
-        if df is None or df.empty or "Date" not in df.columns or "Close" not in df.columns:
-            continue
-        try:
-            s = pd.Series(df["Close"].values, index=pd.to_datetime(df["Date"]))
-        except Exception:
-            continue
-        s = _clean_series(s)
         if len(s):
-            collected[t] = s
+            collected[t] = s[~s.index.duplicated(keep="last")]
     return collected
 
 
@@ -481,8 +521,8 @@ def _chain_onto(base: pd.Series, extra: pd.Series, ratio_link: bool) -> pd.Serie
     """Extend ``base`` with the part of ``extra`` that falls after base's end.
 
     With ratio_link=True the two series sit on different adjustment bases
-    (Stooq is not dividend-adjusted), so ``extra`` is converted into a return
-    chain off its own overlapping value rather than being used at face value.
+    (an unadjusted feed, for instance), so ``extra`` is converted into a
+    return chain off its overlapping value rather than used at face value.
     """
     base = base.dropna()
     extra = extra.dropna()
@@ -510,8 +550,8 @@ def _fetch_closes(tickers, start_date: str, end_date: str,
     """Adjusted closes for ``tickers`` over the requested window.
 
     Yahoo is preferred; the committed snapshot backfills whatever Yahoo will
-    not return, and Stooq tops up the most recent days when Yahoo is rate
-    limited. Returns an empty DataFrame rather than raising if all three fail.
+    not return, and the direct chart endpoint tops up the most recent days
+    when the library call is rate limited. Returns an empty DataFrame rather than raising if all three fail.
     """
     tickers = [t for t in dict.fromkeys(tickers) if t]
     if not tickers:
@@ -548,13 +588,14 @@ def _fetch_closes(tickers, start_date: str, end_date: str,
         elif s is not None:
             series[t] = s
 
-    # Anything Yahoo would not give us gets a Stooq top-up so the most recent
-    # session is not missing just because the host is rate limited.
+    # Anything the library would not return gets a direct chart-endpoint
+    # top-up, so the most recent session is not missing just because the batch
+    # call was throttled.
     stale = [t for t in tickers if t not in live]
     if stale:
-        for t, s in _stooq_closes(stale, fetch_start, fetch_end).items():
+        for t, s in _fallback_closes(stale, fetch_start, fetch_end).items():
             if t in series:
-                series[t] = _chain_onto(series[t], s, ratio_link=True)
+                series[t] = _chain_onto(series[t], s, ratio_link=False)
             else:
                 series[t] = s
 
@@ -2191,7 +2232,7 @@ def compute_live_position_drift(tickers_tuple, start_weights_tuple, today_str,
     fetch_start = (first_of_month - pd.Timedelta(days=75)).strftime("%Y-%m-%d")
     fetch_end = (today_ts + pd.Timedelta(days=2)).strftime("%Y-%m-%d")
 
-    # Yahoo first, then the committed snapshot, then Stooq. Partial results are
+    # Yahoo, then the snapshot, then the chart endpoint. Partial results are
     # fine here: the caller renormalizes across whichever tickers came back.
     close_map = dict(_yahoo_closes(tickers, fetch_start, fetch_end))
 
@@ -2207,10 +2248,10 @@ def compute_live_position_drift(tickers_tuple, start_weights_tuple, today_str,
 
     still_missing = [t for t in tickers if t not in close_map]
     if still_missing:
-        close_map.update(_stooq_closes(still_missing, fetch_start, fetch_end))
+        close_map.update(_fallback_closes(still_missing, fetch_start, fetch_end))
 
     if not close_map:
-        return None, "no price data from Yahoo, snapshot, or Stooq"
+        return None, "no price data from Yahoo or the committed snapshot"
 
     close = pd.DataFrame(close_map).sort_index()
 
@@ -2438,7 +2479,7 @@ def extend_reconstruction_via_yahoo(recon_last_date_str: str, target_date_str: s
     fetch_end = (target_ts + timedelta(days=5)).strftime("%Y-%m-%d")
 
     # Same three-source ladder the chart loaders use: Yahoo first, then the
-    # committed snapshot, then Stooq for anything still missing. A ticker with
+    # committed snapshot, then the direct chart endpoint. A ticker with
     # no data simply drops out and the surviving weights are renormalized.
     close_map = dict(_yahoo_closes(tickers, fetch_start, fetch_end))
 
@@ -2454,10 +2495,10 @@ def extend_reconstruction_via_yahoo(recon_last_date_str: str, target_date_str: s
 
     still_missing = [t for t in tickers if t not in close_map]
     if still_missing:
-        close_map.update(_stooq_closes(still_missing, fetch_start, fetch_end))
+        close_map.update(_fallback_closes(still_missing, fetch_start, fetch_end))
 
     if not close_map:
-        return empty, "no price data from Yahoo, snapshot, or Stooq"
+        return empty, "no price data from Yahoo or the committed snapshot"
 
     close = pd.DataFrame(close_map).sort_index()
 
@@ -2780,14 +2821,14 @@ def render_update_section(portfolio_df):
     """Render the partial-month update controls and pipeline instructions."""
     last_date = portfolio_df["date"].iloc[-1]
     last_value = float(portfolio_df["portfolio_value"].iloc[-1])
-    days_stale = (datetime.now().date() - last_date.date()).days
+    days_stale = (local_now().date() - last_date.date()).days
 
     # Decide which workflow the user is likely going to need based on the
     # calendar. If a full calendar month has elapsed since the last data
     # point, recommend Workflow 2 (permanent pipeline refresh). Otherwise
     # the open month is still in progress and Workflow 1 (quick MTD extend)
     # is the typical move. This is a soft recommendation, not a hard rule.
-    today = datetime.now().date()
+    today = local_now().date()
     last_ym = last_date.year * 12 + last_date.month
     today_ym = today.year * 12 + today.month
     recommend_workflow_2 = today_ym > last_ym
@@ -2886,7 +2927,7 @@ def render_update_section(portfolio_df):
         with col_b:
             as_of = st.date_input(
                 "As-of date",
-                value=datetime.now().date(),
+                value=local_now().date(),
                 key="upd_as_of",
                 help="The date the MTD return is current through.",
             )
@@ -3529,7 +3570,7 @@ def main():
         for _k in ("upd_as_of", "upd_mtd_return", "summary_end_date", "summary_start_date"):
             st.session_state.pop(_k, None)
         # MTD return not seeded; field defaults to empty after a full rebuild.
-        st.session_state["upd_as_of"] = datetime.now().date()
+        st.session_state["upd_as_of"] = local_now().date()
         st.session_state["_dates_reset_version"] = DATE_RESET_VERSION
 
     # Load data
@@ -3596,7 +3637,7 @@ def main():
     latest_str = latest_date.strftime("%B %d, %Y")
     st.markdown(
         f'<p class="brand-sub">Data through {latest_str} &nbsp;&middot;&nbsp; '
-        f'Refreshed {datetime.now().strftime("%b %d, %I:%M %p")} &nbsp;&middot;&nbsp; '
+        f'Refreshed {format_clock(local_now())} MT &nbsp;&middot;&nbsp; '
         f'<span style="color:#9CA3AF; font-size:0.78rem;">Build v2026-05-27c</span></p>',
         unsafe_allow_html=True,
     )
@@ -4400,7 +4441,7 @@ def main():
     # Bottom footer
     st.markdown(
         f'<p style="text-align:center; color:{TEXT_MUTED}; font-size:0.72rem; margin-top:2rem;">'
-        f'asymmetricedge.io &nbsp;&middot;&nbsp; Data refreshed {datetime.now().strftime("%b %d, %Y %I:%M %p")}'
+        f'asymmetricedge.io &nbsp;&middot;&nbsp; Data refreshed {format_clock(local_now(), with_year=True)} MT'
         f'</p>',
         unsafe_allow_html=True,
     )
