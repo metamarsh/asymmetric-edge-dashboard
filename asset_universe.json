@@ -1,0 +1,84 @@
+{
+  "categories": [
+    {
+      "name": "U.S. equities",
+      "visible": true,
+      "color_bg": "#DCE7F4",
+      "color_text": "#1F4D87",
+      "assets": [
+        {
+          "name": "Nasdaq-100",
+          "ticker": "QQQ"
+        },
+        {
+          "name": "Russell 2000",
+          "ticker": "IWM"
+        }
+      ]
+    },
+    {
+      "name": "International",
+      "visible": true,
+      "color_bg": "#D6E8DF",
+      "color_text": "#14543E",
+      "assets": [
+        {
+          "name": "Japan hedged",
+          "ticker": "DXJ"
+        },
+        {
+          "name": "EM ex-China",
+          "ticker": "EMXC"
+        }
+      ]
+    },
+    {
+      "name": "Commodities",
+      "visible": true,
+      "color_bg": "#F4E5C5",
+      "color_text": "#7E4A0A",
+      "assets": [
+        {
+          "name": "Gold",
+          "ticker": "GLD"
+        },
+        {
+          "name": "All-weather",
+          "ticker": "HGER"
+        }
+      ]
+    },
+    {
+      "name": "Crypto",
+      "visible": true,
+      "color_bg": "#E2DDF0",
+      "color_text": "#443D7F",
+      "assets": [
+        {
+          "name": "Bitcoin",
+          "ticker": "IBIT"
+        }
+      ]
+    },
+    {
+      "name": "Defensive",
+      "visible": true,
+      "color_bg": "#E8E4DA",
+      "color_text": "#4A463D",
+      "assets": [
+        {
+          "name": "Defensive equity",
+          "ticker": "BTAL"
+        },
+        {
+          "name": "Cash T-Bills",
+          "ticker": "BIL"
+        },
+        {
+          "name": "Long Treasuries",
+          "ticker": "TLT"
+        }
+      ]
+    }
+  ]
+}
