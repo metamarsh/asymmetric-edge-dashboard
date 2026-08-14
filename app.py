@@ -6,6 +6,7 @@ import yfinance as yf
 from datetime import datetime, timedelta
 import os
 import json
+import time
 
 # ---------- Page config ----------
 st.set_page_config(
@@ -319,33 +320,260 @@ def load_reconstruction_data():
     return df
 
 
+# ---------------------------------------------------------------------------
+# Resilient price fetching
+#
+# On shared hosts (Streamlit Community Cloud in particular) Yahoo Finance
+# regularly answers with YFRateLimitError for some or all tickers, because the
+# request comes from an IP shared with hundreds of other apps. Every price
+# fetch therefore goes through _fetch_closes(), which assembles a series from
+# three sources in descending order of preference:
+#
+#   1. Yahoo, with one batch attempt followed by per-ticker retries.
+#   2. price_snapshot.csv, a committed long-history snapshot of adjusted
+#      closes regenerated on the PC whenever the pipeline runs.
+#   3. Stooq, which needs no API key and sits on a different network path
+#      than Yahoo. Stooq closes are split- but NOT dividend-adjusted, so they
+#      are only ever chained onto the end of an adjusted series as returns.
+#
+# Nothing in this layer raises, and nothing calls st.stop(). A ticker that
+# cannot be resolved is simply absent from the result and its chart line is
+# skipped, which is always preferable to taking the whole dashboard down.
+# ---------------------------------------------------------------------------
+
+PRICE_SNAPSHOT_NAME = "price_snapshot.csv"
+
+
+@st.cache_data(ttl=86400)
+def load_price_snapshot() -> pd.DataFrame:
+    """Committed adjusted-close history, used whenever Yahoo is unavailable."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(script_dir, PRICE_SNAPSHOT_NAME),
+        os.path.join(os.path.dirname(script_dir), "Portfolio Hist Val Reconstruction", PRICE_SNAPSHOT_NAME),
+    ]
+    for path in candidates:
+        if not os.path.exists(path):
+            continue
+        try:
+            df = pd.read_csv(path, parse_dates=["date"], index_col="date")
+        except Exception:
+            continue
+        try:
+            df.index = pd.to_datetime(df.index)
+            if getattr(df.index, "tz", None) is not None:
+                df.index = df.index.tz_localize(None)
+        except Exception:
+            continue
+        return df.sort_index()
+    return pd.DataFrame()
+
+
+def _clean_series(values) -> pd.Series:
+    s = pd.to_numeric(values, errors="coerce").dropna()
+    s = s[s > 0]
+    return s.sort_index()
+
+
+def _yahoo_closes(tickers, fetch_start, fetch_end, attempts: int = 3) -> dict:
+    """Best-effort Yahoo close prices. Returns {ticker: Series}; never raises."""
+    tickers = list(dict.fromkeys(tickers))
+    collected = {}
+
+    def _absorb(raw, expected):
+        if raw is None or len(raw) == 0:
+            return
+        try:
+            if isinstance(raw.columns, pd.MultiIndex):
+                if "Close" not in raw.columns.get_level_values(0):
+                    return
+                close = raw["Close"].copy()
+            else:
+                if "Close" not in raw.columns:
+                    return
+                close = raw[["Close"]].copy()
+                close.columns = [expected[0]]
+            close.index = pd.to_datetime(close.index)
+            if getattr(close.index, "tz", None) is not None:
+                close.index = close.index.tz_localize(None)
+        except Exception:
+            return
+        for col in close.columns:
+            name = str(col)
+            if name in collected:
+                continue
+            s = _clean_series(close[col])
+            if len(s):
+                collected[name] = s
+
+    # One batch attempt first: cheapest path when Yahoo is behaving.
+    try:
+        _absorb(
+            yf.download(tickers, start=fetch_start, end=fetch_end,
+                        auto_adjust=True, progress=False, threads=False),
+            tickers,
+        )
+    except Exception:
+        pass
+
+    # Then retry only the stragglers, one at a time, with a little backoff.
+    for attempt in range(attempts):
+        missing = [t for t in tickers if t not in collected]
+        if not missing:
+            break
+        if attempt:
+            time.sleep(1.0 + attempt)
+        for t in missing:
+            try:
+                _absorb(
+                    yf.download(t, start=fetch_start, end=fetch_end,
+                                auto_adjust=True, progress=False, threads=False),
+                    [t],
+                )
+            except Exception:
+                continue
+
+    return collected
+
+
+_STOOQ_OVERRIDES = {
+    "CL=F": "cl.f",
+    "BTC-USD": "btcusd",
+    "DX-Y.NYB": None,
+}
+
+
+def _stooq_symbol(ticker: str):
+    if ticker in _STOOQ_OVERRIDES:
+        return _STOOQ_OVERRIDES[ticker]
+    if any(ch in ticker for ch in ("=", "^")):
+        return None
+    return ticker.lower().replace(".", "-") + ".us"
+
+
+def _stooq_closes(tickers, fetch_start, fetch_end) -> dict:
+    """Last-resort daily closes from Stooq. Returns {ticker: Series}."""
+    collected = {}
+    d1 = pd.Timestamp(fetch_start).strftime("%Y%m%d")
+    d2 = pd.Timestamp(fetch_end).strftime("%Y%m%d")
+    for t in dict.fromkeys(tickers):
+        sym = _stooq_symbol(t)
+        if not sym:
+            continue
+        url = "https://stooq.com/q/d/l/?s=%s&d1=%s&d2=%s&i=d" % (sym, d1, d2)
+        try:
+            df = pd.read_csv(url)
+        except Exception:
+            continue
+        if df is None or df.empty or "Date" not in df.columns or "Close" not in df.columns:
+            continue
+        try:
+            s = pd.Series(df["Close"].values, index=pd.to_datetime(df["Date"]))
+        except Exception:
+            continue
+        s = _clean_series(s)
+        if len(s):
+            collected[t] = s
+    return collected
+
+
+def _chain_onto(base: pd.Series, extra: pd.Series, ratio_link: bool) -> pd.Series:
+    """Extend ``base`` with the part of ``extra`` that falls after base's end.
+
+    With ratio_link=True the two series sit on different adjustment bases
+    (Stooq is not dividend-adjusted), so ``extra`` is converted into a return
+    chain off its own overlapping value rather than being used at face value.
+    """
+    base = base.dropna()
+    extra = extra.dropna()
+    if base.empty:
+        return extra
+    if extra.empty:
+        return base
+    last_dt = base.index[-1]
+    tail = extra[extra.index > last_dt]
+    if tail.empty:
+        return base
+    if ratio_link:
+        overlap = extra.index[extra.index <= last_dt]
+        if len(overlap) == 0:
+            return base
+        anchor = float(extra.loc[overlap[-1]])
+        if not np.isfinite(anchor) or anchor <= 0:
+            return base
+        tail = tail / anchor * float(base.iloc[-1])
+    return pd.concat([base, tail]).sort_index()
+
+
+def _fetch_closes(tickers, start_date: str, end_date: str,
+                  lead_days: int = 7, trail_days: int = 3) -> pd.DataFrame:
+    """Adjusted closes for ``tickers`` over the requested window.
+
+    Yahoo is preferred; the committed snapshot backfills whatever Yahoo will
+    not return, and Stooq tops up the most recent days when Yahoo is rate
+    limited. Returns an empty DataFrame rather than raising if all three fail.
+    """
+    tickers = [t for t in dict.fromkeys(tickers) if t]
+    if not tickers:
+        return pd.DataFrame()
+
+    fetch_start = (pd.Timestamp(start_date) - timedelta(days=lead_days)).strftime("%Y-%m-%d")
+    fetch_end = (pd.Timestamp(end_date) + timedelta(days=trail_days)).strftime("%Y-%m-%d")
+    lo, hi = pd.Timestamp(fetch_start), pd.Timestamp(fetch_end)
+
+    snap = load_price_snapshot()
+    snap_series = {}
+    for t in tickers:
+        if t in snap.columns:
+            s = _clean_series(snap[t])
+            s = s[(s.index >= lo) & (s.index <= hi)]
+            if len(s):
+                snap_series[t] = s
+
+    live = _yahoo_closes(tickers, fetch_start, fetch_end)
+
+    series = {}
+    for t in tickers:
+        y = live.get(t)
+        s = snap_series.get(t)
+        if y is not None and s is not None:
+            # If Yahoo returned the full window, trust it outright; otherwise
+            # keep the snapshot's history and append Yahoo's newer rows.
+            if y.index[0] <= s.index[0] + timedelta(days=5):
+                series[t] = y
+            else:
+                series[t] = _chain_onto(s, y, ratio_link=False)
+        elif y is not None:
+            series[t] = y
+        elif s is not None:
+            series[t] = s
+
+    # Anything Yahoo would not give us gets a Stooq top-up so the most recent
+    # session is not missing just because the host is rate limited.
+    stale = [t for t in tickers if t not in live]
+    if stale:
+        for t, s in _stooq_closes(stale, fetch_start, fetch_end).items():
+            if t in series:
+                series[t] = _chain_onto(series[t], s, ratio_link=True)
+            else:
+                series[t] = s
+
+    if not series:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(series).sort_index()
+    df = df[(df.index >= lo) & (df.index <= hi)]
+    return df
+
+
 @st.cache_data(ttl=3600)
 def load_benchmark_data(start_date: str, end_date: str):
-    tickers = list(BENCHMARK_TICKERS.values())
-    fetch_start = (pd.Timestamp(start_date) - timedelta(days=7)).strftime("%Y-%m-%d")
-    fetch_end = (pd.Timestamp(end_date) + timedelta(days=3)).strftime("%Y-%m-%d")
-    raw = yf.download(tickers, start=fetch_start, end=fetch_end, auto_adjust=True)
-    if raw.empty:
-        st.error("Could not fetch benchmark data from Yahoo Finance.")
-        st.stop()
-    close = raw["Close"].copy()
-    close.index = pd.to_datetime(close.index).tz_localize(None)
-    close = close.sort_index()
-    return close
+    return _fetch_closes(list(BENCHMARK_TICKERS.values()), start_date, end_date)
 
 
 @st.cache_data(ttl=3600)
 def load_asset_class_data(start_date: str, end_date: str):
-    fetch_start = (pd.Timestamp(start_date) - timedelta(days=7)).strftime("%Y-%m-%d")
-    fetch_end = (pd.Timestamp(end_date) + timedelta(days=3)).strftime("%Y-%m-%d")
-    tickers = list(ASSET_CLASS_TICKERS.values())
-    raw = yf.download(tickers, start=fetch_start, end=fetch_end, auto_adjust=True)
-    if raw.empty:
-        return pd.DataFrame()
-    close = raw["Close"].copy()
-    close.index = pd.to_datetime(close.index).tz_localize(None)
-    close = close.sort_index()
-    return close
+    return _fetch_closes(list(ASSET_CLASS_TICKERS.values()), start_date, end_date)
 
 
 @st.cache_data(ttl=3600)
@@ -356,22 +584,10 @@ def load_bil_data(start_date: str, end_date: str):
     fall outside BIL's history are treated as 0% risk-free by the caller via
     reindex + fillna.
     """
-    fetch_start = (pd.Timestamp(start_date) - timedelta(days=7)).strftime("%Y-%m-%d")
-    fetch_end = (pd.Timestamp(end_date) + timedelta(days=3)).strftime("%Y-%m-%d")
-    try:
-        raw = yf.download("BIL", start=fetch_start, end=fetch_end, auto_adjust=True, progress=False)
-    except Exception:
+    frame = _fetch_closes(["BIL"], start_date, end_date)
+    if frame.empty or "BIL" not in frame.columns:
         return None
-    if raw is None or raw.empty:
-        return None
-    if isinstance(raw.columns, pd.MultiIndex):
-        close = raw["Close"]
-        if isinstance(close, pd.DataFrame):
-            close = close.iloc[:, 0]
-    else:
-        close = raw["Close"]
-    close.index = pd.to_datetime(close.index).tz_localize(None)
-    close = close.sort_index().dropna()
+    close = frame["BIL"].dropna()
     if len(close) < 2:
         return None
     monthly = close.resample("ME").last().pct_change().dropna()
@@ -379,7 +595,17 @@ def load_bil_data(start_date: str, end_date: str):
 
 
 def normalize_to_10k(series: pd.Series) -> pd.Series:
-    first_val = series.dropna().iloc[0]
+    """Rebase a price series to 10,000 at its first observation.
+
+    Returns an empty series when there is nothing to rebase, so a benchmark
+    that failed to download drops out of the chart instead of raising.
+    """
+    clean = series.dropna()
+    if clean.empty:
+        return pd.Series(dtype="float64")
+    first_val = float(clean.iloc[0])
+    if not np.isfinite(first_val) or first_val == 0:
+        return pd.Series(dtype="float64")
     return series / first_val * 10000
 
 
@@ -917,19 +1143,7 @@ def load_custom_ticker_data(tickers_tuple, start_date: str, end_date: str):
     tickers = list(tickers_tuple)
     if not tickers:
         return pd.DataFrame()
-    fetch_start = (pd.Timestamp(start_date) - timedelta(days=7)).strftime("%Y-%m-%d")
-    fetch_end = (pd.Timestamp(end_date) + timedelta(days=3)).strftime("%Y-%m-%d")
-    raw = yf.download(tickers, start=fetch_start, end=fetch_end, auto_adjust=True)
-    if raw.empty:
-        return pd.DataFrame()
-    if len(tickers) == 1:
-        close = raw[["Close"]].copy()
-        close.columns = [tickers[0]]
-    else:
-        close = raw["Close"].copy()
-    close.index = pd.to_datetime(close.index).tz_localize(None)
-    close = close.sort_index()
-    return close
+    return _fetch_closes(tickers, start_date, end_date)
 
 
 def build_total_return_chart(series_dict, start_date, end_date, color_map):
@@ -1977,36 +2191,28 @@ def compute_live_position_drift(tickers_tuple, start_weights_tuple, today_str,
     fetch_start = (first_of_month - pd.Timedelta(days=75)).strftime("%Y-%m-%d")
     fetch_end = (today_ts + pd.Timedelta(days=2)).strftime("%Y-%m-%d")
 
-    try:
-        raw = yf.download(
-            tickers,
-            start=fetch_start,
-            end=fetch_end,
-            auto_adjust=True,
-            progress=False,
-            threads=False,
-        )
-    except Exception as e:
-        return None, f"yfinance.download raised: {type(e).__name__}: {e}"
+    # Yahoo first, then the committed snapshot, then Stooq. Partial results are
+    # fine here: the caller renormalizes across whichever tickers came back.
+    close_map = dict(_yahoo_closes(tickers, fetch_start, fetch_end))
 
-    if raw is None or raw.empty:
-        return None, "yfinance returned empty data"
+    snap = load_price_snapshot()
+    lo, hi = pd.Timestamp(fetch_start), pd.Timestamp(fetch_end)
+    for t in tickers:
+        if t in close_map or t not in snap.columns:
+            continue
+        s = _clean_series(snap[t])
+        s = s[(s.index >= lo) & (s.index <= hi)]
+        if len(s):
+            close_map[t] = s
 
-    # Normalize column layout to one column per ticker. Multi-ticker fetches
-    # have MultiIndex columns (level 0 = field, level 1 = ticker); single
-    # ticker fetches are flat.
-    if isinstance(raw.columns, pd.MultiIndex):
-        if "Close" not in raw.columns.get_level_values(0):
-            return None, "no 'Close' column in yfinance result"
-        close = raw["Close"].copy()
-    else:
-        if "Close" not in raw.columns:
-            return None, "no 'Close' column in single-ticker yfinance result"
-        close = raw[["Close"]].copy()
-        close.columns = [tickers[0]]
+    still_missing = [t for t in tickers if t not in close_map]
+    if still_missing:
+        close_map.update(_stooq_closes(still_missing, fetch_start, fetch_end))
 
-    close.index = pd.to_datetime(close.index).tz_localize(None)
-    close = close.sort_index()
+    if not close_map:
+        return None, "no price data from Yahoo, snapshot, or Stooq"
+
+    close = pd.DataFrame(close_map).sort_index()
 
     # Anchor = last trading day in the prior calendar month.
     prior_mask = (close.index.year == prior_year) & (close.index.month == prior_month)
@@ -2231,36 +2437,29 @@ def extend_reconstruction_via_yahoo(recon_last_date_str: str, target_date_str: s
     fetch_start = (recon_last_ts - timedelta(days=10)).strftime("%Y-%m-%d")
     fetch_end = (target_ts + timedelta(days=5)).strftime("%Y-%m-%d")
 
-    try:
-        raw = yf.download(
-            tickers,
-            start=fetch_start,
-            end=fetch_end,
-            auto_adjust=True,
-            progress=False,
-            threads=False,
-        )
-    except Exception as e:
-        return empty, f"yfinance.download raised: {type(e).__name__}: {e}"
+    # Same three-source ladder the chart loaders use: Yahoo first, then the
+    # committed snapshot, then Stooq for anything still missing. A ticker with
+    # no data simply drops out and the surviving weights are renormalized.
+    close_map = dict(_yahoo_closes(tickers, fetch_start, fetch_end))
 
-    if raw is None or raw.empty:
-        return empty, "yfinance returned empty DataFrame"
+    snap = load_price_snapshot()
+    lo, hi = pd.Timestamp(fetch_start), pd.Timestamp(fetch_end)
+    for t in tickers:
+        if t in close_map or t not in snap.columns:
+            continue
+        s = _clean_series(snap[t])
+        s = s[(s.index >= lo) & (s.index <= hi)]
+        if len(s):
+            close_map[t] = s
 
-    # Normalize column layout to a DataFrame with one column per ticker.
-    # Multi-ticker fetches have MultiIndex columns with level 0 = field name
-    # (Close, High, ...) and level 1 = ticker. Single-ticker fetches are flat.
-    if isinstance(raw.columns, pd.MultiIndex):
-        if "Close" not in raw.columns.get_level_values(0):
-            return empty, "no 'Close' column in yfinance result"
-        close = raw["Close"].copy()
-    else:
-        if "Close" not in raw.columns:
-            return empty, "no 'Close' column in single-ticker yfinance result"
-        close = raw[["Close"]].copy()
-        close.columns = [tickers[0]]
+    still_missing = [t for t in tickers if t not in close_map]
+    if still_missing:
+        close_map.update(_stooq_closes(still_missing, fetch_start, fetch_end))
 
-    close.index = pd.to_datetime(close.index).tz_localize(None)
-    close = close.sort_index()
+    if not close_map:
+        return empty, "no price data from Yahoo, snapshot, or Stooq"
+
+    close = pd.DataFrame(close_map).sort_index()
 
     # Find which tickers actually have data for the anchor date
     on_or_before_idx = close.index[close.index <= recon_last_ts]
@@ -2268,9 +2467,19 @@ def extend_reconstruction_via_yahoo(recon_last_date_str: str, target_date_str: s
         return empty, f"yfinance returned no trading days at or before {recon_last_ts.date()}"
 
     anchor_dt = on_or_before_idx[-1]
-    available_tickers = [t for t in tickers if t in close.columns]
+    # A ticker only helps if it has both an anchor close and at least one close
+    # after the anchor; a stale snapshot-only column would otherwise blank out
+    # every extension day for the whole basket.
+    available_tickers = []
+    for t in tickers:
+        if t not in close.columns:
+            continue
+        col = close[t].dropna()
+        if len(col[(col.index > recon_last_ts) & (col.index <= target_ts)]) == 0:
+            continue
+        available_tickers.append(t)
     if not available_tickers:
-        return empty, f"none of the tickers {tickers} are present in yfinance result"
+        return empty, f"no fresh closes after {recon_last_ts.date()} for {tickers}"
 
     # Build per-ticker anchor closes, dropping any that are NaN/zero
     anchor_values = {}
@@ -3347,11 +3556,21 @@ def main():
     portfolio_series.index = pd.to_datetime(portfolio_series.index)
 
     all_series = {"AsymEdge": portfolio_series}
+    _missing_benchmarks = []
     for name, ticker in BENCHMARK_TICKERS.items():
-        if ticker in bench_close.columns:
-            raw = bench_close[ticker].dropna()
-            norm = normalize_to_10k(raw)
-            all_series[name] = norm
+        raw = bench_close[ticker].dropna() if ticker in bench_close.columns else pd.Series(dtype="float64")
+        norm = normalize_to_10k(raw)
+        if norm.dropna().empty:
+            _missing_benchmarks.append(f"{name} ({ticker})")
+            continue
+        all_series[name] = norm
+
+    if _missing_benchmarks:
+        st.warning(
+            "Price data unavailable for " + ", ".join(_missing_benchmarks)
+            + ". Yahoo Finance rate-limits shared cloud hosts; these lines are "
+            "hidden for now. Reloading in a few minutes usually restores them."
+        )
 
     combined = pd.DataFrame(all_series)
     combined = combined.sort_index()
