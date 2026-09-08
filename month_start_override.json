@@ -1,0 +1,10 @@
+{
+  "period_start_date": "2026-08-31",
+  "weights": {
+    "EMXC": 21.21,
+    "DXJ": 32.69,
+    "HGER": 32.79,
+    "IBIT": 13.31
+  },
+  "note": "Fidelity's basket rebalance feature did not apply the intended weights on the August 31, 2026 rebalance. The account actually held EMXC 9.95 / DXJ 40.73 / HGER 43.10 / IBIT 6.22 from August 31 close until September 8, 2026, when positions were reset to the intended weights drifted forward. These are the weights the strategy called for. The published return series is NOT adjusted and correctly carries the roughly 38 to 54 bp cost of the error. Delete this file after the September 30, 2026 rebalance."
+}

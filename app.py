@@ -1967,6 +1967,64 @@ def load_holdings_values():
     return pd.DataFrame()
 
 
+MONTH_START_OVERRIDE_NAME = "month_start_override.json"
+
+
+def _month_start_override_paths():
+    """Candidate paths for the optional month-start override file."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    pipeline_dir = os.path.join(os.path.dirname(script_dir), "Portfolio Hist Val Reconstruction")
+    return [
+        os.path.join(script_dir, MONTH_START_OVERRIDE_NAME),
+        os.path.join(pipeline_dir, MONTH_START_OVERRIDE_NAME),
+    ]
+
+
+@st.cache_data(ttl=3600)
+def load_month_start_override():
+    """Optional correction for the current period's going-in weights.
+
+    This exists for the case where a broker rebalance did not execute the
+    intended basket, so the holdings sitting on the rebalance date are not
+    the weights the strategy actually called for. Every table that reads
+    start_weights (Current Allocation, Allocation Drift, Live Position
+    Drift) then measures against the intended basket rather than the
+    mis-executed one.
+
+    It never touches the return series. Realized performance always
+    reflects what was actually held, including the cost of the error.
+
+    Schema:
+        {"period_start_date": "YYYY-MM-DD",
+         "weights": {"TICKER": percent, ...},
+         "note": "why this exists"}
+
+    The override applies only when period_start_date matches the rebalance
+    date the holdings data reports, so it expires by itself at the next
+    month-end rebalance. Returns None when absent or unusable.
+    """
+    for path in _month_start_override_paths():
+        if not os.path.exists(path):
+            continue
+        try:
+            # utf-8-sig so a byte-order mark from a Windows editor or
+            # PowerShell redirect does not silently disable the override.
+            with open(path, "r", encoding="utf-8-sig") as f:
+                data = json.load(f)
+            weights = {str(k): float(v) for k, v in (data.get("weights") or {}).items()}
+            total = sum(weights.values())
+            if not weights or total <= 0:
+                return None
+            return {
+                "period_start_date": str(data.get("period_start_date", "")).strip(),
+                "weights": {k: v / total for k, v in weights.items()},
+                "note": str(data.get("note", "")).strip(),
+            }
+        except Exception:
+            return None
+    return None
+
+
 def find_rebalance_dates(holdings_values):
     """Return rebalance dates from the holdings_values index.
 
@@ -2025,11 +2083,23 @@ def compute_drift_summary(holdings_values):
     start_weights = (holdings_values.loc[period_start] / start_total).to_dict()
     drift_weights = (holdings_values.loc[drift_date] / drift_total).to_dict()
 
+    # A month-start override replaces the going-in weights when the broker
+    # did not execute the intended basket on the rebalance date. It is
+    # keyed to a specific rebalance date, so it lapses on its own at the
+    # next month end. The return series is never affected.
+    override = load_month_start_override()
+    override_note = ""
+    if override and override["period_start_date"] == period_start.strftime("%Y-%m-%d"):
+        start_weights = dict(override["weights"])
+        override_note = override["note"]
+
     return {
         "period_start_date": period_start,
         "drift_date": drift_date,
         "start_weights": start_weights,
         "drift_weights": drift_weights,
+        "start_weights_overridden": bool(override_note),
+        "start_weights_note": override_note,
     }
 
 
@@ -3790,13 +3860,30 @@ def main():
         alloc_config = chart_config("Current Allocation", static=True)
         st.plotly_chart(build_allocation_table(current_alloc_rows), use_container_width=False, config=alloc_config)
 
-        footnote_alloc = (
-            f"Current portfolio allocation as of the {current_alloc_date.strftime('%b %d, %Y')} "
-            f"rebalance, computed automatically from your reconstructed end-of-day holdings, the "
-            f"same source as the Allocation Drift table's Month Start column. It refreshes whenever "
-            f"the pipeline regenerates holdings_daily_values.csv, so there is nothing to update by "
-            f"hand. Holdings and weights are subject to change based on regime signals and market conditions."
-        )
+        # When a month-start override is active the weights shown are the
+        # basket the strategy called for, not the one the broker actually
+        # executed, so say so rather than claiming they come straight from
+        # the holdings file.
+        _alloc_summary = compute_drift_summary(_holdings_for_alloc)
+        _alloc_overridden = bool(_alloc_summary and _alloc_summary.get("start_weights_overridden"))
+
+        if _alloc_overridden:
+            footnote_alloc = (
+                f"Target portfolio allocation for the period beginning "
+                f"{current_alloc_date.strftime('%b %d, %Y')}. These are the weights the strategy "
+                f"called for at that rebalance. A broker execution error meant the account did not "
+                f"hold exactly these weights for part of the period; realized performance in the "
+                f"chart above reflects what was actually held and is not adjusted. Holdings and "
+                f"weights are subject to change based on regime signals and market conditions."
+            )
+        else:
+            footnote_alloc = (
+                f"Current portfolio allocation as of the {current_alloc_date.strftime('%b %d, %Y')} "
+                f"rebalance, computed automatically from your reconstructed end-of-day holdings, the "
+                f"same source as the Allocation Drift table's Month Start column. It refreshes whenever "
+                f"the pipeline regenerates holdings_daily_values.csv, so there is nothing to update by "
+                f"hand. Holdings and weights are subject to change based on regime signals and market conditions."
+            )
         st.markdown(f'<p class="footer-text">{footnote_alloc}</p>', unsafe_allow_html=True)
 
     # ================================================================
