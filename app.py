@@ -179,7 +179,7 @@ ASSET_CLASS_TICKERS = {
     "U.S. Dollar": "DX-Y.NYB",
     "LT Treasuries": "TLT",
     "Crude Oil": "CL=F",
-    "Bitcoin": "BTC-USD",
+    "Bitcoin": "IBIT",
 }
 
 SERIES_ORDER = ["AsymEdge", "80/20", "60/40", "S&P 500"]
@@ -3006,7 +3006,7 @@ def render_update_section(portfolio_df):
             unsafe_allow_html=True,
         )
         st.code(
-            'cd "C:\\Users\\tyler\\OneDrive\\Asymmetric Edge\\Portfolio Hist Val Reconstruction"\n'
+            'cd "C:\\Users\\tyler\\OneDrive\\PROJECTS\\Strategy Backtesting System\\Portfolio Hist Val Reconstruction"\n'
             "python portfolio_valuation.py History_for_Account_Z27314115.csv <as-of-date>\n"
             "python build_anchored_series.py . <return-percent> <as-of-date>",
             language="powershell",
@@ -3020,7 +3020,7 @@ def render_update_section(portfolio_df):
             unsafe_allow_html=True,
         )
         st.code(
-            'cd "C:\\Users\\tyler\\OneDrive\\Asymmetric Edge\\Portfolio Hist Val Reconstruction"\n'
+            'cd "C:\\Users\\tyler\\OneDrive\\PROJECTS\\Strategy Backtesting System\\Portfolio Hist Val Reconstruction"\n'
             "python portfolio_valuation.py History_for_Account_Z27314115.csv 2026-05-26\n"
             "python build_anchored_series.py . 5.28 2026-05-26",
             language="powershell",
@@ -4337,7 +4337,7 @@ def main():
         f"{selected_asset_period} total returns from {af_start.strftime('%m/%d/%Y')} through "
         f"{af_end.strftime('%m/%d/%Y')}, using adjusted close prices (dividends reinvested) from Yahoo Finance. "
         f"Tickers: GLD (Gold), EMXC (EM ex-China), DXJ (Japan, Hedged), SPY (S&P 500), QQQ (Nasdaq-100), "
-        f"IWM (Russell 2000), DX-Y.NYB (U.S. Dollar Index), TLT (LT Treasuries), CL=F (Crude Oil), BTC-USD (Bitcoin)."
+        f"IWM (Russell 2000), DX-Y.NYB (U.S. Dollar Index), TLT (LT Treasuries), CL=F (Crude Oil), IBIT (Bitcoin)."
     )
     st.markdown(f'<p class="footer-text">{footnote_asset}</p>', unsafe_allow_html=True)
 
