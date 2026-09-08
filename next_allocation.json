@@ -1,30 +1,30 @@
 [
   {
+    "ticker": "EMXC",
+    "asset": "EM ex-China",
+    "emoji": "\ud83c\udf0f",
+    "purpose": "Emerging markets ex-China",
+    "weight": "21.21%"
+  },
+  {
     "ticker": "DXJ",
     "asset": "Japan Hedged Equity",
     "emoji": "\u26e9\ufe0f",
     "purpose": "Japan equity, currency-hedged",
-    "weight": "25.77%"
-  },
-  {
-    "ticker": "QQQ",
-    "asset": "Nasdaq-100",
-    "emoji": "\ud83d\udcbb",
-    "purpose": "Growth from U.S. tech leaders",
-    "weight": "24.00%"
+    "weight": "32.69%"
   },
   {
     "ticker": "HGER",
     "asset": "Active Commodities",
     "emoji": "\ud83c\udfed",
     "purpose": "Broad commodities, inflation hedge",
-    "weight": "26.26%"
+    "weight": "32.79%"
   },
   {
-    "ticker": "IWM",
-    "asset": "Russell 2000",
-    "emoji": "\ud83d\udd37",
-    "purpose": "Small-cap U.S. exposure",
-    "weight": "23.97%"
+    "ticker": "IBIT",
+    "asset": "Bitcoin",
+    "emoji": "\ud83d\udfe0",
+    "purpose": "Bitcoin spot exposure",
+    "weight": "13.31%"
   }
 ]
