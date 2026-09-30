@@ -1669,20 +1669,20 @@ def build_allocation_table(rows):
 # asset, insert it in the slot for its category so the tables stay sorted.
 ASSET_CATALOG = {
     # U.S. equities
-    "QQQ":  {"asset": "Nasdaq-100",              "emoji": "\U0001F4BB", "purpose": "Growth from U.S. tech leaders"},
-    "IWM":  {"asset": "Russell 2000",            "emoji": "\U0001F537", "purpose": "Small-cap U.S. exposure"},
+    "QQQ":  {"asset": "Nasdaq-100",              "emoji": "\U0001F4BB", "purpose": "Growth via U.S. tech stocks"},
+    "IWM":  {"asset": "Russell 2000",            "emoji": "\U0001F537", "purpose": "Upside from U.S. economic expansion"},
     # International
-    "EMXC": {"asset": "Emerging Mkts",           "emoji": "\U0001F30F", "purpose": "Emerging markets ex-China"},
-    "DXJ":  {"asset": "Japan Hedged Equity",     "emoji": "\u26E9\uFE0F", "purpose": "Japan equity, currency-hedged"},
+    "EMXC": {"asset": "Emerging Mkts",           "emoji": "\U0001F30F", "purpose": "Emerging-economy growth, ex-China"},
+    "DXJ":  {"asset": "Japan",                   "emoji": "\u26E9\uFE0F", "purpose": "Developed-market growth, no yen risk"},
     # Commodities
-    "GLD":  {"asset": "Gold",                    "emoji": "\U0001F7E8", "purpose": "Gold, store of value"},
-    "HGER": {"asset": "Active Commodities",      "emoji": "\U0001F3ED", "purpose": "Broad commodities, inflation hedge"},
+    "GLD":  {"asset": "Gold",                    "emoji": "\U0001F7E8", "purpose": "Crisis hedge, store of value"},
+    "HGER": {"asset": "Active Commodities",      "emoji": "\U0001F3ED", "purpose": "Hedge against inflation and price spikes"},
     # Crypto
-    "IBIT": {"asset": "Bitcoin",                 "emoji": "\U0001F7E0", "purpose": "Bitcoin spot exposure"},
+    "IBIT": {"asset": "Bitcoin",                 "emoji": "\U0001F7E0", "purpose": "High-upside, fixed-supply digital asset"},
     # Defensive
-    "BIL":  {"asset": "Short-Term Treasuries",   "emoji": "\U0001F4B5", "purpose": "Ultra-short Treasuries, cash proxy"},
-    "TLT":  {"asset": "Long-Term Treasuries",    "emoji": "\U0001F3E6", "purpose": "Long-duration U.S. Treasuries"},
-    "BTAL": {"asset": "Defensive Equity",        "emoji": "\U0001F6E1\uFE0F", "purpose": "Market-neutral, tail-risk hedge"},
+    "BIL":  {"asset": "Short-Term Treasuries",   "emoji": "\U0001F4B5", "purpose": "Cash reserve when risk assets weaken"},
+    "TLT":  {"asset": "Long-Term Treasuries",    "emoji": "\U0001F3E6", "purpose": "Recession and falling-rate hedge"},
+    "BTAL": {"asset": "Defensive Equity",        "emoji": "\U0001F6E1\uFE0F", "purpose": "Hedge against stock market sell-offs"},
 }
 
 
@@ -3262,7 +3262,7 @@ DEFAULT_ASSET_UNIVERSE = {
             "color_bg": "#D6E8DF",
             "color_text": "#14543E",
             "assets": [
-                {"name": "Japan hedged", "ticker": "DXJ"},
+                {"name": "Japan", "ticker": "DXJ"},
                 {"name": "Emerging Mkts", "ticker": "EMXC"},
             ],
         },
