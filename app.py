@@ -1723,6 +1723,19 @@ ALLOC_HISTORY_TICKER_CATEGORY = {
     "BIL": "cash", "389930108": "cash",  # 389930108 is a money-market CUSIP
 }
 
+# Permanent chart-only corrections for broker execution errors, keyed by the
+# rebalance (going-in) date. The bar for the month that rebalance opened
+# shows the basket the strategy called for instead of the mis-executed fill.
+# Unlike month_start_override.json, which lapses at the next month end and is
+# then deleted, these stay in place so the history keeps showing the intended
+# basket. Weights are percents and are normalized on use. This NEVER touches
+# the return series, which carries the real cost of each error.
+ALLOC_HISTORY_EXECUTION_CORRECTIONS = {
+    # Fidelity's basket rebalance misfired on Aug 31, 2026. Actual fill was
+    # EMXC 9.95 / DXJ 40.73 / HGER 43.10 / IBIT 6.22 until the Sep 8 reset.
+    "2026-08-31": {"EMXC": 21.21, "DXJ": 32.69, "HGER": 32.79, "IBIT": 13.31},
+}
+
 
 def _load_reconstructed_totals():
     """Load date-indexed account_value and cash from reconstructed_account_value.csv.
@@ -1754,47 +1767,85 @@ def _load_reconstructed_totals():
 def build_allocation_history_figure(holdings_values):
     """Build the Asset Allocation Over Time stacked-bar figure.
 
-    One 100% stacked bar per month, computed from actual end-of-day holdings
-    on the last trading day of each month (the rebalance close), the same
-    source the Current Allocation table uses. The current open month appears
-    as the final bar, computed at the latest trading day in the data. The
-    cash sleeve comes from reconstructed_account_value.csv when available.
+    One 100% stacked bar per month showing the portfolio that month was
+    entered with (its going-in weights). This matches how the strategy
+    trades: next month's targets are computed after the close on the
+    second-to-last trading day and executed on the last trading day, so
+    those trades belong to the NEXT month's bar, not the month they were
+    placed in. Bar M is therefore the end-of-day holdings on the last
+    trading day of month M-1 (the rebalance close). The inception month
+    uses the close on the first trading day on or after ALLOC_HISTORY_START,
+    when the initial positions were entered.
+
+    The current open month appears as the final bar with its going-in
+    weights, the same weights the Current Allocation table shows, including
+    an active month-start override. A rebalance that has executed but whose
+    month has not begun in the data yet does not get a bar. The cash sleeve
+    comes from reconstructed_account_value.csv when available.
 
     Returns a Plotly figure, or None if there is no usable data.
     """
     if holdings_values.empty:
         return None
-    hv = holdings_values[holdings_values.index >= pd.Timestamp(ALLOC_HISTORY_START)]
-    hv = hv.fillna(0.0)
-    if hv.empty:
+    hv = holdings_values.fillna(0.0).sort_index()
+    inception = pd.Timestamp(ALLOC_HISTORY_START)
+    in_range = hv.index[hv.index >= inception]
+    if len(in_range) == 0:
         return None
 
-    # Last trading day of each calendar month (includes the open month's
-    # latest day, so the chart always shows the current allocation too).
-    month_rows = hv.groupby([hv.index.year, hv.index.month]).tail(1)
+    # Last trading day of every calendar month in the data, including the
+    # pre-inception months so February 2024 can find its January close.
+    idx = hv.index
+    month_ends = idx.to_series().groupby([idx.year, idx.month]).max()
+
+    # (month period, going-in date) pairs, oldest first.
+    bar_dates = []
+    for period in pd.period_range(in_range[0].to_period("M"), idx[-1].to_period("M"), freq="M"):
+        prev = period - 1
+        going_in = month_ends.get((prev.year, prev.month))
+        if going_in is None or going_in < inception:
+            in_month = in_range[(in_range.year == period.year) & (in_range.month == period.month)]
+            if len(in_month) == 0:
+                continue
+            going_in = in_month[0]
+        bar_dates.append((period, going_in))
+
     totals = _load_reconstructed_totals()
+    override = load_month_start_override()
+    override_date = override["period_start_date"] if override else ""
 
     cat_keys = [k for k, _label, _color in ALLOC_HISTORY_CATEGORIES]
     labels = []
     weights = {k: [] for k in cat_keys}   # percent values per month
     details = {k: [] for k in cat_keys}   # per-month ticker breakdown strings
 
-    for date, row in month_rows.iterrows():
-        securities_total = float(row.sum())
-        total = securities_total
-        cash_dollars = 0.0
-        if totals is not None and date in totals.index:
-            account_value = float(totals.at[date, "account_value"])
-            if account_value > 0:
-                total = account_value
-                cash_dollars = max(float(totals.at[date, "cash"]), 0.0)
+    for period, date in bar_dates:
+        date_key = date.strftime("%Y-%m-%d")
+        correction = ALLOC_HISTORY_EXECUTION_CORRECTIONS.get(date_key)
+        if correction is None and override and date_key == override_date:
+            correction = override["weights"]
+        if correction:
+            # Broker execution error on this rebalance: show the basket the
+            # strategy called for, as the Current Allocation table does.
+            items = [(t, float(w)) for t, w in correction.items()]
+            total = sum(w for _t, w in items)
+            cash_dollars = 0.0
+        else:
+            row = hv.loc[date]
+            items = [(t, float(v)) for t, v in row.items()]
+            total = float(row.sum())
+            cash_dollars = 0.0
+            if totals is not None and date in totals.index:
+                account_value = float(totals.at[date, "account_value"])
+                if account_value > 0:
+                    total = account_value
+                    cash_dollars = max(float(totals.at[date, "cash"]), 0.0)
         if total <= 0:
             continue
 
         month_w = {k: 0.0 for k in cat_keys}
         month_parts = {k: [] for k in cat_keys}
-        for ticker, value in row.items():
-            value = float(value)
+        for ticker, value in items:
             if value <= 0:
                 continue
             key = ALLOC_HISTORY_TICKER_CATEGORY.get(ticker, "us")
@@ -1803,7 +1854,7 @@ def build_allocation_history_figure(holdings_values):
             month_parts[key].append((ticker, w))
         month_w["cash"] += cash_dollars / total
 
-        labels.append(date.strftime("%b-%y"))
+        labels.append(period.strftime("%b-%y"))
         for k in cat_keys:
             pct = month_w[k] * 100.0
             # None (not 0) hides empty categories from the unified hover.
@@ -3860,30 +3911,13 @@ def main():
         alloc_config = chart_config("Current Allocation", static=True)
         st.plotly_chart(build_allocation_table(current_alloc_rows), use_container_width=False, config=alloc_config)
 
-        # When a month-start override is active the weights shown are the
-        # basket the strategy called for, not the one the broker actually
-        # executed, so say so rather than claiming they come straight from
-        # the holdings file.
-        _alloc_summary = compute_drift_summary(_holdings_for_alloc)
-        _alloc_overridden = bool(_alloc_summary and _alloc_summary.get("start_weights_overridden"))
-
-        if _alloc_overridden:
-            footnote_alloc = (
-                f"Target portfolio allocation for the period beginning "
-                f"{current_alloc_date.strftime('%b %d, %Y')}. These are the weights the strategy "
-                f"called for at that rebalance. A broker execution error meant the account did not "
-                f"hold exactly these weights for part of the period; realized performance in the "
-                f"chart above reflects what was actually held and is not adjusted. Holdings and "
-                f"weights are subject to change based on regime signals and market conditions."
-            )
-        else:
-            footnote_alloc = (
-                f"Current portfolio allocation as of the {current_alloc_date.strftime('%b %d, %Y')} "
-                f"rebalance, computed automatically from your reconstructed end-of-day holdings, the "
-                f"same source as the Allocation Drift table's Month Start column. It refreshes whenever "
-                f"the pipeline regenerates holdings_daily_values.csv, so there is nothing to update by "
-                f"hand. Holdings and weights are subject to change based on regime signals and market conditions."
-            )
+        footnote_alloc = (
+            f"Current portfolio allocation as of the {current_alloc_date.strftime('%b %d, %Y')} "
+            f"rebalance, computed automatically from your reconstructed end-of-day holdings, the "
+            f"same source as the Allocation Drift table's Month Start column. It refreshes whenever "
+            f"the pipeline regenerates holdings_daily_values.csv, so there is nothing to update by "
+            f"hand. Holdings and weights are subject to change based on regime signals and market conditions."
+        )
         st.markdown(f'<p class="footer-text">{footnote_alloc}</p>', unsafe_allow_html=True)
 
     # ================================================================
@@ -4145,15 +4179,17 @@ def main():
             )
             footnote_alloc_history = (
                 "Portfolio allocation by asset class since inception, one bar per month. "
-                "Each bar shows the mix at that month's final trading-day close (the "
-                "rebalance close), computed from the same reconstructed end-of-day "
-                "holdings that drive the Current Allocation table, so it refreshes "
-                "automatically whenever the pipeline regenerates holdings_daily_values.csv. "
-                "The last bar is the current open month at the latest trading day in the "
-                "data. <b>T-bills &amp; Cash</b> combines BIL, money-market positions, and "
-                "uninvested cash. Hover a bar to see the exact weights and the underlying "
-                "tickers inside each asset class. Holdings and weights are subject to "
-                "change based on regime signals and market conditions."
+                "Each bar shows the weights the portfolio entered that month with: the "
+                "holdings at the close of the prior month's final trading day, when the "
+                "month-end rebalance executes. Trades placed on a month's last trading day "
+                "therefore appear in the following month's bar. The last bar is the current "
+                "month's going-in allocation, matching the Current Allocation table. Bars are "
+                "computed from the same reconstructed end-of-day holdings, so the chart "
+                "refreshes automatically whenever the pipeline regenerates "
+                "holdings_daily_values.csv. <b>T-bills &amp; Cash</b> combines BIL, "
+                "money-market positions, and uninvested cash. Hover a bar to see the exact "
+                "weights and the underlying tickers inside each asset class. Holdings and "
+                "weights are subject to change based on regime signals and market conditions."
             )
             st.markdown(f'<p class="footer-text">{footnote_alloc_history}</p>', unsafe_allow_html=True)
 
