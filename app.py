@@ -1672,7 +1672,7 @@ ASSET_CATALOG = {
     "QQQ":  {"asset": "Nasdaq-100",              "emoji": "\U0001F4BB", "purpose": "Growth from U.S. tech leaders"},
     "IWM":  {"asset": "Russell 2000",            "emoji": "\U0001F537", "purpose": "Small-cap U.S. exposure"},
     # International
-    "EMXC": {"asset": "EM ex-China",             "emoji": "\U0001F30F", "purpose": "Emerging markets ex-China"},
+    "EMXC": {"asset": "Emerging Mkts",           "emoji": "\U0001F30F", "purpose": "Emerging markets ex-China"},
     "DXJ":  {"asset": "Japan Hedged Equity",     "emoji": "\u26E9\uFE0F", "purpose": "Japan equity, currency-hedged"},
     # Commodities
     "GLD":  {"asset": "Gold",                    "emoji": "\U0001F7E8", "purpose": "Gold, store of value"},
@@ -3263,7 +3263,7 @@ DEFAULT_ASSET_UNIVERSE = {
             "color_text": "#14543E",
             "assets": [
                 {"name": "Japan hedged", "ticker": "DXJ"},
-                {"name": "EM ex-China", "ticker": "EMXC"},
+                {"name": "Emerging Mkts", "ticker": "EMXC"},
             ],
         },
         {
