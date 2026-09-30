@@ -171,8 +171,8 @@ BENCHMARK_TICKERS = {
 
 ASSET_CLASS_TICKERS = {
     "Gold": "GLD",
-    "EM ex-China": "EMXC",
-    "Japan (Hedged)": "DXJ",
+    "Emerging Mkts": "EMXC",
+    "Japan": "DXJ",
     "S&P 500": "SPY",
     "Nasdaq-100": "QQQ",
     "Russell 2000": "IWM",
@@ -180,6 +180,15 @@ ASSET_CLASS_TICKERS = {
     "LT Treasuries": "TLT",
     "Bitcoin": "IBIT",
     "Commodities": "HGER",
+}
+
+# Plain-language footnote notes for Asset Class Returns, keyed by ticker so a
+# note appears only while its ticker is on the chart. {label} is filled with
+# that ticker's label from ASSET_CLASS_TICKERS.
+ASSET_CLASS_FOOTNOTES = {
+    "EMXC": "{label} uses EMXC, which holds emerging-market stocks but excludes China.",
+    "DXJ": "{label} uses DXJ, which hedges out the yen, so its return reflects Japanese stocks without currency swings.",
+    "DX-Y.NYB": "The U.S. Dollar Index (DX-Y.NYB) is a price index with no income, so its bar is price return only.",
 }
 
 SERIES_ORDER = ["AsymEdge", "80/20", "60/40", "S&P 500"]
@@ -4466,20 +4475,20 @@ def main():
     # branch above, so the dates are always available even if asset_close
     # failed to load (ac_start/ac_end are scoped to the if-block).
     af_start, af_end = get_period_dates(latest_date, selected_asset_period)
-    # Built from ASSET_CLASS_TICKERS so the ticker list can never drift from
-    # the chart. Only the U.S. Dollar Index is a price series with no income;
-    # every other ticker is a fund whose adjusted close includes distributions.
+    # Built from ASSET_CLASS_TICKERS and ASSET_CLASS_FOOTNOTES so the ticker
+    # list and notes can never drift from the chart.
     asset_ticker_list = "; ".join(
         f"{label}: {ticker}" for label, ticker in ASSET_CLASS_TICKERS.items()
     )
-    price_only_note = (
-        " The U.S. Dollar Index (DX-Y.NYB) is a price index with no income, so its bar is price return only."
-        if "DX-Y.NYB" in ASSET_CLASS_TICKERS.values() else ""
+    asset_notes = "".join(
+        " " + ASSET_CLASS_FOOTNOTES[ticker].format(label=label)
+        for label, ticker in ASSET_CLASS_TICKERS.items()
+        if ticker in ASSET_CLASS_FOOTNOTES
     )
     footnote_asset = (
         f"{selected_asset_period} returns from {af_start.strftime('%m/%d/%Y')} through "
         f"{af_end.strftime('%m/%d/%Y')}, using adjusted close prices from Yahoo Finance, so fund returns "
-        f"include reinvested distributions.{price_only_note} Tickers: {asset_ticker_list}."
+        f"include reinvested distributions.{asset_notes} Tickers: {asset_ticker_list}."
     )
     st.markdown(f'<p class="footer-text">{footnote_asset}</p>', unsafe_allow_html=True)
 
