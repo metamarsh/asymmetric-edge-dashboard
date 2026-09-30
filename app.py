@@ -1611,6 +1611,30 @@ def build_summary_table_html(metrics_by_series, series_order):
 # error instead of stale, hand-typed numbers.
 
 
+def _pct1(value, signed=False):
+    """Format a percent value for the allocation tables: one decimal place.
+
+    Display only. The underlying weights stay at full precision (and the
+    Current Allocation row strings stay at two decimals, because
+    current_allocation_weights() parses them back into the weights that
+    extend_reconstruction_via_yahoo uses). A value that rounds to zero prints
+    as 0.0% with no sign, never -0.0% or +0.0%.
+    """
+    r = round(float(value), 1)
+    if r == 0:
+        r = 0.0
+    text = f"{r:.1f}%"
+    return "+" + text if signed and r > 0 else text
+
+
+def _pct1_str(weight_str):
+    """Reformat a stored weight string such as '21.49%' to one decimal."""
+    try:
+        return _pct1(str(weight_str).replace("%", "").strip())
+    except (ValueError, TypeError):
+        return weight_str
+
+
 def build_allocation_table(rows):
     """Build a Plotly table figure for the current allocation so it can be
     exported as PNG via the toolbar download button.
@@ -1622,7 +1646,7 @@ def build_allocation_table(rows):
     header_values = ["Asset", "Ticker", "Weight", "Purpose"]
     assets = [f'{row["emoji"]}  {row["asset"]}' for row in rows]
     tickers = [row["ticker"] for row in rows]
-    weights = [row["weight"] for row in rows]
+    weights = [_pct1_str(row["weight"]) for row in rows]
     purposes = [row["purpose"] for row in rows]
 
     # Alternating row fills for readability
@@ -1965,7 +1989,7 @@ def build_next_allocation_table(rows):
     header_values = ["Asset", "Ticker", "Weight", "Purpose"]
     assets = [f'{row["emoji"]}  {row["asset"]}' for row in rows]
     tickers = [row["ticker"] for row in rows]
-    weights = [row["weight"] for row in rows]
+    weights = [_pct1_str(row["weight"]) for row in rows]
     purposes = [row["purpose"] for row in rows]
 
     n = len(rows)
@@ -2268,20 +2292,19 @@ def build_drift_table(summary, new_target_rows):
         trade = target_w - drift_w
 
         asset_cells.append(f'{info["emoji"]}  {info["asset"]} ({ticker})')
-        start_cells.append(f"{start_w:.2f}%")
-        drift_cells.append(f"{drift_w:.2f}%")
+        start_cells.append(_pct1(start_w))
+        drift_cells.append(_pct1(drift_w))
 
         if target_is_set:
-            target_cells.append(f"{target_w:.2f}%")
+            target_cells.append(_pct1(target_w))
             is_new = start_w < 0.005 and drift_w < 0.005 and target_w > 0
             is_exit = target_w < 0.005 and drift_w >= 0.005
             if is_new:
-                trade_cells.append(f"+{target_w:.2f}% (new)")
+                trade_cells.append(f"+{_pct1(target_w)} (new)")
             elif is_exit:
-                trade_cells.append(f"-{drift_w:.2f}% (exit)")
+                trade_cells.append(f"-{_pct1(drift_w)} (exit)")
             else:
-                trade_sign = "+" if trade > 0 else ""
-                trade_cells.append(f"{trade_sign}{trade:.2f}%")
+                trade_cells.append(_pct1(trade, signed=True))
         else:
             target_cells.append("\u2014")
             trade_cells.append("\u2014")
@@ -2482,11 +2505,10 @@ def build_live_drift_table(result):
         ret_pct = r["ret"] * 100.0
         asset_cells.append(f'{info["emoji"]}  {info["asset"]}')
         ticker_cells.append(ticker)
-        start_cells.append(f'{r["start_w"] * 100.0:.2f}%')
-        ret_sign = "+" if ret_pct >= 0 else ""
-        ret_cells.append(f"{ret_sign}{ret_pct:.2f}%")
-        cur_cells.append(f'{r["drift_w"] * 100.0:.2f}%')
-        ret_colors.append(GAIN_GREEN if ret_pct >= 0 else LOSS_RED)
+        start_cells.append(_pct1(r["start_w"] * 100.0))
+        ret_cells.append(_pct1(ret_pct, signed=True))
+        cur_cells.append(_pct1(r["drift_w"] * 100.0))
+        ret_colors.append(GAIN_GREEN if round(ret_pct, 1) >= 0 else LOSS_RED)
 
     n = len(asset_cells)
     row_fills = ["#F9FAFB" if i % 2 == 1 else "#ffffff" for i in range(n)]
