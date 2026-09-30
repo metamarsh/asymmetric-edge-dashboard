@@ -178,8 +178,8 @@ ASSET_CLASS_TICKERS = {
     "Russell 2000": "IWM",
     "U.S. Dollar": "DX-Y.NYB",
     "LT Treasuries": "TLT",
-    "Crude Oil": "CL=F",
     "Bitcoin": "IBIT",
+    "Commodities": "HGER",
 }
 
 SERIES_ORDER = ["AsymEdge", "80/20", "60/40", "S&P 500"]
@@ -4465,11 +4465,20 @@ def main():
     # branch above, so the dates are always available even if asset_close
     # failed to load (ac_start/ac_end are scoped to the if-block).
     af_start, af_end = get_period_dates(latest_date, selected_asset_period)
+    # Built from ASSET_CLASS_TICKERS so the ticker list can never drift from
+    # the chart. Only the U.S. Dollar Index is a price series with no income;
+    # every other ticker is a fund whose adjusted close includes distributions.
+    asset_ticker_list = "; ".join(
+        f"{label}: {ticker}" for label, ticker in ASSET_CLASS_TICKERS.items()
+    )
+    price_only_note = (
+        " The U.S. Dollar Index (DX-Y.NYB) is a price index with no income, so its bar is price return only."
+        if "DX-Y.NYB" in ASSET_CLASS_TICKERS.values() else ""
+    )
     footnote_asset = (
-        f"{selected_asset_period} total returns from {af_start.strftime('%m/%d/%Y')} through "
-        f"{af_end.strftime('%m/%d/%Y')}, using adjusted close prices (dividends reinvested) from Yahoo Finance. "
-        f"Tickers: GLD (Gold), EMXC (EM ex-China), DXJ (Japan, Hedged), SPY (S&P 500), QQQ (Nasdaq-100), "
-        f"IWM (Russell 2000), DX-Y.NYB (U.S. Dollar Index), TLT (LT Treasuries), CL=F (Crude Oil), IBIT (Bitcoin)."
+        f"{selected_asset_period} returns from {af_start.strftime('%m/%d/%Y')} through "
+        f"{af_end.strftime('%m/%d/%Y')}, using adjusted close prices from Yahoo Finance, so fund returns "
+        f"include reinvested distributions.{price_only_note} Tickers: {asset_ticker_list}."
     )
     st.markdown(f'<p class="footer-text">{footnote_asset}</p>', unsafe_allow_html=True)
 
