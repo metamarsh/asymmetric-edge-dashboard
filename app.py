@@ -599,6 +599,15 @@ def _fetch_closes(tickers, start_date: str, end_date: str,
             else:
                 series[t] = s
 
+    # If the committed snapshot runs past everything Yahoo and the chart
+    # endpoint returned, append the snapshot's newer rows. This covers the
+    # case where Yahoo leaves the latest session's close blank for hours
+    # (September 29, 2026) and the snapshot was filled from another source.
+    for t, s in snap_series.items():
+        cur = series.get(t)
+        if cur is not None and len(cur) and s.index[-1] > cur.index[-1]:
+            series[t] = pd.concat([cur, s[s.index > cur.index[-1]]]).sort_index()
+
     if not series:
         return pd.DataFrame()
 

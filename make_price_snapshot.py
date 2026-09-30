@@ -1,4 +1,4 @@
-﻿"""Fetch a long-history adjusted-close snapshot for every ticker the dashboard
+"""Fetch a long-history adjusted-close snapshot for every ticker the dashboard
 needs, so the cloud app can render even when Yahoo rate-limits it."""
 import sys
 import pandas as pd
@@ -7,7 +7,7 @@ import yfinance as yf
 TICKERS = [
     "SPY", "AOA", "AOR",
     "GLD", "EMXC", "DXJ", "QQQ", "IWM", "DX-Y.NYB", "TLT", "CL=F", "BTC-USD",
-    "BIL", "HGER",
+    "BIL", "HGER", "IBIT",
 ]
 
 START = "2014-01-01"
