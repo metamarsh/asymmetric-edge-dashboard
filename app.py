@@ -622,8 +622,11 @@ def load_benchmark_data(start_date: str, end_date: str):
 
 
 @st.cache_data(ttl=3600)
-def load_asset_class_data(start_date: str, end_date: str):
-    return _fetch_closes(list(ASSET_CLASS_TICKERS.values()), start_date, end_date)
+def load_asset_class_data(tickers: tuple, start_date: str, end_date: str):
+    # tickers is an argument (not read from the global) so it is part of the
+    # cache key: editing ASSET_CLASS_TICKERS invalidates the cached download
+    # instead of serving the old ticker set for up to an hour.
+    return _fetch_closes(list(tickers), start_date, end_date)
 
 
 @st.cache_data(ttl=3600)
@@ -3884,7 +3887,9 @@ def main():
 
     # Load asset class data once
     asset_start = (pd.Timestamp(latest_date) - timedelta(days=400)).strftime("%Y-%m-%d")
-    asset_close = load_asset_class_data(asset_start, latest_date.strftime("%Y-%m-%d"))
+    asset_close = load_asset_class_data(
+        tuple(ASSET_CLASS_TICKERS.values()), asset_start, latest_date.strftime("%Y-%m-%d")
+    )
 
     # ================================================================
     # ASSET UNIVERSE
@@ -4448,11 +4453,7 @@ def main():
                     returns_dict[label] = ret
         if returns_dict:
             st.plotly_chart(
-                build_asset_class_chart(
-                    returns_dict,
-                    periods=asset_periods,
-                    selected_period=selected_asset_period,
-                ),
+                build_asset_class_chart(returns_dict),
                 use_container_width=True,
                 config=chart_config("Asset Class Returns"),
             )
