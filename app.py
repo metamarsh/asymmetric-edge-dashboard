@@ -1,5 +1,10 @@
 import streamlit as st
 import pandas as pd
+from pandas.tseries.holiday import (
+    AbstractHolidayCalendar, Holiday, GoodFriday, USLaborDay,
+    USMartinLutherKingJr, USMemorialDay, USPresidentsDay, USThanksgivingDay,
+    nearest_workday, sunday_to_monday,
+)
 import numpy as np
 import plotly.graph_objects as go
 import yfinance as yf
@@ -1647,7 +1652,14 @@ def build_allocation_table(rows):
     header_values = ["Asset", "Ticker", "Weight", "Purpose"]
     assets = [f'{row["emoji"]}  {row["asset"]}' for row in rows]
     tickers = [row["ticker"] for row in rows]
-    weights = [_pct1_str(row["weight"]) for row in rows]
+    # Round from the full-precision weight_pct when present, exactly as the
+    # Allocation Drift table's Month Start column does. Rounding the stored
+    # two-decimal string a second time can land 0.1 off (33.847 -> 33.85 ->
+    # 33.9 instead of 33.8).
+    weights = [
+        _pct1(row["weight_pct"]) if "weight_pct" in row else _pct1_str(row["weight"])
+        for row in rows
+    ]
     purposes = [row["purpose"] for row in rows]
 
     # Alternating row fills for readability
@@ -1763,7 +1775,10 @@ def sort_rows_by_weight(rows):
     canon = {t: i for i, t in enumerate(canonical_order([r.get("ticker", "") for r in rows]))}
     return sorted(
         rows,
-        key=lambda r: (-_sort_weight(r.get("weight")), canon.get(r.get("ticker", ""), len(canon))),
+        key=lambda r: (
+            -_sort_weight(r.get("weight_pct", r.get("weight"))),
+            canon.get(r.get("ticker", ""), len(canon)),
+        ),
     )
 
 NEXT_ALLOC_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "next_allocation.json")
@@ -1869,7 +1884,10 @@ def build_allocation_history_figure(holdings_values):
     The current open month appears as the final bar with its going-in
     weights, the same weights the Current Allocation table shows, including
     an active month-start override. A rebalance that has executed but whose
-    month has not begun in the data yet does not get a bar. The cash sleeve
+    month has not begun in the data yet does not get a bar. In that window
+    (data ending on a month's final session) Current Allocation already
+    shows the new basket while the final bar still shows the month just
+    ending, until the next month's first day reaches the data. The cash sleeve
     comes from reconstructed_account_value.csv when available.
 
     Returns a Plotly figure, or None if there is no usable data.
@@ -2166,6 +2184,54 @@ def load_month_start_override():
     return None
 
 
+class _NYSEHolidayCalendar(AbstractHolidayCalendar):
+    """NYSE full-day market holidays, used to tell whether a date is the last
+    trading day of its month. Only Good Friday and Memorial Day can ever
+    displace a month's final session, but the full list keeps it honest.
+    Unscheduled closures (days of mourning, weather) are not listed; if one
+    ever lands on a month's final weekday, the rebalance is simply picked up
+    a day later, the same way it was before this calendar existed."""
+    rules = [
+        Holiday("New Year's Day", month=1, day=1, observance=sunday_to_monday),
+        USMartinLutherKingJr,
+        USPresidentsDay,
+        GoodFriday,
+        USMemorialDay,
+        Holiday("Juneteenth", month=6, day=19, start_date="2022-01-01",
+                observance=nearest_workday),
+        Holiday("Independence Day", month=7, day=4, observance=nearest_workday),
+        USLaborDay,
+        USThanksgivingDay,
+        Holiday("Christmas Day", month=12, day=25, observance=nearest_workday),
+    ]
+
+
+def _is_month_final_session(day):
+    """True when day is a trading day and no trading day follows it in the
+    same calendar month."""
+    day = pd.Timestamp(day).normalize()
+    month_end = day + pd.offsets.MonthEnd(0)
+    holidays = _NYSEHolidayCalendar().holidays(day, month_end)
+    if day.dayofweek >= 5 or day in holidays:
+        return False
+    later = pd.bdate_range(day + pd.Timedelta(days=1), month_end, freq="C",
+                           holidays=holidays)
+    return len(later) == 0
+
+
+def _session_has_closed(day):
+    """True once the regular session on day has ended (4 p.m. Eastern), so a
+    rebalance is never read from a partial trading day. If the Eastern clock
+    is unavailable, only days before today count."""
+    day = pd.Timestamp(day).normalize()
+    try:
+        from zoneinfo import ZoneInfo
+        now_et = pd.Timestamp(datetime.now(ZoneInfo("America/New_York")).replace(tzinfo=None))
+    except Exception:
+        return day < pd.Timestamp(local_now()).normalize()
+    return now_et >= day + pd.Timedelta(hours=16)
+
+
 def find_rebalance_dates(holdings_values):
     """Return rebalance dates from the holdings_values index.
 
@@ -2175,9 +2241,15 @@ def find_rebalance_dates(holdings_values):
     that has been fully completed in the dataset, sorted most recent first.
 
     A month is treated as completed when the data extends past its last
-    trading day (i.e., the next month has begun). The current open month,
-    whose rebalance has not happened yet, is excluded. This is robust to
-    months where the new targets are similar to the old ones, which a
+    trading day (i.e., the next month has begun), or when the data ends ON
+    the month's final trading day and that session has closed. The second
+    case matters because portfolio_valuation.py stops its grid at the
+    ledger's last transaction, which on a rebalance day is the rebalance
+    itself. Without it, a fresh rebalance would not register until the next
+    transaction extended the data, and every table reading start_weights
+    would keep showing the prior month's basket. A month that is still
+    open, whose rebalance has not happened yet, is excluded. This is robust
+    to months where the new targets are similar to the old ones, which a
     turnover-threshold approach would miss.
     """
     if holdings_values.empty:
@@ -2187,6 +2259,11 @@ def find_rebalance_dates(holdings_values):
     month_ends = idx.to_series().groupby([idx.year, idx.month]).max()
     # Keep only month-ends that have at least one trading day after them
     completed = [d for d in month_ends.tolist() if (idx > d).any()]
+    # Plus the data's last day when it is its month's closed final session
+    last_day = idx.max()
+    if (last_day not in completed and _is_month_final_session(last_day)
+            and _session_has_closed(last_day)):
+        completed.append(last_day)
     return sorted(completed, reverse=True)
 
 
@@ -2275,6 +2352,7 @@ def derive_current_allocation(holdings_values):
             "asset": info.get("asset", ticker),
             "ticker": ticker,
             "weight": f"{start[ticker] * 100.0:.2f}%",
+            "weight_pct": start[ticker] * 100.0,
             "purpose": info.get("purpose", ""),
         })
     if not rows:
