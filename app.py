@@ -1883,11 +1883,10 @@ def build_allocation_history_figure(holdings_values):
 
     The current open month appears as the final bar with its going-in
     weights, the same weights the Current Allocation table shows, including
-    an active month-start override. A rebalance that has executed but whose
-    month has not begun in the data yet does not get a bar. In that window
-    (data ending on a month's final session) Current Allocation already
-    shows the new basket while the final bar still shows the month just
-    ending, until the next month's first day reaches the data. The cash sleeve
+    an active month-start override. When the data ends on a month-end
+    rebalance that has registered (see find_rebalance_dates), the next
+    month's bar is added right away with that rebalance as its going-in
+    date, so the final bar and the Current Allocation table always agree. The cash sleeve
     comes from reconstructed_account_value.csv when available.
 
     Returns a Plotly figure, or None if there is no usable data.
@@ -1905,9 +1904,18 @@ def build_allocation_history_figure(holdings_values):
     idx = hv.index
     month_ends = idx.to_series().groupby([idx.year, idx.month]).max()
 
+    # Bars run through the data's last month, plus the month after it when
+    # the data ends on a registered month-end rebalance (that month's closed
+    # final session). The extra bar's going-in date is that rebalance, the
+    # same basket the Current Allocation table shows.
+    last_period = idx[-1].to_period("M")
+    rebalances = find_rebalance_dates(hv)
+    if rebalances and rebalances[0] == idx[-1]:
+        last_period = last_period + 1
+
     # (month period, going-in date) pairs, oldest first.
     bar_dates = []
-    for period in pd.period_range(in_range[0].to_period("M"), idx[-1].to_period("M"), freq="M"):
+    for period in pd.period_range(in_range[0].to_period("M"), last_period, freq="M"):
         prev = period - 1
         going_in = month_ends.get((prev.year, prev.month))
         if going_in is None or going_in < inception:
