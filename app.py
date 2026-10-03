@@ -1641,8 +1641,9 @@ def build_allocation_table(rows):
 
     rows is the auto-derived current allocation (from actual holdings at the
     most recent rebalance). There is no hardcoded fallback, callers invoke this
-    only when rows is available.
+    only when rows is available. Rows are listed largest weight first.
     """
+    rows = sort_rows_by_weight(rows)
     header_values = ["Asset", "Ticker", "Weight", "Purpose"]
     assets = [f'{row["emoji"]}  {row["asset"]}' for row in rows]
     tickers = [row["ticker"] for row in rows]
@@ -1686,11 +1687,12 @@ def build_allocation_table(rows):
 # Maps ticker -> display name, emoji, and purpose. Used by the Next Allocation
 # editor so that selecting a ticker auto-fills the other columns.
 #
-# The INSERTION ORDER of this dict is the canonical sort order used across
-# all three allocation tables (Current, Last Rebalance, Next). Assets are
-# grouped by category, matching asset_universe.json: U.S. equities, then
-# International, then Commodities, then Crypto, then Defensive. To add a new
-# asset, insert it in the slot for its category so the tables stay sorted.
+# The INSERTION ORDER of this dict is the canonical order: assets grouped by
+# category, matching asset_universe.json (U.S. equities, then International,
+# then Commodities, then Crypto, then Defensive). The allocation tables list
+# their rows largest weight first (see weight_order) and use this order only
+# to break exact ties. To add a new asset, insert it in the slot for its
+# category.
 ASSET_CATALOG = {
     # U.S. equities
     "QQQ":  {"asset": "Nasdaq-100",              "emoji": "\U0001F4BB", "purpose": "Growth via U.S. tech stocks"},
@@ -1713,14 +1715,56 @@ ASSET_CATALOG = {
 def canonical_order(tickers):
     """Sort tickers by ASSET_CATALOG insertion order.
 
-    Unknown tickers appear at the end in alphabetical order. Used so every
-    allocation table on the dashboard lists assets in the same category-
-    grouped order.
+    Unknown tickers appear at the end in alphabetical order. The allocation
+    tables sort largest weight first (weight_order) and fall back to this
+    category-grouped order only to break exact ties.
     """
     catalog = list(ASSET_CATALOG.keys())
     known = [t for t in catalog if t in tickers]
     unknown = sorted([t for t in tickers if t not in catalog])
     return known + unknown
+
+
+def _sort_weight(value):
+    """Coerce a weight to a float for sorting. Missing, unparseable, or NaN
+    values sort as zero so a bad cell can never break the table order."""
+    try:
+        v = float(str(value).replace("%", "").strip())
+    except (ValueError, TypeError):
+        return 0.0
+    return 0.0 if v != v else v
+
+
+def weight_order(weights, tiebreak=None):
+    """Return the tickers in weights ordered largest weight first.
+
+    This is the row order for every allocation table on the dashboard
+    (Current Allocation, Live Position Drift, Next Allocation, Allocation
+    Drift). weights maps ticker -> weight in any consistent unit. Exact ties
+    fall back to tiebreak (ticker -> weight, larger first) when given, then
+    to canonical_order, so the order never shuffles between reruns. Display
+    only: no calculation depends on this order.
+    """
+    canon = {t: i for i, t in enumerate(canonical_order(list(weights)))}
+    tiebreak = tiebreak or {}
+    return sorted(
+        weights,
+        key=lambda t: (
+            -_sort_weight(weights[t]),
+            -_sort_weight(tiebreak.get(t, 0.0)),
+            canon[t],
+        ),
+    )
+
+
+def sort_rows_by_weight(rows):
+    """Sort allocation-row dicts (each with a "ticker" and a weight string
+    such as '21.49%') largest weight first, exact ties in canonical order."""
+    canon = {t: i for i, t in enumerate(canonical_order([r.get("ticker", "") for r in rows]))}
+    return sorted(
+        rows,
+        key=lambda r: (-_sort_weight(r.get("weight")), canon.get(r.get("ticker", ""), len(canon))),
+    )
 
 NEXT_ALLOC_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "next_allocation.json")
 
@@ -1984,8 +2028,9 @@ def save_next_allocation(rows):
 
 def build_next_allocation_table(rows):
     """Build a Plotly table figure for the next allocation, matching the
-    Current Allocation table style."""
+    Current Allocation table style. Rows are listed largest weight first."""
 
+    rows = sort_rows_by_weight(rows)
     header_values = ["Asset", "Ticker", "Weight", "Purpose"]
     assets = [f'{row["emoji"]}  {row["asset"]}' for row in rows]
     tickers = [row["ticker"] for row in rows]
@@ -2209,9 +2254,11 @@ def derive_current_allocation(holdings_values):
     string. Returns (None, None) if holdings data is unavailable, so callers
     can show an error instead of stale numbers.
 
-    By reusing the same start_weights, threshold, ordering, and number
-    formatting as build_drift_table, the Current Allocation table is
-    guaranteed to match the drift table's Month Start column exactly.
+    By reusing the same start_weights, threshold, and number formatting as
+    build_drift_table, the Current Allocation table is guaranteed to match
+    the drift table's Month Start column exactly. Rows come back in
+    canonical order; both table builders list them largest Month Start
+    weight first at render time, so the two tables also share a row order.
     """
     summary = compute_drift_summary(holdings_values)
     if summary is None:
@@ -2245,6 +2292,7 @@ def build_drift_table(summary, new_target_rows):
     going-in weights for the current period). Pre-Rebalance Drift shows
     current weights as of the latest data day. New Target is the upcoming
     allocation from next_allocation.json. Trade is Drift -> New Target.
+    Rows are listed largest Month Start weight first.
 
     If new_target_rows is empty (no upcoming allocation entered yet), the
     New Target and Trade cells render as em-dashes so the table still shows
@@ -2281,7 +2329,13 @@ def build_drift_table(summary, new_target_rows):
         if w > 0:
             union.add(ticker)
 
-    ordered = canonical_order(list(union))
+    # Largest Month Start weight first, so the rows line up with the Current
+    # Allocation table. A position opening at the upcoming rebalance (no
+    # Month Start weight) sorts below the held ones, largest New Target first.
+    ordered = weight_order(
+        {t: start.get(t, 0.0) for t in union},
+        tiebreak={t: new_target_map.get(t, 0.0) for t in union},
+    )
 
     asset_cells, start_cells, drift_cells, target_cells, trade_cells = [], [], [], [], []
     for ticker in ordered:
@@ -2491,10 +2545,14 @@ def build_live_drift_table(result):
     month. Return is its total return since the month-start anchor. Current is
     the weight it has drifted to as of the latest close. The Return column is
     tinted green for gains and red for losses so the over- and under-
-    performers stand out at a glance.
+    performers stand out at a glance. Rows are listed largest Month Start
+    weight first.
     """
     rows = result["rows"]
-    ordered = canonical_order(list(rows.keys()))
+    # Largest Month Start weight first, matching the Current Allocation table.
+    # Sorting on Month Start rather than Current keeps the rows from
+    # reshuffling as prices move during the month.
+    ordered = weight_order({t: r["start_w"] for t, r in rows.items()})
 
     asset_cells, ticker_cells = [], []
     start_cells, ret_cells, cur_cells = [], [], []
@@ -4126,13 +4184,8 @@ def main():
     display_rows = saved_rows if saved_rows else editor_rows
     display_rows = [r for r in display_rows if r.get("ticker")]
 
-    # Sort by the same canonical order used by Current Allocation and
-    # Allocation Drift so all three tables list assets identically.
-    if display_rows:
-        display_tickers = [r["ticker"] for r in display_rows]
-        order = canonical_order(display_tickers)
-        order_index = {t: i for i, t in enumerate(order)}
-        display_rows = sorted(display_rows, key=lambda r: order_index.get(r["ticker"], len(order)))
+    # Row order (largest weight first, like the other allocation tables) is
+    # applied inside build_next_allocation_table.
 
     if display_rows:
         next_alloc_config = chart_config("Next Allocation", static=True)
