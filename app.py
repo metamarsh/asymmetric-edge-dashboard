@@ -3396,6 +3396,427 @@ def render_update_section(portfolio_df):
 
 
 
+# ---------- HGER look-through (Quantix Commodity Index sector weights) ----------
+# HGER tracks the Quantix Commodity Index (QCI). Harbor publishes the index's
+# daily sector weights on the HGER fund page, no sign-in required. The page is
+# a static Gatsby build, so the same data is also served as structured JSON at
+# HGER_PAGE_DATA_URL, which is read first. If that fails, the rendered table on
+# the HTML page is parsed instead. If both fail, the most recent saved snapshot
+# is shown with a warning. Every successful fetch is saved to qci_snapshots\
+# beside app.py, so a history of as-of dates builds up over time (Harbor only
+# publishes the current day).
+#
+# QCI rebalances quarterly, phased in over business days 5 to 9 of the month
+# after quarter end, and rolls contracts monthly in the same window. Between
+# rebalances the sector mix moves only with prices.
+
+HGER_PAGE_URL = "https://www.harborcapital.com/etf/hger/"
+HGER_PAGE_DATA_URL = "https://www.harborcapital.com/page-data/etf/hger/page-data.json"
+QCI_SNAPSHOT_DIR_NAME = "qci_snapshots"
+
+# Harbor sector name -> (display name, emoji). An unknown sector still shows,
+# under a cleaned-up version of Harbor's name, and is flagged on the page so
+# the map can be extended.
+QCI_SECTOR_DISPLAY = {
+    "Petroleum": ("Petroleum", "\U0001F6E2️"),
+    "Precious": ("Precious Metals", "\U0001F7E8"),  # shown as "Gold" when gold is the only holding
+    "Grains And Soybean Products": ("Grains", "\U0001F33E"),
+    "Softs": ("Softs", "☕"),
+    "Industrial": ("Industrial Metals", "\U0001F529"),
+    "LivestockAndDairy": ("Livestock", "\U0001F416"),
+    "Natural Gas": ("Natural Gas", "\U0001F525"),
+    "Energy": ("Energy", "⚡"),
+}
+QCI_UNMAPPED_EMOJI = "◻️"
+
+# Harbor commodity name -> display name, in the order "What it holds" lists
+# them. Contract months and duplicate names (Wheat and Kansas Wheat) collapse
+# to one entry. Unknown commodities are lowercased and listed after the known ones.
+QCI_COMMODITY_DISPLAY = [
+    ("Brent Crude Oil", "Brent crude"),
+    ("WTI Crude Oil", "WTI crude"),
+    ("Crude Oil", "WTI crude"),
+    ("Gasoil", "gasoil"),
+    ("RBOB Gasoline", "gasoline"),
+    ("Heating Oil", "heating oil"),
+    ("Natural Gas", "natural gas"),
+    ("Gold", "gold"),
+    ("Silver", "silver"),
+    ("Platinum", "platinum"),
+    ("Palladium", "palladium"),
+    ("Corn", "corn"),
+    ("Wheat", "wheat"),
+    ("Kansas Wheat", "wheat"),
+    ("Soybeans", "soybeans"),
+    ("Soymeal", "soymeal"),
+    ("Bean Oil", "bean oil"),
+    ("Cocoa", "cocoa"),
+    ("Sugar", "sugar"),
+    ("Coffee", "coffee"),
+    ("Cotton", "cotton"),
+    ("Comex Copper", "copper"),
+    ("Copper", "copper"),
+    ("Zinc", "zinc"),
+    ("Aluminum", "aluminum"),
+    ("Nickel", "nickel"),
+    ("Lead", "lead"),
+    ("Tin", "tin"),
+    ("Lean Hogs", "lean hogs"),
+    ("Live Cattle", "live cattle"),
+    ("Feeder Cattle", "feeder cattle"),
+]
+
+
+def _find_json_key(obj, key):
+    """Depth-first search for the first value stored under key."""
+    if isinstance(obj, dict):
+        if key in obj:
+            return obj[key]
+        for value in obj.values():
+            found = _find_json_key(value, key)
+            if found is not None:
+                return found
+    elif isinstance(obj, list):
+        for value in obj:
+            found = _find_json_key(value, key)
+            if found is not None:
+                return found
+    return None
+
+
+def _qci_validated(rows, as_of, source):
+    """Return the parsed payload only if the weights add up to about 100%."""
+    if not rows or not as_of:
+        return None
+    total = sum(r["weight"] for r in rows)
+    if not 95.0 <= total <= 105.0:
+        return None
+    return {"as_of": as_of, "rows": rows, "source": source,
+            "fetched_at": local_now().strftime("%Y-%m-%d %H:%M")}
+
+
+def _qci_from_page_data(payload):
+    """Parse Harbor's page-data JSON (weights there are fractions of 1)."""
+    sectors = _find_json_key(payload, "etfCommodityIndexSectors")
+    if not sectors:
+        return None
+    rows, as_of = [], None
+    for sector in sectors:
+        as_of = as_of or str(sector.get("calendarDate") or "")[:10]
+        for c in sector.get("commodities") or []:
+            rows.append({
+                "ticker": str(c.get("ticker") or "").strip(),
+                "sector": str(sector.get("sectorName") or "").strip(),
+                "commodity": str(c.get("commodityName") or "").strip(),
+                "facility": str(c.get("tradingFacility") or "").strip(),
+                "weight": float(c.get("weight") or 0) * 100.0,
+            })
+    return _qci_validated(rows, as_of, "Harbor page data")
+
+
+def _qci_from_html(html):
+    """Fallback: parse the rendered sector weights table on the HGER page.
+
+    The table renders as a flat run of <div> cells, five per contract:
+    ticker, sector, commodity, facility, weight (already in percent).
+    """
+    import re
+    start = html.find("Daily Commodity Sector Weights")
+    if start < 0:
+        return None
+    segment = html[start:start + 80000]
+    m = re.search(r"As of\s*(\d{1,2})/(\d{1,2})/(\d{4})", segment)
+    header_end = segment.find("Daily Weight (%)")
+    if not m or header_end < 0:
+        return None
+    as_of = f"{m.group(3)}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
+    cells = [t.strip() for t in re.findall(r"<div[^>]*>([^<]+)</div>", segment[header_end:])]
+    rows = []
+    for i in range(0, len(cells) - 4, 5):
+        ticker, sector, commodity, facility, weight = cells[i:i + 5]
+        try:
+            weight_val = float(weight)
+        except ValueError:
+            break
+        rows.append({"ticker": ticker, "sector": sector, "commodity": commodity,
+                     "facility": facility, "weight": weight_val})
+    return _qci_validated(rows, as_of, "Harbor HGER page table")
+
+
+def _http_text(url):
+    """GET a page as text, preferring curl_cffi's browser impersonation."""
+    try:
+        from curl_cffi import requests as cffi_requests
+        r = cffi_requests.get(url, impersonate="chrome", timeout=20)
+        if r.status_code == 200:
+            return r.text
+    except Exception:
+        pass
+    try:
+        import requests as _requests
+        r = _requests.get(url, timeout=20, headers={"User-Agent": _BROWSER_UA})
+        if r.status_code == 200:
+            return r.text
+    except Exception:
+        pass
+    return None
+
+
+@st.cache_data(ttl=6 * 3600, show_spinner=False)
+def fetch_qci_weights():
+    """Fetch the latest QCI sector weights from Harbor.
+
+    Raises on failure so Streamlit does not cache a miss for six hours.
+    """
+    payload = _http_json(HGER_PAGE_DATA_URL, None)
+    data = _qci_from_page_data(payload) if payload else None
+    if data is None:
+        html = _http_text(HGER_PAGE_URL)
+        data = _qci_from_html(html) if html else None
+    if data is None:
+        raise RuntimeError("Harbor QCI sector weights unavailable")
+    return data
+
+
+def _qci_snapshot_dir():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), QCI_SNAPSHOT_DIR_NAME)
+
+
+def save_qci_snapshot(data):
+    """Save one snapshot per as-of date. Never overwrites, never raises."""
+    try:
+        folder = _qci_snapshot_dir()
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, f"qci_sector_weights_{data['as_of']}.json")
+        if not os.path.exists(path):
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+    except Exception:
+        pass
+
+
+def list_qci_snapshots():
+    """Return {as_of: path} for saved snapshots, newest first."""
+    folder = _qci_snapshot_dir()
+    found = {}
+    try:
+        for name in os.listdir(folder):
+            if name.startswith("qci_sector_weights_") and name.endswith(".json"):
+                found[name[len("qci_sector_weights_"):-5]] = os.path.join(folder, name)
+    except OSError:
+        return {}
+    return dict(sorted(found.items(), reverse=True))
+
+
+def load_qci_snapshot(path):
+    try:
+        with open(path, "r", encoding="utf-8-sig") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def summarize_qci_sectors(data):
+    """Group contract-level weights into display sectors.
+
+    Returns (sector_rows, n_commodities, unmapped_sectors). sector_rows is
+    sorted largest weight first. Nothing is dropped: an unknown sector or
+    commodity still shows and still counts toward the total.
+    """
+    import re
+    order = {src: i for i, (src, _) in enumerate(QCI_COMMODITY_DISPLAY)}
+    names = dict(QCI_COMMODITY_DISPLAY)
+    by_sector = {}
+    for r in data["rows"]:
+        by_sector.setdefault(r["sector"], []).append(r)
+
+    sector_rows, unmapped = [], []
+    for sector, rows in by_sector.items():
+        display, emoji = QCI_SECTOR_DISPLAY.get(sector, (None, None))
+        if display is None:
+            unmapped.append(sector)
+            display = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", sector).strip() or "Other"
+            emoji = QCI_UNMAPPED_EMOJI
+        ranked = sorted(rows, key=lambda r: (order.get(r["commodity"], len(order)), -r["weight"]))
+        held = []
+        for r in ranked:
+            label = names.get(r["commodity"], r["commodity"].lower())
+            if label not in held:
+                held.append(label)
+        if sector == "Precious" and held == ["gold"]:
+            display, holds = "Gold", "Gold futures"
+        else:
+            holds = ", ".join(held)
+            holds = holds[:1].upper() + holds[1:]
+        sector_rows.append({
+            "sector": display, "emoji": emoji, "holds": holds,
+            "weight": sum(r["weight"] for r in rows),
+        })
+    sector_rows.sort(key=lambda s: -s["weight"])
+    n_commodities = len({r["commodity"] for r in data["rows"]})
+    return sector_rows, n_commodities, unmapped
+
+
+def _rounded_bar_path(x0, x1, y_mid, height):
+    """SVG path for a pill-shaped bar (fully rounded ends)."""
+    r = height / 2
+    if x1 - x0 < height:
+        x1 = x0 + height
+    y0, y1 = y_mid - r, y_mid + r
+    return (f"M {x0 + r},{y0} L {x1 - r},{y0} Q {x1},{y0} {x1},{y_mid} "
+            f"Q {x1},{y1} {x1 - r},{y1} L {x0 + r},{y1} Q {x0},{y1} {x0},{y_mid} "
+            f"Q {x0},{y0} {x0 + r},{y0} Z")
+
+
+def build_qci_sector_table(sector_rows, n_commodities):
+    """Plotly figure of the HGER look-through table, drawn in pixel coordinates
+    (like the Asset Universe grid) so the PNG export matches the screen.
+
+    Columns: Sector (emoji + name), What it holds, a weight bar scaled to the
+    largest sector, and the weight. A Total row closes the table.
+    """
+    WIDTH = 860
+    HEADER_H = 46
+    ROW_H = 48
+    TOTAL_H = 48
+    SECTOR_X = 18
+    HOLDS_X = 240
+    BAR_X0, BAR_X1 = 610, 742
+    WEIGHT_X = WIDTH - 18
+    BAR_H = 11
+    BAR_FILL = "#4F2DB8"
+    BAR_TRACK = "#ECECF1"
+    RULE = "#E5E7EB"
+    HEADER_BG = "#F9FAFB"
+    font_family = "DM Sans, sans-serif"
+
+    n = len(sector_rows)
+    HEIGHT = HEADER_H + n * ROW_H + TOTAL_H
+    shapes, annotations = [], []
+
+    def text(x, y, value, anchor="left", size=16, color=TEXT_PRIMARY, bold=False):
+        annotations.append(dict(
+            x=x, y=y, xref="x", yref="y", xanchor=anchor, yanchor="middle",
+            text=f"<b>{value}</b>" if bold else value, showarrow=False,
+            font=dict(family=font_family, size=size, color=color),
+        ))
+
+    # Header band and its Deep Purple underline
+    shapes.append(dict(type="rect", x0=0, x1=WIDTH, y0=0, y1=HEADER_H,
+                       fillcolor=HEADER_BG, line_width=0, layer="below"))
+    shapes.append(dict(type="line", x0=0, x1=WIDTH, y0=HEADER_H, y1=HEADER_H,
+                       line=dict(color=BRAND_PURPLE, width=2)))
+    header_y = HEADER_H / 2
+    text(SECTOR_X, header_y, "Sector", size=17, bold=True)
+    text(HOLDS_X, header_y, "What it holds", size=17, bold=True)
+    text(WEIGHT_X, header_y, "Weight", anchor="right", size=17, bold=True)
+
+    max_weight = max((s["weight"] for s in sector_rows), default=1.0) or 1.0
+    for i, s in enumerate(sector_rows):
+        top = HEADER_H + i * ROW_H
+        mid = top + ROW_H / 2
+        if i > 0:
+            shapes.append(dict(type="line", x0=0, x1=WIDTH, y0=top, y1=top,
+                               line=dict(color=RULE, width=1)))
+        text(SECTOR_X, mid, f"{s['emoji']}  {s['sector']}")
+        text(HOLDS_X, mid, s["holds"], color=TEXT_SECONDARY)
+        shapes.append(dict(type="path", path=_rounded_bar_path(BAR_X0, BAR_X1, mid, BAR_H),
+                           fillcolor=BAR_TRACK, line_width=0, layer="below"))
+        fill_x1 = BAR_X0 + (BAR_X1 - BAR_X0) * (s["weight"] / max_weight)
+        shapes.append(dict(type="path", path=_rounded_bar_path(BAR_X0, fill_x1, mid, BAR_H),
+                           fillcolor=BAR_FILL, line_width=0))
+        text(WEIGHT_X, mid, _pct1(s["weight"]), anchor="right")
+
+    total_top = HEADER_H + n * ROW_H
+    shapes.append(dict(type="rect", x0=0, x1=WIDTH, y0=total_top, y1=HEIGHT,
+                       fillcolor=HEADER_BG, line_width=0, layer="below"))
+    shapes.append(dict(type="line", x0=0, x1=WIDTH, y0=total_top, y1=total_top,
+                       line=dict(color=RULE, width=1)))
+    total_mid = total_top + TOTAL_H / 2
+    noun = "commodity" if n_commodities == 1 else "commodities"
+    sec_noun = "sector" if n == 1 else "sectors"
+    text(SECTOR_X, total_mid, "Total", bold=True)
+    text(HOLDS_X, total_mid, f"{n_commodities} {noun} across {n} {sec_noun}", color=TEXT_SECONDARY)
+    text(WEIGHT_X, total_mid, _pct1(sum(s["weight"] for s in sector_rows)), anchor="right", bold=True)
+
+    fig = go.Figure()
+    fig.update_layout(
+        **DARK_LAYOUT,
+        width=WIDTH, height=HEIGHT,
+        margin=dict(t=0, b=0, l=0, r=0),
+        xaxis=dict(range=[0, WIDTH], visible=False, fixedrange=True),
+        yaxis=dict(range=[HEIGHT, 0], visible=False, fixedrange=True),
+        shapes=shapes, annotations=annotations, showlegend=False,
+    )
+    return fig
+
+
+def _hger_is_held(current_alloc_rows):
+    """True when HGER is in the current allocation or the saved next allocation."""
+    tickers = {str(r.get("ticker", "")).upper() for r in (current_alloc_rows or [])}
+    tickers |= {str(r.get("ticker", "")).upper() for r in load_next_allocation()}
+    return "HGER" in tickers
+
+
+def render_hger_lookthrough_section():
+    st.markdown("## What HGER Holds")
+
+    live, live_error = None, False
+    try:
+        live = fetch_qci_weights()
+        save_qci_snapshot(live)
+    except Exception:
+        live_error = True
+
+    snapshots = list_qci_snapshots()
+    data = live
+    if snapshots and (len(snapshots) > 1 or live is None):
+        dates = list(snapshots.keys())
+        default = dates.index(live["as_of"]) if live and live["as_of"] in dates else 0
+        pick = st.selectbox(
+            "As of", dates, index=default, key="qci_as_of",
+            format_func=lambda d: datetime.strptime(d, "%Y-%m-%d").strftime("%b %d, %Y"),
+        )
+        if live is None or pick != live["as_of"]:
+            data = load_qci_snapshot(snapshots[pick])
+
+    if data is None:
+        st.error(
+            "HGER sector weights unavailable. Harbor's HGER page could not be reached or "
+            f"its layout changed, and no saved snapshot exists yet. Source page: {HGER_PAGE_URL}"
+        )
+        return
+    if live_error:
+        st.warning(
+            "Could not reach Harbor just now, so this shows the most recent saved snapshot. "
+            "Check the as-of date before using it in an issue."
+        )
+
+    sector_rows, n_commodities, unmapped = summarize_qci_sectors(data)
+    as_of_dt = datetime.strptime(data["as_of"], "%Y-%m-%d")
+    st.plotly_chart(
+        build_qci_sector_table(sector_rows, n_commodities),
+        use_container_width=False,
+        config=chart_config(f"QCI (HGER) Sector Weights {as_of_dt:%m-%d-%Y}", static=True),
+    )
+    if unmapped:
+        st.warning(
+            "New sector name from Harbor, shown under its raw name: "
+            + ", ".join(unmapped)
+            + ". Add it to QCI_SECTOR_DISPLAY in app.py to give it a display name and emoji."
+        )
+
+    footnote = (
+        f"Source: Quantix Commodity Index daily holdings as of {as_of_dt:%m/%d/%Y}, the index "
+        f"tracked by HGER, grouped by sector. Weights change daily."
+    )
+    st.markdown(f'<p class="footer-text">{footnote}</p>', unsafe_allow_html=True)
+
+    if st.button("Refresh from Harbor", key="qci_refresh"):
+        fetch_qci_weights.clear()
+        st.rerun()
+
+
 # ---------- Asset Universe ----------
 #
 # The asset universe grid lives in a JSON file next to the portfolio CSV.
@@ -4108,6 +4529,12 @@ def main():
             f"hand. Holdings and weights are subject to change based on regime signals and market conditions."
         )
         st.markdown(f'<p class="footer-text">{footnote_alloc}</p>', unsafe_allow_html=True)
+
+    # ================================================================
+    # WHAT HGER HOLDS (QCI look-through, shown only while HGER is held)
+    # ================================================================
+    if _hger_is_held(current_alloc_rows):
+        render_hger_lookthrough_section()
 
     # ================================================================
     # LIVE POSITION DRIFT (intramonth, for deposit / withdrawal sizing)
