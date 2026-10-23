@@ -51,8 +51,8 @@
     {
       "name": "Crypto",
       "visible": true,
-      "color_bg": "#E2DDF0",
-      "color_text": "#443D7F",
+      "color_bg": "#FCE3CF",
+      "color_text": "#A84E08",
       "assets": [
         {
           "name": "Bitcoin",

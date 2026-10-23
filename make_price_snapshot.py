@@ -8,7 +8,22 @@ TICKERS = [
     "SPY", "AOA", "AOR",
     "GLD", "EMXC", "DXJ", "QQQ", "IWM", "DX-Y.NYB", "TLT", "CL=F", "BTC-USD",
     "BIL", "HGER", "IBIT",
+    # Every other ticker held since inception (October 22, 2026), for the
+    # What Drove the Month and Rebalance Log sections, plus BTAL for Risk vs. Return.
+    "BTAL", "BITO", "COPX", "EZU", "GBTC", "LBNOX", "LOLDX",
 ]
+
+# Pick up any ticker held since inception automatically, so a new holding is in
+# the snapshot without editing this list. CUSIPs and money-market sweeps are skipped.
+try:
+    import re
+    _hv = pd.read_csv("holdings_daily_values.csv", parse_dates=["date"]).set_index("date")
+    _hv = _hv[_hv.index >= "2023-12-20"]
+    for _t in _hv.columns[(_hv.fillna(0) > 1).any()]:
+        if re.fullmatch(r"[A-Z][A-Z.\-]{0,9}", _t) and _t not in TICKERS and _t != "SPAXX":
+            TICKERS.append(_t)
+except Exception as _e:
+    print("holdings scan skipped:", _e)
 
 START = "2014-01-01"
 

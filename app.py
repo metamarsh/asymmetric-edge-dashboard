@@ -11,6 +11,7 @@ import yfinance as yf
 from datetime import datetime, timedelta
 import os
 import json
+import textwrap
 import time
 
 # ---------- Page config ----------
@@ -197,6 +198,12 @@ ASSET_CLASS_FOOTNOTES = {
 }
 
 SERIES_ORDER = ["AsymEdge", "80/20", "60/40", "S&P 500"]
+
+
+def series_label(name):
+    """Name a series as subscribers see it. "AsymEdge" stays the key in code;
+    every legend, header and toggle shows the full brand name."""
+    return "Asymmetric Edge" if name == "AsymEdge" else name
 
 # Palette for the Total Return Comparison chart. The first four swatches mirror
 # the four chart series colors (per the design spec rule) so users can easily
@@ -944,7 +951,7 @@ def build_performance_chart(bar_df, series_names):
         fig.add_trace(go.Bar(
             x=subset["Period"],
             y=subset["Return"],
-            name=name,
+            name=series_label(name),
             marker=dict(
                 color=BAR_SERIES_COLORS.get(name, "#999"),
                 cornerradius=6,
@@ -964,11 +971,11 @@ def build_performance_chart(bar_df, series_names):
             zerolinecolor=ZERO_LINE,
             tickfont=dict(size=16, color=TEXT_MUTED),
         ),
-        xaxis=dict(type="category", tickfont=dict(size=20, color=TEXT_SECONDARY, weight=700)),
+        xaxis=dict(type="category", tickfont=dict(size=16, color=TEXT_SECONDARY, weight=700)),
         legend=dict(
-            orientation="h", yanchor="top", y=-0.18,
+            orientation="h", yanchor="top", y=-0.16,
             xanchor="center", x=0.5,
-            font=dict(size=22, color=TEXT_SECONDARY, weight=500),
+            font=dict(size=16, color=TEXT_SECONDARY, weight=500),
         ),
         margin=dict(t=30, b=80, l=50, r=30),
         height=430,
@@ -1004,7 +1011,7 @@ def build_growth_chart(combined, series_names, start_g, end_g):
         rgba = f"rgba({r},{g},{b},{opacity})"
 
         legend_items.append({
-            "name": name,
+            "name": series_label(name),
             "value": final_val,
             "pct": pct_return,
             "color": rgba,
@@ -1015,9 +1022,9 @@ def build_growth_chart(combined, series_names, start_g, end_g):
             x=normed.index,
             y=normed.values,
             mode="lines",
-            name=name,
+            name=series_label(name),
             line=dict(color=rgba, width=4 if name == "AsymEdge" else 3),
-            hovertemplate="%{x|%b %d, %Y}<br>$%{y:,.0f}<extra>" + name + "</extra>",
+            hovertemplate="%{x|%b %d, %Y}<br>$%{y:,.0f}<extra>" + series_label(name) + "</extra>",
             showlegend=False,
         ))
 
@@ -1044,16 +1051,16 @@ def build_growth_chart(combined, series_names, start_g, end_g):
         SQ_HALF = SQ_PX / 2
         CORNER_PX = 3             # rounded corner radius, pixels
         SQ_GAP_PX = 9             # space between marker and series name
-        ITEM_GAP_PX = 140         # space between adjacent legend items
-        FIG_W_PX = 1060           # typical chart width inside the 1100px-max container
-        NAME_CHAR_PX = 12.1       # 22pt DM Sans medium, average char width
-        VALUE_CHAR_PX = 8.6       # 16pt DM Sans regular, average char width
+        ITEM_GAP_PX = 56          # space between adjacent legend items
+        FIG_W_PX = 790            # chart width in Tyler's Firefox (about 795 px content column)
+        NAME_CHAR_PX = 8.9        # 16pt DM Sans medium, average char width
+        VALUE_CHAR_PX = 7.1       # 13pt DM Sans regular, average char width
 
         # Vertical positions in paper-y. y_name is further from the plot
         # than the prior version to leave a comfortable gap between the
         # x-axis date labels and the legend.
-        y_name = -0.16
-        y_value = -0.24
+        y_name = -0.15
+        y_value = -0.205
 
         # Path for the rounded square in pixel coords centered on (0, 0).
         # Used with xsizemode/ysizemode="pixel" so the marker is exactly
@@ -1120,7 +1127,7 @@ def build_growth_chart(combined, series_names, start_g, end_g):
                 x=name_x, y=y_name,
                 text=item["name"],
                 showarrow=False,
-                font=dict(size=22, color=TEXT_SECONDARY,
+                font=dict(size=16, color=TEXT_SECONDARY,
                           family="DM Sans, sans-serif", weight=500),
                 xanchor="left", yanchor="middle",
             ))
@@ -1130,7 +1137,7 @@ def build_growth_chart(combined, series_names, start_g, end_g):
                 x=name_center_x, y=y_value,
                 text=item["value_text"],
                 showarrow=False,
-                font=dict(size=16, color=TEXT_MUTED,
+                font=dict(size=13, color=TEXT_MUTED,
                           family="DM Sans, sans-serif"),
                 xanchor="center", yanchor="middle",
             ))
@@ -1153,7 +1160,7 @@ def build_growth_chart(combined, series_names, start_g, end_g):
             tickfont=dict(size=16, color=TEXT_MUTED),
             range=[start_g - timedelta(days=2), end_g + timedelta(days=2)],
         ),
-        margin=dict(t=15, b=140, l=70, r=30),
+        margin=dict(t=15, b=125, l=70, r=30),
         height=560,
         hovermode="x unified",
         shapes=legend_shapes,
@@ -1169,7 +1176,7 @@ def build_drawdown_chart(bar_df, series_names):
         fig.add_trace(go.Bar(
             x=subset["Period"],
             y=subset["Drawdown"],
-            name=name,
+            name=series_label(name),
             marker=dict(
                 color=BAR_SERIES_COLORS.get(name, "#999"),
                 cornerradius=6,
@@ -1189,11 +1196,11 @@ def build_drawdown_chart(bar_df, series_names):
             zerolinecolor=ZERO_LINE,
             tickfont=dict(size=16, color=TEXT_MUTED),
         ),
-        xaxis=dict(type="category", tickfont=dict(size=20, color=TEXT_SECONDARY, weight=700)),
+        xaxis=dict(type="category", tickfont=dict(size=16, color=TEXT_SECONDARY, weight=700)),
         legend=dict(
-            orientation="h", yanchor="top", y=-0.18,
+            orientation="h", yanchor="top", y=-0.16,
             xanchor="center", x=0.5,
-            font=dict(size=22, color=TEXT_SECONDARY, weight=500),
+            font=dict(size=16, color=TEXT_SECONDARY, weight=500),
         ),
         margin=dict(t=30, b=80, l=55, r=30),
         height=430,
@@ -1509,7 +1516,7 @@ def build_summary_table_html(metrics_by_series, series_order):
         ("Period",             "Period",               fmt_text,   False, None,               None),
     ]
 
-    header_cells = "".join(f"<th>{name}</th>" for name in series_order)
+    header_cells = "".join(f"<th>{series_label(name)}</th>" for name in series_order)
 
     css = f"""
     <style>
@@ -1794,7 +1801,8 @@ NEXT_ALLOC_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "next
 # for the equity family, amber vs pale gold for the commodity family), so
 # the chart reads calmly while adjacent categories stay distinct. Validated
 # for colorblind separation (all adjacent stack pairs pass CVD deltaE
-# checks). The defensive sleeve and T-bills/cash fade toward gray so
+# checks, including Crypto's orange against both Gold and Commodities, since
+# Crypto sits directly on Commodities in months with no gold). The defensive sleeve and T-bills/cash fade toward gray so
 # risk-off periods read as the portfolio "going quiet."
 #
 # Stack order is bottom-to-top; the legend follows the same order.
@@ -1808,7 +1816,9 @@ ALLOC_HISTORY_CATEGORIES = [
     ("gold",   "Gold",              "#E4D294"),  # pale gold, kept separate from
                                                  # Commodities because it is usually
                                                  # the strategy's largest single sleeve
-    ("crypto", "Crypto",            "#9D91CE"),  # muted violet
+    ("crypto", "Crypto",            "#F59A3C"),  # bitcoin orange, matching the
+                                                 # Asset Universe card and the
+                                                 # orange emoji (October 22, 2026)
     ("def",    "Defensive Equity",  "#6E6A62"),  # warm dark gray (BTAL)
     ("cash",   "T-bills & Cash",    "#F0F1F3"),  # near-white, reads as "nothing held"
 ]
@@ -2458,14 +2468,15 @@ def build_drift_table(summary, new_target_rows):
     # both the header row and the cells. Two columns need more room than a
     # bare percentage: Trim/Add carries labels like "-100.00% (exit)", and the
     # "Month Start" and "New Target" headers are the longest header strings.
-    # This table is laid out at width=860 rather than the 790 used by the
-    # other tables because five columns at those minimums do not fit in 790.
-    # The container is 1100px wide, so 860 still has room.
+    # Laid out at width=780 (October 22, 2026): Tyler's Firefox content column
+    # is about 795 px, and Streamlit squeezes any wider figure to fit, which
+    # wrapped the asset names and clipped the last row at the old 860. The
+    # asset column keeps 287 px, enough for the longest name on one line.
     # If any cell or header wraps to a second line, the table renders taller
     # than the figure height set below and the final row gets clipped, so
     # these widths and that height calculation have to stay in sync.
     fig = go.Figure(data=[go.Table(
-        columnwidth=[230, 130, 90, 115, 135],
+        columnwidth=[255, 120, 80, 110, 125],
         header=dict(
             values=[f"<b>{v}</b>" for v in header_values],
             fill_color="#F9FAFB",
@@ -2491,7 +2502,7 @@ def build_drift_table(summary, new_target_rows):
         # the other tables' 10px because this one carries the widest cells, so
         # it absorbs a stray wrap instead of clipping the last row.
         height=38 + 38 * n + 24,
-        width=860,
+        width=780,
     )
     return fig
 
@@ -3866,8 +3877,8 @@ DEFAULT_ASSET_UNIVERSE = {
         {
             "name": "Crypto",
             "visible": True,
-            "color_bg": "#E2DDF0",
-            "color_text": "#443D7F",
+            "color_bg": "#FCE3CF",
+            "color_text": "#A84E08",
             "assets": [
                 {"name": "Bitcoin", "ticker": "IBIT"},
             ],
@@ -3961,7 +3972,33 @@ def build_asset_universe_html(universe):
     )
 
 
-def build_asset_universe_chart(universe):
+# Asset Universe styling, option B (October 22, 2026). Every card keeps its
+# category's pastel fill and dark text. Cards the portfolio holds now add a
+# 2 px outline and a weight pill, both in the category's text color, so the
+# holdings stand out without a heavy fill. Set UNIVERSE_HIGHLIGHT_HELD to
+# False to show every card alike.
+UNIVERSE_HIGHLIGHT_HELD = True
+
+# Approximate DM Sans advance widths in em, used only to center the ticker
+# and weight pill as one group under each held card's name.
+_DM_SANS_EM = {".": 0.27, "%": 0.82, " ": 0.25, "-": 0.36}
+
+
+def _est_text_width(text, size, bold=False):
+    w = 0.0
+    for ch in str(text):
+        if ch in _DM_SANS_EM:
+            w += _DM_SANS_EM[ch]
+        elif ch.isdigit():
+            w += 0.58
+        elif ch.isupper():
+            w += 0.66
+        else:
+            w += 0.55
+    return w * size * (1.04 if bold else 1.0)
+
+
+def build_asset_universe_chart(universe, held=None):
     """Build a Plotly figure that renders the asset universe grid.
 
     Uses pixel-based coordinates (xaxis 0 to WIDTH, yaxis HEIGHT to 0 so
@@ -3973,7 +4010,11 @@ def build_asset_universe_chart(universe):
     card is drawn as an SVG path with quadratic Bezier curves at the four
     corners. Card backgrounds sit on layer='below' so the text annotations
     render cleanly on top.
+
+    held: optional {ticker: weight percent} for the current allocation. Held
+    cards get an outline and a weight pill; see UNIVERSE_HIGHLIGHT_HELD.
     """
+    held = held if (held and UNIVERSE_HIGHLIGHT_HELD) else {}
     categories = [
         c for c in universe.get("categories", [])
         if c.get("assets") and c.get("visible", True)
@@ -4006,10 +4047,17 @@ def build_asset_universe_chart(universe):
     TOP_PAD = 4
     BOT_PAD = 4
 
-    HEIGHT = TOP_PAD + n_rows * ROW_HEIGHT + (n_rows - 1) * ROW_GAP + BOT_PAD
+    OUTLINE_W = 2
+    PILL_H = 18
+    PILL_PAD_X = 7
+    PILL_GAP = 6
+
+    LEGEND_H = 34 if held else 0
+    HEIGHT = TOP_PAD + n_rows * ROW_HEIGHT + (n_rows - 1) * ROW_GAP + BOT_PAD + LEGEND_H
 
     shapes = []
     annotations = []
+    font = "DM Sans, sans-serif"
 
     for i, cat in enumerate(categories):
         row_top = TOP_PAD + i * (ROW_HEIGHT + ROW_GAP)
@@ -4022,13 +4070,13 @@ def build_asset_universe_chart(universe):
             text=cat.get("name", ""),
             showarrow=False,
             xanchor="right", yanchor="middle",
-            font=dict(size=15, color="#4D4D48", family="DM Sans, sans-serif"),
+            font=dict(size=15, color=TEXT_PRIMARY, family=font, weight=600),
         ))
 
         assets = cat.get("assets", [])
         n_assets = len(assets)
-        bg = cat.get("color_bg", "#E8E4DA")
         txt = cat.get("color_text", "#4A463D")
+        bg = cat.get("color_bg", "#E8E4DA")
 
         # Single-card rows fill half the card area so a lone card doesn't stretch
         if n_assets == 1:
@@ -4042,42 +4090,97 @@ def build_asset_universe_chart(universe):
         for j, asset in enumerate(assets):
             card_left = CARD_AREA_LEFT + j * (card_width + CARD_GAP)
             card_right = card_left + card_width
+            ticker = str(asset.get("ticker", "")).strip().upper()
+            is_held = ticker in held
 
-            r = CORNER_RADIUS
-            x0, y0 = card_left, row_top
-            x1, y1 = card_right, row_bottom
-            path = (
-                f"M {x0+r},{y0} L {x1-r},{y0} "
-                f"Q {x1},{y0} {x1},{y0+r} L {x1},{y1-r} "
-                f"Q {x1},{y1} {x1-r},{y1} L {x0+r},{y1} "
-                f"Q {x0},{y1} {x0},{y1-r} L {x0},{y0+r} "
-                f"Q {x0},{y0} {x0+r},{y0} Z"
-            )
-            shapes.append(dict(
-                type="path", path=path,
-                fillcolor=bg, line=dict(width=0),
-                layer="below",
-            ))
+            if is_held:
+                # Inset by half the stroke so the outline sits inside the card
+                # edge, the way a CSS border does.
+                h = OUTLINE_W / 2
+                shapes.append(dict(
+                    type="path",
+                    path=_round_rect_path(card_left + h, row_top + h,
+                                          card_right - h, row_bottom - h,
+                                          CORNER_RADIUS - h),
+                    fillcolor=bg, line=dict(color=txt, width=OUTLINE_W),
+                    layer="below",
+                ))
+            else:
+                shapes.append(dict(
+                    type="path",
+                    path=_round_rect_path(card_left, row_top, card_right, row_bottom,
+                                          CORNER_RADIUS),
+                    fillcolor=bg, line=dict(width=0),
+                    layer="below",
+                ))
 
             card_center_x = (card_left + card_right) / 2
-
-            # Asset name above center, medium weight to match the HTML version
             annotations.append(dict(
-                x=card_center_x, y=row_center_y - 6,
+                x=card_center_x, y=row_center_y - 7,
                 text=asset.get("name", ""),
                 showarrow=False,
                 xanchor="center", yanchor="middle",
-                font=dict(size=15, color=txt, family="DM Sans, sans-serif", weight=500),
+                font=dict(size=15, color=txt, family=font, weight=600),
             ))
-            # Ticker below name at 70% opacity, mirroring the HTML version
+
+            sub_y = row_center_y + 13
+            if not is_held:
+                annotations.append(dict(
+                    x=card_center_x, y=sub_y,
+                    text=asset.get("ticker", ""),
+                    showarrow=False,
+                    xanchor="center", yanchor="middle",
+                    font=dict(size=12, color=txt, family=font, weight=500),
+                ))
+                continue
+
+            # Held: ticker, then a pill with the weight, centered as one group.
+            weight_txt = f"{held[ticker]:.1f}%"
+            tw = _est_text_width(ticker, 12)
+            pw = _est_text_width(weight_txt, 12, bold=True) + 2 * PILL_PAD_X
+            start = card_center_x - (tw + PILL_GAP + pw) / 2
             annotations.append(dict(
-                x=card_center_x, y=row_center_y + 14,
-                text=asset.get("ticker", ""),
+                x=start + tw, y=sub_y,
+                text=ticker,
+                showarrow=False,
+                xanchor="right", yanchor="middle",
+                font=dict(size=12, color=txt, family=font, weight=500),
+            ))
+            px0 = start + tw + PILL_GAP
+            px1 = px0 + pw
+            shapes.append(dict(
+                type="path",
+                path=_round_rect_path(px0, sub_y - PILL_H / 2, px1, sub_y + PILL_H / 2,
+                                      PILL_H / 2),
+                fillcolor=txt, line=dict(width=0),
+            ))
+            annotations.append(dict(
+                x=(px0 + px1) / 2, y=sub_y,
+                text=weight_txt,
                 showarrow=False,
                 xanchor="center", yanchor="middle",
-                font=dict(size=12, color=txt, family="DM Sans, sans-serif"),
-                opacity=0.7,
+                font=dict(size=12, color="#ffffff", family=font, weight=700),
             ))
+
+    if held:
+        ly = HEIGHT - LEGEND_H / 2 + 2
+        x = CARD_AREA_LEFT
+        # Neutral cool gray, so the key reads as applying to every category
+        # rather than matching the Defensive row's warm tan.
+        legend_bg, legend_txt = "#DFE1E7", "#5F6573"
+        for outlined, label in [(True, "Held now, with weight"), (False, "In the universe")]:
+            shapes.append(dict(
+                type="path",
+                path=_round_rect_path(x + 1, ly - 6, x + 13, ly + 6, 2) if outlined
+                else _round_rect_path(x, ly - 7, x + 14, ly + 7, 3),
+                fillcolor=legend_bg,
+                line=dict(color=legend_txt, width=2) if outlined else dict(width=0),
+            ))
+            annotations.append(dict(
+                x=x + 20, y=ly, text=label, showarrow=False, xanchor="left", yanchor="middle",
+                font=dict(size=12, color=TEXT_SECONDARY, family=font),
+            ))
+            x += 190
 
     fig = go.Figure()
     fig.update_layout(
@@ -4148,15 +4251,23 @@ def render_asset_universe_section():
     # rest of the dashboard's charts are full-width. Hide the chart-interaction
     # tools (zoom, pan, etc.) that don't apply to a static layout, leaving
     # the toolbar focused on the download button.
-    fig = build_asset_universe_chart(universe)
+    held = {}
+    try:
+        rows, _alloc_date = derive_current_allocation(load_holdings_values())
+        held = {r["ticker"]: float(r["weight_pct"]) for r in (rows or [])}
+    except Exception:
+        held = {}
+    fig = build_asset_universe_chart(universe, held)
     au_config = chart_config("Asset Universe", static=True)
-    _, center, _ = st.columns([1, 6, 1])
-    with center:
-        st.plotly_chart(fig, use_container_width=False, config=au_config)
+    # Drawn at its native 720 px. The old centering column squeezed it below
+    # that width in narrower windows, which shrank the cards and crowded the text.
+    st.plotly_chart(fig, use_container_width=False, config=au_config)
 
     footnote_au = (
         "Current asset universe used by the Asymmetric Edge strategy. "
-        "Holdings rotate based on regime signals and are rebalanced as market conditions evolve."
+        + ("Outlined cards are the current holdings, with their weights as of the latest rebalance. "
+           if held and UNIVERSE_HIGHLIGHT_HELD else "")
+        + "Holdings rotate based on regime signals and are rebalanced as market conditions evolve."
     )
     st.markdown(f'<p class="footer-text">{footnote_au}</p>', unsafe_allow_html=True)
 
@@ -4272,6 +4383,1883 @@ def render_asset_universe_section():
 
 
 # ---------- Main ----------
+# ===========================================================================
+# Track-record analytics (added October 22, 2026)
+#
+# Seven sections built entirely from files the dashboard already reads: the
+# anchored series, holdings_daily_values.csv, reconstructed_account_value.csv,
+# and adjusted closes through _fetch_closes. They need no new inputs and
+# refresh whenever the pipeline does.
+#
+#   Monthly Returns          calendar grid of monthly returns, year totals,
+#                            and the difference against the S&P 500
+#   What Drove the Month     each holding's contribution to one month
+#   Rebalance Log            what each month-end rebalance added, exited,
+#                            and how much of the portfolio turned over
+#   Drawdowns Over Time      underwater chart plus the deepest declines
+#   The Asymmetry            upside/downside capture against the S&P 500
+#   Rolling 12-Month Return  trailing one-year return, excess, and volatility
+#   Risk vs. Return          CAGR against volatility for the strategy, its
+#                            benchmarks, and the asset universe
+#
+# Every figure is a Plotly figure rendered with chart_config, so the toolbar's
+# PNG download works for newsletter use. Table-style figures are drawn in
+# pixel coordinates (like the HGER look-through and Asset Universe grid) so the
+# exported PNG matches the screen. Each section renders through
+# _render_guarded, so a data problem in one section shows a notice instead of
+# taking the page down.
+# ===========================================================================
+
+ANALYTICS_WIDTH = 780   # fits Tyler's Firefox content column (about 795 px); wider figures get squeezed
+ANALYTICS_FONT = "DM Sans, sans-serif"
+ANALYTICS_TINT = "#F0EDF8"      # light lavender used for AE emphasis cells
+ANALYTICS_RULE = "#E5E7EB"
+ANALYTICS_HEADER_BG = "#F9FAFB"
+ANALYTICS_CELL_TEXT = "#2E2E38"
+MINUS = "−"
+
+# The benchmark every analytics section compares against first (Tyler's
+# primary comparison, October 22, 2026): an 80/20 portfolio, proxied by AOA.
+PRIMARY_BENCHMARK = "80/20"
+
+# Capture ratios are the exception: they are measured against the S&P 500, the
+# benchmark funds most commonly quote them against, so the figures compare
+# directly with other managers' published capture ratios.
+CAPTURE_BENCHMARK = "S&P 500"   # default for The Asymmetry: the standard capture-ratio benchmark
+CAPTURE_BENCHMARK_CHOICES = ["S&P 500", "80/20", "60/40"]   # swappable in The Asymmetry
+
+# Money-market and sweep positions are cash for every analytics purpose.
+CASH_LIKE_TICKERS = {"389930108", "SPAXX"}
+
+# Monthly heatmap tiers, light to strong, using the dashboard's gain/loss hues.
+HEAT_TIERS = [
+    # (lower bound inclusive in percent, fill, legend label)
+    (3.0, "#9FD3B3", "≥ 3%"),
+    (1.0, "#CFEAD9", "1% to 3%"),
+    (0.0, "#EAF5EE", "0% to 1%"),
+    (-1.0, "#FAE6E3", MINUS + "1% to 0%"),
+    (-3.0, "#F2C6BF", MINUS + "3% to " + MINUS + "1%"),
+    (None, "#E59E93", "≤ " + MINUS + "3%"),
+]
+HEAT_EMPTY = "#F7F7F9"
+
+
+def _fmt_pct(value, digits=1, signed=True, suffix="%"):
+    """Format a percent-unit number with a true minus sign; n/a when missing."""
+    if value is None:
+        return "n/a"
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return "n/a"
+    if not np.isfinite(value):
+        return "n/a"
+    if round(value, digits) == 0:
+        return f"{0:.{digits}f}{suffix}"
+    if value < 0:
+        sign = MINUS
+    else:
+        sign = "+" if signed else ""
+    return f"{sign}{abs(value):.{digits}f}{suffix}"
+
+
+def _heat_fill(pct):
+    if pct is None or not np.isfinite(pct):
+        return HEAT_EMPTY
+    pct = round(pct, 1)
+    for lower, fill, _label in HEAT_TIERS:
+        if lower is None or pct >= lower:
+            return fill
+    return HEAT_TIERS[-1][1]
+
+
+def _round_rect_path(x0, y0, x1, y1, r=6):
+    """SVG path for a rectangle with rounded corners, in data coordinates."""
+    r = max(0.0, min(r, (x1 - x0) / 2, (y1 - y0) / 2))
+    return (
+        f"M {x0 + r},{y0} L {x1 - r},{y0} Q {x1},{y0} {x1},{y0 + r} "
+        f"L {x1},{y1 - r} Q {x1},{y1} {x1 - r},{y1} L {x0 + r},{y1} "
+        f"Q {x0},{y1} {x0},{y1 - r} L {x0},{y0 + r} Q {x0},{y0} {x0 + r},{y0} Z"
+    )
+
+
+def _px_text(annotations, x, y, value, anchor="left", size=15, color=TEXT_PRIMARY,
+             bold=False, valign="middle"):
+    annotations.append(dict(
+        x=x, y=y, xref="x", yref="y", xanchor=anchor, yanchor=valign,
+        text=f"<b>{value}</b>" if bold else value, showarrow=False,
+        align=anchor if anchor in ("left", "right") else "center",
+        font=dict(family=ANALYTICS_FONT, size=size, color=color),
+    ))
+
+
+def _pixel_layout(fig, width, height, shapes, annotations):
+    """Lay a figure out in pixel coordinates: x runs 0..width left to right and
+    y runs 0..height top to bottom, so tables export to PNG exactly as drawn."""
+    fig.update_layout(
+        **DARK_LAYOUT,
+        width=width, height=height,
+        margin=dict(t=0, b=0, l=0, r=0),
+        xaxis=dict(range=[0, width], visible=False, fixedrange=True),
+        yaxis=dict(range=[height, 0], visible=False, fixedrange=True),
+        shapes=shapes, annotations=annotations, showlegend=False,
+        hoverlabel=dict(font=dict(family=ANALYTICS_FONT, size=13)),
+    )
+    return fig
+
+
+def _footnote(text):
+    st.markdown(f'<p class="footer-text">{text}</p>', unsafe_allow_html=True)
+
+
+def _render_guarded(title, fn, *args, **kwargs):
+    """Render one analytics section under its header. Any exception becomes a
+    notice in place of the section; the rest of the dashboard keeps going."""
+    st.markdown(f"## {title}")
+    try:
+        fn(*args, **kwargs)
+    except Exception as exc:  # noqa: BLE001 - a section must never take the page down
+        st.info(
+            f"{title} could not be computed from the current data "
+            f"({type(exc).__name__}: {exc})."
+        )
+
+
+def _long_date(d):
+    d = pd.Timestamp(d)
+    return f"{d:%B} {d.day}, {d.year}"
+
+
+def _asset_label(ticker):
+    info = ASSET_CATALOG.get(ticker)
+    return f"{info['asset']} ({ticker})" if info else ticker
+
+
+# ---------- shared data helpers ----------
+
+def _monthly_returns(daily, inception):
+    """Calendar-month returns (fractions) keyed by monthly Period.
+
+    The first month is measured from the inception close and every later month
+    from the prior month's last close, the same anchoring
+    compute_summary_metrics uses, so closed Asymmetric Edge months tie to
+    Fidelity's reported returns.
+    """
+    s = daily.dropna()
+    s = s[s.index >= pd.Timestamp(inception)]
+    if len(s) < 2:
+        return pd.Series(dtype="float64")
+    month_last = s.groupby(s.index.to_period("M")).last()
+    prev = month_last.shift(1)
+    prev.iloc[0] = float(s.iloc[0])
+    return (month_last / prev - 1.0).dropna()
+
+
+def _month_end_values(daily, inception):
+    """Month-end values keyed by Period, with the inception close as the
+    'prior month-end' anchor of the first month."""
+    s = daily.dropna()
+    s = s[s.index >= pd.Timestamp(inception)]
+    if len(s) < 2:
+        return pd.Series(dtype="float64")
+    month_last = s.groupby(s.index.to_period("M")).last()
+    anchor = pd.Series([float(s.iloc[0])], index=[month_last.index[0] - 1])
+    return pd.concat([anchor, month_last])
+
+
+def _last_month_closed(last_date):
+    """True when the data ends on its month's final session and that session
+    has closed, so the month's return is final."""
+    last_date = pd.Timestamp(last_date)
+    return _is_month_final_session(last_date) and _session_has_closed(last_date)
+
+
+def _open_period(last_date):
+    """The month still in progress at last_date, or None if it has closed."""
+    return None if _last_month_closed(last_date) else pd.Timestamp(last_date).to_period("M")
+
+
+@st.cache_data(ttl=3600)
+def load_anchor_flags():
+    """Date -> anchored flag from asymmetric_edge_series.csv. A day is anchored
+    when its month ties to a Fidelity figure, including an open month built
+    with Fidelity's month-to-date return. Empty when the column is missing."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    pipeline_dir = os.path.join(os.path.dirname(script_dir), "Portfolio Hist Val Reconstruction")
+    for path in (os.path.join(pipeline_dir, "asymmetric_edge_series.csv"),
+                 os.path.join(script_dir, "asymmetric_edge_series.csv")):
+        if not os.path.exists(path):
+            continue
+        try:
+            df = pd.read_csv(path, parse_dates=["date"])
+        except Exception:
+            return pd.Series(dtype="bool")
+        if "anchored" not in df.columns:
+            return pd.Series(dtype="bool")
+        flags = df.set_index("date")["anchored"].astype(str).str.strip().str.lower() == "true"
+        return flags.sort_index()
+    return pd.Series(dtype="bool")
+
+
+def _open_month_anchored(last_date):
+    """True when the open month's figure ties to Fidelity: either the series
+    was built with Fidelity's month-to-date return, or the dashboard extended
+    it with a month-to-date return entered in Update Portfolio Data."""
+    flags = load_anchor_flags()
+    if flags.empty:
+        return False
+    last_date = pd.Timestamp(last_date)
+    if last_date > flags.index.max():
+        return True
+    return bool(flags.get(last_date, False))
+
+
+def _closed_only(monthly, last_date):
+    open_p = _open_period(last_date)
+    if open_p is None or monthly.empty:
+        return monthly
+    return monthly[monthly.index < open_p]
+
+
+def _held_tickers(holdings_values, since=None):
+    """Tickers with a meaningful position at any point since `since`."""
+    if holdings_values is None or holdings_values.empty:
+        return []
+    hv = holdings_values
+    if since is not None:
+        hv = hv[hv.index >= pd.Timestamp(since) - pd.Timedelta(days=10)]
+    held = hv.columns[(hv.fillna(0.0) > 1.0).any()]
+    return [t for t in held if t not in CASH_LIKE_TICKERS]
+
+
+@st.cache_data(ttl=3600)
+def load_holding_prices(tickers: tuple, start_date: str, end_date: str):
+    """Adjusted closes for every ticker held since inception. Routed through
+    _fetch_closes, so the committed snapshot covers Yahoo outages."""
+    return _fetch_closes(list(tickers), start_date, end_date)
+
+
+def _price_frame_on(prices, dates):
+    """Prices aligned to the given dates, carrying the last close forward over
+    exchange holidays."""
+    if prices is None or prices.empty:
+        return pd.DataFrame(index=pd.DatetimeIndex(dates))
+    union = prices.index.union(pd.DatetimeIndex(dates))
+    return prices.reindex(union).sort_index().ffill().reindex(pd.DatetimeIndex(dates))
+
+
+# ===========================================================================
+# 1. MONTHLY RETURNS
+# ===========================================================================
+
+def build_monthly_returns_figure(ae_monthly, spx_monthly, open_period, last_date,
+                                 bench_label=PRIMARY_BENCHMARK):
+    """Calendar grid: one row per year, one cell per month, then the year's
+    compounded return and its difference from the primary benchmark (80/20)
+    in points. spx_monthly holds that benchmark's monthly returns. Month cells
+    show the percent value without the % sign so the grid fits 780 px."""
+    years = sorted({p.year for p in ae_monthly.index})
+    W = ANALYTICS_WIDTH
+    YEAR_W, TOT_W, VS_W, GAP = 46, 70, 80, 4
+    cell_w = (W - YEAR_W - TOT_W - VS_W - 14 * GAP) / 12
+    HEAD_H, ROW_H, ROW_GAP, LEG_H = 30, 48, 4, 50
+    top0 = HEAD_H + 8
+    H = int(top0 + len(years) * (ROW_H + ROW_GAP) + LEG_H)
+
+    def x_month(m):
+        return YEAR_W + GAP + (m - 1) * (cell_w + GAP)
+
+    x_tot = YEAR_W + 13 * GAP + 12 * cell_w
+    x_vs = x_tot + TOT_W + GAP
+
+    shapes, ann = [], []
+    hx, hy, htext = [], [], []
+
+    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+              "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    _px_text(ann, 0, HEAD_H / 2, "Year", size=12, color=TEXT_SECONDARY, bold=True)
+    for m, name in enumerate(months, start=1):
+        _px_text(ann, x_month(m) + cell_w / 2, HEAD_H / 2, name, anchor="center",
+                 size=12, color=TEXT_SECONDARY, bold=True)
+    _px_text(ann, x_tot + TOT_W / 2, HEAD_H / 2, "Year", anchor="center", size=12, bold=True)
+    _px_text(ann, x_vs + VS_W / 2, HEAD_H / 2, f"vs {bench_label}", anchor="center", size=12,
+             color=TEXT_SECONDARY, bold=True)
+    shapes.append(dict(type="line", x0=0, x1=W, y0=HEAD_H, y1=HEAD_H,
+                       line=dict(color=BRAND_PURPLE, width=2)))
+
+    for row, year in enumerate(years):
+        y0 = top0 + row * (ROW_H + ROW_GAP)
+        y1 = y0 + ROW_H
+        mid = (y0 + y1) / 2
+        _px_text(ann, 0, mid, str(year), size=14, bold=True)
+        ae_growth, spx_growth, spx_ok = 1.0, 1.0, True
+        for m in range(1, 13):
+            period = pd.Period(year=year, month=m, freq="M")
+            x0 = x_month(m)
+            x1 = x0 + cell_w
+            r = ae_monthly.get(period)
+            pct = None if r is None or not np.isfinite(r) else float(r) * 100.0
+            is_open = open_period is not None and period == open_period and pct is not None
+            shapes.append(dict(
+                type="path", path=_round_rect_path(x0, y0, x1, y1, 5),
+                fillcolor=_heat_fill(pct),
+                # Solid outline: dashes on a small rounded cell render as
+                # broken fragments, especially in the legend key.
+                line=dict(color=BRAND_PURPLE, width=2) if is_open else dict(width=0),
+                layer="below",
+            ))
+            if pct is None:
+                continue
+            ae_growth *= 1.0 + pct / 100.0
+            s_r = spx_monthly.get(period) if spx_monthly is not None else None
+            if s_r is None or not np.isfinite(s_r):
+                spx_ok = False
+            else:
+                spx_growth *= 1.0 + float(s_r)
+            cell_text = _fmt_pct(pct, suffix="")
+            if is_open:
+                _px_text(ann, (x0 + x1) / 2, mid - 7, cell_text, anchor="center",
+                         size=13, color=ANALYTICS_CELL_TEXT, bold=True)
+                _px_text(ann, (x0 + x1) / 2, mid + 12, "MTD", anchor="center",
+                         size=9, color=BRAND_PURPLE, bold=True)
+            else:
+                _px_text(ann, (x0 + x1) / 2, mid, cell_text, anchor="center",
+                         size=13, color=ANALYTICS_CELL_TEXT, bold=True)
+            label = period.strftime("%B %Y")
+            if is_open:
+                label += f" (month to date through {pd.Timestamp(last_date):%b} {pd.Timestamp(last_date).day})"
+            spx_txt = _fmt_pct(float(s_r) * 100.0, 2) if s_r is not None and np.isfinite(s_r) else "n/a"
+            hx.append((x0 + x1) / 2)
+            hy.append(mid)
+            htext.append(f"<b>{label}</b><br>Asymmetric Edge {_fmt_pct(pct, 2)}"
+                         f"<br>{bench_label} {spx_txt}")
+
+        year_pct = (ae_growth - 1.0) * 100.0
+        shapes.append(dict(type="path", path=_round_rect_path(x_tot, y0, x_tot + TOT_W, y1, 5),
+                           fillcolor=ANALYTICS_TINT, line=dict(width=0), layer="below"))
+        _px_text(ann, x_tot + TOT_W / 2, mid, _fmt_pct(year_pct), anchor="center",
+                 size=14, color=BRAND_PURPLE, bold=True)
+        if spx_ok:
+            diff = year_pct - (spx_growth - 1.0) * 100.0
+            _px_text(ann, x_vs + VS_W / 2, mid, _fmt_pct(diff, suffix=" pts"), anchor="center",
+                     size=13, color=GAIN_GREEN if diff >= 0 else LOSS_RED, bold=True)
+        else:
+            _px_text(ann, x_vs + VS_W / 2, mid, "n/a", anchor="center", size=13,
+                     color=TEXT_MUTED)
+
+    # Scale legend
+    ly = H - LEG_H / 2 + 4
+    _px_text(ann, 0, ly, "Scale", size=11, color=TEXT_SECONDARY)
+    chip_w, chip_h, chip_gap = 76, 24, 5
+    cx = 38
+    for lower, fill, label in reversed(HEAT_TIERS):
+        shapes.append(dict(type="path",
+                           path=_round_rect_path(cx, ly - chip_h / 2, cx + chip_w, ly + chip_h / 2, 5),
+                           fillcolor=fill, line=dict(width=0), layer="below"))
+        _px_text(ann, cx + chip_w / 2, ly, label, anchor="center", size=11, color=ANALYTICS_CELL_TEXT)
+        cx += chip_w + chip_gap
+    if open_period is not None:
+        # Key: a miniature of the open-month cell, purple outline with its tag.
+        mx = W - 124
+        shapes.append(dict(type="path",
+                           path=_round_rect_path(mx, ly - chip_h / 2, mx + 38, ly + chip_h / 2, 5),
+                           fillcolor="#ffffff",
+                           line=dict(color=BRAND_PURPLE, width=2)))
+        _px_text(ann, mx + 19, ly, "MTD", anchor="center", size=10, color=BRAND_PURPLE, bold=True)
+        _px_text(ann, mx + 46, ly, "Month to date", size=11, color=TEXT_SECONDARY)
+
+    fig = go.Figure()
+    if hx:
+        fig.add_trace(go.Scatter(
+            x=hx, y=hy, mode="markers",
+            marker=dict(size=int(min(cell_w, ROW_H)), color="rgba(0,0,0,0)", symbol="square"),
+            hovertext=htext, hovertemplate="%{hovertext}<extra></extra>",
+            showlegend=False,
+        ))
+    return _pixel_layout(fig, W, H, shapes, ann)
+
+
+def _asset_row_label(ticker):
+    """Emoji, asset name and ticker for row labels, e.g. '🏭  Active Commodities (HGER)'."""
+    info = ASSET_CATALOG.get(ticker)
+    if not info:
+        return ticker
+    return f"{info['emoji']}  {info['asset']} ({ticker})"
+
+
+def _nice_step(span):
+    """A tick step giving four to seven ticks across span."""
+    for step in (0.1, 0.2, 0.25, 0.5, 1.0, 2.0, 2.5, 5.0, 10.0):
+        if span / step <= 7:
+            return step
+    return 20.0
+
+
+def build_attribution_figure(result, is_open):
+    """One row per holding: emoji and name, average weight and return, then
+    a horizontal waterfall bar showing where its contribution starts and ends,
+    and the contribution in points. The month's total closes the table, so
+    every bar sits on the same line as its label and the rows add up to it."""
+    W = ANALYTICS_WIDTH
+    NAME_X = 0
+    WEIGHT_R = 300
+    RETURN_R = 372
+    BX0, BX1 = 396, 664          # bar area
+    VALUE_R = W - 2
+    HEAD_H, ROW_H, TOTAL_H = 34, 42, 46
+    BAR_H = 18
+    period = result["period"]
+    month_name = period.strftime("%B")
+
+    rows = []
+    level = 0.0
+    for r in result["rows"]:
+        c = r["contribution"] * 100.0
+        rows.append({"label": _asset_row_label(r["ticker"]), "weight": r["avg_weight"] * 100.0,
+                     "ret": None if r["return"] is None else r["return"] * 100.0,
+                     "start": level, "end": level + c, "value": c,
+                     "color": GAIN_GREEN if c >= 0 else LOSS_RED})
+        level += c
+    total = result["month_return"] * 100.0
+
+    levels = [0.0, total] + [r["start"] for r in rows] + [r["end"] for r in rows]
+    lo, hi = min(levels), max(levels)
+    span = (hi - lo) or 1.0
+    lo -= span * 0.06
+    hi += span * 0.06
+
+    def bx(v):
+        return BX0 + (v - lo) / (hi - lo) * (BX1 - BX0)
+
+    n = len(rows)
+    rows_bottom = HEAD_H + n * ROW_H + TOTAL_H
+    TICK_H = 24
+    H = rows_bottom + TICK_H + 50
+
+    shapes, ann = [], []
+    # Header
+    _px_text(ann, NAME_X, HEAD_H / 2, "Holding", size=13, bold=True)
+    _px_text(ann, WEIGHT_R, HEAD_H / 2, "Avg. weight", anchor="right", size=13, bold=True)
+    _px_text(ann, RETURN_R, HEAD_H / 2, "Return", anchor="right", size=13, bold=True)
+    _px_text(ann, BX0, HEAD_H / 2, "How the month adds up", size=13, bold=True)
+    _px_text(ann, VALUE_R, HEAD_H / 2, "Contribution", anchor="right", size=13, bold=True)
+    shapes.append(dict(type="line", x0=0, x1=W, y0=HEAD_H, y1=HEAD_H,
+                       line=dict(color=BRAND_PURPLE, width=2)))
+
+    # Gridlines and ticks across the bar area
+    step = _nice_step(hi - lo)
+    t = np.ceil(lo / step) * step
+    while t <= hi + 1e-9:
+        x = bx(t)
+        is_zero = abs(t) < 1e-9
+        shapes.append(dict(type="line", x0=x, x1=x, y0=HEAD_H, y1=rows_bottom,
+                           line=dict(color="#c9c9d3" if is_zero else GRID_COLOR, width=1),
+                           layer="below"))
+        tick = "0%" if is_zero else _fmt_pct(t, 2 if step < 0.5 else (1 if step < 1 else 0))
+        _px_text(ann, x, rows_bottom + TICK_H / 2 + 2, tick, anchor="center", size=11,
+                 color=TEXT_MUTED)
+        t += step
+
+    for i, r in enumerate(rows):
+        top = HEAD_H + i * ROW_H
+        mid = top + ROW_H / 2
+        if i:
+            shapes.append(dict(type="line", x0=0, x1=BX0 - 12, y0=top, y1=top,
+                               line=dict(color=ANALYTICS_RULE, width=1)))
+            shapes.append(dict(type="line", x0=BX1 + 12, x1=W, y0=top, y1=top,
+                               line=dict(color=ANALYTICS_RULE, width=1)))
+        _px_text(ann, NAME_X, mid, r["label"], size=14)
+        if r["weight"] is not None:
+            _px_text(ann, WEIGHT_R, mid, f"{r['weight']:.1f}%", anchor="right", size=13,
+                     color=TEXT_SECONDARY)
+        if r["ret"] is not None:
+            _px_text(ann, RETURN_R, mid, _fmt_pct(r["ret"], 2), anchor="right", size=13,
+                     color=TEXT_SECONDARY)
+        x0, x1 = sorted((bx(r["start"]), bx(r["end"])))
+        x1 = max(x1, x0 + 2)
+        shapes.append(dict(type="path", path=_round_rect_path(x0, mid - BAR_H / 2, x1, mid + BAR_H / 2, 4),
+                           fillcolor=r["color"], line=dict(width=0)))
+        # Connector from this bar's end down to the next row
+        nxt_top = top + ROW_H + (ROW_H - BAR_H) / 2
+        shapes.append(dict(type="line", x0=bx(r["end"]), x1=bx(r["end"]),
+                           y0=mid + BAR_H / 2, y1=nxt_top,
+                           line=dict(color="#9CA3AF", width=1, dash="dot")))
+        _px_text(ann, VALUE_R, mid, _fmt_pct(r["value"], 2), anchor="right", size=14,
+                 color=(TEXT_SECONDARY if r["color"] == "#9CA3AF" else r["color"]), bold=True)
+
+    # Total row
+    top = HEAD_H + n * ROW_H
+    mid = top + TOTAL_H / 2
+    shapes.append(dict(type="rect", x0=0, x1=W, y0=top, y1=top + TOTAL_H,
+                       fillcolor=ANALYTICS_TINT, line_width=0, layer="below"))
+    _px_text(ann, NAME_X + 8, mid, f"{month_name} return{' to date' if is_open else ''}",
+             size=14, color=BRAND_PURPLE, bold=True)
+    x0, x1 = sorted((bx(0.0), bx(total)))
+    x1 = max(x1, x0 + 2)
+    shapes.append(dict(type="path", path=_round_rect_path(x0, mid - BAR_H / 2, x1, mid + BAR_H / 2, 4),
+                       fillcolor=BAR_SERIES_COLORS["AsymEdge"], line=dict(width=0)))
+    _px_text(ann, VALUE_R, mid, _fmt_pct(total, 2), anchor="right", size=14,
+             color=BRAND_PURPLE, bold=True)
+
+    # One-line takeaway, generated from the numbers
+    holdings_sorted = sorted(result["rows"], key=lambda r: r["contribution"])
+    if holdings_sorted:
+        best, worst = holdings_sorted[-1], holdings_sorted[0]
+        parts = [f"{_asset_label(best['ticker'])} contributed the most "
+                 f"({_fmt_pct(best['contribution'] * 100, 2)})."]
+        if worst["contribution"] < 0 and worst is not best:
+            parts.append(f"{_asset_label(worst['ticker'])} was the largest drag "
+                         f"({_fmt_pct(worst['contribution'] * 100, 2)}).")
+        elif best["contribution"] >= 0:
+            parts.append("No holding detracted.")
+        wrapped = "<br>".join(textwrap.wrap(" ".join(parts), width=118))
+        _px_text(ann, 0, rows_bottom + TICK_H + 14, wrapped, size=13, valign="top")
+
+    return _pixel_layout(go.Figure(), W, int(H), shapes, ann)
+
+
+def build_rebalance_log_figure(rows_newest_first, stats):
+    W = ANALYTICS_WIDTH
+    TILE_H, TILE_GAP = 70, 12
+    HEAD_TOP = TILE_H + 22
+    HEAD_H = 32
+    cols = {"month": 0, "traded": 64, "added": 170, "exited": 318, "shifts": 466, "turn": W - 2}
+    LINE_H = 18
+
+    def row_height(r):
+        lines = max(len(r["added"]), len(r["exited"]), 1, (len(r["shifts"]) + 1) // 2)
+        return 16 + LINE_H * lines
+
+    H = HEAD_TOP + HEAD_H + sum(row_height(r) for r in rows_newest_first) + 6
+    shapes, ann = [], []
+
+    tile_w = (W - 2 * TILE_GAP) / 3
+    tiles = [
+        (f"{stats['avg_turnover']:.1f}%", "average monthly turnover"),
+        (f"{stats['new_months']} of {stats['n']}", "rebalances added a new holding"),
+        (f"{stats['avg_holdings']:.1f}", "holdings on average"),
+    ]
+    for i, (big, small) in enumerate(tiles):
+        x0 = i * (tile_w + TILE_GAP)
+        shapes.append(dict(type="path", path=_round_rect_path(x0, 0, x0 + tile_w, TILE_H, 10),
+                           fillcolor=ANALYTICS_TINT, line=dict(width=0), layer="below"))
+        _px_text(ann, x0 + 16, 27, big, size=22, color=BRAND_PURPLE, bold=True)
+        _px_text(ann, x0 + 16, 53, small, size=12)
+
+    hy = HEAD_TOP + HEAD_H / 2
+    for key, label in [("month", "Month"), ("traded", "Traded"), ("added", "Added"),
+                       ("exited", "Exited"), ("shifts", "Reweighted")]:
+        _px_text(ann, cols[key], hy, label, size=13, bold=True)
+    _px_text(ann, cols["turn"], hy, "Turnover", anchor="right", size=13, bold=True)
+    y = HEAD_TOP + HEAD_H
+    shapes.append(dict(type="line", x0=0, x1=W, y0=y, y1=y, line=dict(color=BRAND_PURPLE, width=2)))
+
+    def fmt_item(t, w, sign):
+        return f"{sign}{t} {w:.1f}%"
+
+    for r in rows_newest_first:
+        h = row_height(r)
+        top = y + 8
+        first = top + LINE_H / 2
+        _px_text(ann, cols["month"], first, r["period"].strftime("%b-%y"), size=14, bold=True)
+        _px_text(ann, cols["traded"], first, _long_date(r["date"]).replace(
+            r["date"].strftime("%B"), r["date"].strftime("%b")), size=12, color=TEXT_SECONDARY)
+        for key, items, sign, color in [("added", r["added"], "+", GAIN_GREEN),
+                                        ("exited", r["exited"], MINUS, LOSS_RED)]:
+            if items:
+                for j, (t, w) in enumerate(items):
+                    _px_text(ann, cols[key], top + LINE_H * j + LINE_H / 2,
+                             fmt_item(t, w, sign), size=12, color=color, bold=True)
+            else:
+                _px_text(ann, cols[key], first, "None", size=12, color=TEXT_MUTED)
+        if r["shifts"]:
+            items = [f"{t} {_fmt_pct(d, 1, suffix='')}" for t, d in r["shifts"]]
+            lines = [", ".join(items[i:i + 2]) for i in range(0, len(items), 2)]
+            for j, line in enumerate(lines):
+                _px_text(ann, cols["shifts"], top + LINE_H * j + LINE_H / 2, line, size=12,
+                         color=TEXT_SECONDARY)
+        else:
+            _px_text(ann, cols["shifts"], first, "None", size=12, color=TEXT_MUTED)
+        bar_x1 = cols["turn"] - 52
+        bar_x0 = bar_x1 - 56
+        shapes.append(dict(type="path", path=_round_rect_path(bar_x0, first - 4, bar_x1, first + 4, 4),
+                           fillcolor="#ECECF1", line=dict(width=0)))
+        fill_x1 = bar_x0 + 56 * min(r["turnover"], 100.0) / 100.0
+        if fill_x1 - bar_x0 >= 2:
+            shapes.append(dict(type="path", path=_round_rect_path(bar_x0, first - 4, fill_x1, first + 4, 4),
+                               fillcolor=BAR_SERIES_COLORS["AsymEdge"], line=dict(width=0)))
+        _px_text(ann, cols["turn"], first, f"{r['turnover']:.1f}%", anchor="right", size=12, bold=True)
+        y += h
+        shapes.append(dict(type="line", x0=0, x1=W, y0=y, y1=y,
+                           line=dict(color=ANALYTICS_RULE, width=1)))
+
+    return _pixel_layout(go.Figure(), W, int(H), shapes, ann)
+
+
+def build_capture_figure(captures, worst, bench_label=None):
+    """Capture tiles, sentence and table across the top; the benchmark's worst
+    months as grouped bars across the bottom. Built for 780 px."""
+    bench_label = bench_label or CAPTURE_BENCHMARK
+    # Running text says "the 80/20 portfolio"; tiles and headers keep the short name.
+    bench_noun = bench_label if bench_label == "S&P 500" else f"{bench_label} portfolio"
+    W, H = ANALYTICS_WIDTH, 560
+    shapes, ann = [], []
+    ae = captures.get("AsymEdge")
+
+    # Tiles, top left
+    tile_w, tile_gap = 172, 10
+    for i, (label, key, sub) in enumerate([
+        ("Upside capture", "up", f"of {bench_label} up months"),
+        ("Downside capture", "down", f"of {bench_label} down months"),
+    ]):
+        x0 = i * (tile_w + tile_gap)
+        shapes.append(dict(type="path", path=_round_rect_path(x0, 0, x0 + tile_w, 118, 10),
+                           fillcolor=ANALYTICS_TINT, line=dict(width=0), layer="below"))
+        _px_text(ann, x0 + 14, 24, label, size=13, bold=True)
+        value = ae[key] if ae else np.nan
+        _px_text(ann, x0 + 14, 64, f"{value:.0f}%" if np.isfinite(value) else "n/a",
+                 size=34, color=BRAND_PURPLE, bold=True)
+        _px_text(ann, x0 + 14, 100, sub.replace("&", "&amp;"), size=11, color=TEXT_SECONDARY)
+
+    if ae and np.isfinite(ae["up"]) and np.isfinite(ae["down"]):
+        sentence = (f"In months the {bench_noun} rose, the strategy captured about {ae['up']:.0f}% "
+                    f"of its gains. In months it fell, it took about {ae['down']:.0f}% of its losses.")
+        _px_text(ann, 0, 132, "<br>".join(textwrap.wrap(sentence, width=52)).replace("&", "&amp;"),
+                 size=13, valign="top")
+
+    # Capture table, top right
+    TX = 392
+    ty = 14
+    tcols = [(TX, f"vs {bench_label}", "left"), (TX + 236, "Up", "right"),
+             (TX + 312, "Down", "right"), (W - 2, "Ratio", "right")]
+    for x, label, anchor in tcols:
+        _px_text(ann, x, ty, label.replace("&", "&amp;"), anchor=anchor, size=13, bold=True)
+    shapes.append(dict(type="line", x0=TX, x1=W, y0=ty + 15, y1=ty + 15,
+                       line=dict(color=BRAND_PURPLE, width=2)))
+    y = ty + 15
+    for name in [n for n in ["AsymEdge", "80/20", "60/40", "S&P 500"] if n != bench_label]:
+        c = captures.get(name)
+        if not c:
+            continue
+        mid = y + 17
+        is_ae = name == "AsymEdge"
+        _px_text(ann, TX, mid, ("Asymmetric Edge" if is_ae else name).replace("&", "&amp;"), size=13,
+                 color=BRAND_PURPLE if is_ae else TEXT_SECONDARY, bold=is_ae)
+        for (x, _l, _a), key in zip(tcols[1:], ["up", "down", "ratio"]):
+            v = c[key]
+            text = ("n/a" if not np.isfinite(v) else (f"{v:.2f}" if key == "ratio" else f"{v:.0f}%"))
+            _px_text(ann, x, mid, text, anchor="right", size=13,
+                     color=TEXT_PRIMARY if is_ae else TEXT_SECONDARY, bold=is_ae)
+        y += 34
+        shapes.append(dict(type="line", x0=TX, x1=W, y0=y, y1=y,
+                           line=dict(color=ANALYTICS_RULE, width=1)))
+    if ae:
+        _px_text(ann, TX, y + 18,
+                 f"{ae['n']} months: {ae['n_up']} up and {ae['n_down']} down for the "
+                 f"{bench_noun.replace('&', '&amp;')}", size=11, color=TEXT_SECONDARY)
+
+    fig = go.Figure()
+    if worst is not None and not worst.empty:
+        bench_bar = BAR_SERIES_COLORS.get(bench_label, "#C5CAD3")
+        labels = [p.strftime("%b-%y") for p in worst.index]
+        fig.add_trace(go.Bar(
+            x=labels, y=worst["AsymEdge"] * 100.0, name="Asymmetric Edge",
+            marker=dict(color=BAR_SERIES_COLORS["AsymEdge"], cornerradius=5),
+            text=[_fmt_pct(v * 100.0) for v in worst["AsymEdge"]], textposition="outside",
+            textfont=dict(size=12, color=BRAND_PURPLE, family=ANALYTICS_FONT, weight=700),
+            cliponaxis=False, xaxis="x2", yaxis="y2",
+            hovertemplate="%{x}<br>Asymmetric Edge %{y:.2f}%<extra></extra>",
+        ))
+        fig.add_trace(go.Bar(
+            x=labels, y=worst["bench"] * 100.0, name=bench_label,
+            marker=dict(color=bench_bar, cornerradius=5),
+            text=[_fmt_pct(v * 100.0) for v in worst["bench"]], textposition="outside",
+            textfont=dict(size=11, color=TEXT_SECONDARY, family=ANALYTICS_FONT),
+            cliponaxis=False, xaxis="x2", yaxis="y2",
+            hovertemplate="%{x}<br>" + bench_label + " %{y:.2f}%<extra></extra>",
+        ))
+        low = float(min(worst["AsymEdge"].min(), worst["bench"].min()) * 100.0)
+        high = float(max(worst["AsymEdge"].max(), worst["bench"].max(), 0.0) * 100.0)
+        span = high - low
+        title = f"The {bench_noun}'s {len(worst)} worst months since inception"
+        _px_text(ann, 0, 236, title.replace("&", "&amp;"), size=14, bold=True)
+        lx = W - 230
+        for name, color in [("Asymmetric Edge", BAR_SERIES_COLORS["AsymEdge"]), (bench_label, bench_bar)]:
+            shapes.append(dict(type="path", path=_round_rect_path(lx, 230, lx + 12, 242, 3),
+                               fillcolor=color, line=dict(width=0)))
+            _px_text(ann, lx + 18, 236, name.replace("&", "&amp;"), size=12, color=TEXT_SECONDARY)
+            lx += 140
+        _pixel_layout(fig, W, H, shapes, ann)
+        fig.update_layout(
+            barmode="group", bargap=0.22, bargroupgap=0.04,
+            uniformtext=dict(mode="show", minsize=11),
+            xaxis2=dict(domain=[0.07, 1.0], anchor="y2", type="category",
+                        tickfont=dict(size=12, color=TEXT_PRIMARY, weight=600), fixedrange=True),
+            yaxis2=dict(domain=[0.05, 0.53], anchor="x2",
+                        range=[low - span * 0.16, high + span * 0.12 + 0.3],
+                        ticksuffix="%", gridcolor=GRID_COLOR, zeroline=True,
+                        zerolinecolor="#c9c9d3", tickfont=dict(size=12, color=TEXT_MUTED),
+                        fixedrange=True),
+        )
+    else:
+        _pixel_layout(fig, W, H, shapes, ann)
+    return fig
+
+
+def render_monthly_returns_section(combined, latest_date):
+    if "AsymEdge" not in combined.columns:
+        st.info("Monthly returns unavailable: the portfolio series did not load.")
+        return
+    inception = combined.index[0]
+    ae_m = _monthly_returns(combined["AsymEdge"], inception)
+    spx_m = (_monthly_returns(combined[PRIMARY_BENCHMARK], inception)
+             if PRIMARY_BENCHMARK in combined.columns else None)
+    open_p = _open_period(latest_date)
+    fig = build_monthly_returns_figure(ae_m, spx_m, open_p, latest_date)
+    st.plotly_chart(fig, use_container_width=False,
+                    config=chart_config("Monthly Returns", static=True))
+    open_note = ""
+    if open_p is not None:
+        through = f"{pd.Timestamp(latest_date):%B} {pd.Timestamp(latest_date).day}"
+        if _open_month_anchored(latest_date):
+            open_note = (
+                f"{open_p.strftime('%B %Y')} is month to date through {through}, tied to Fidelity's "
+                f"reported month-to-date return; it becomes final when the month closes. "
+            )
+        else:
+            open_note = (
+                f"{open_p.strftime('%B %Y')} is month to date through {through} and is estimated "
+                f"from the daily reconstruction until Fidelity's figure is entered. "
+            )
+    _footnote(
+        "Monthly time-weighted returns. Closed months are anchored to Fidelity's reported "
+        "returns for the account and tie exactly. " + open_note +
+        "The Year column compounds the months shown, so the current year is year to date. "
+        "vs 80/20 is the difference in percentage points from the 80/20 portfolio (AOA, total "
+        "return with dividends reinvested, Yahoo Finance) over the same months. January 2024 is "
+        "measured from the January 2, 2024 inception close. Hover a cell for both returns to two "
+        "decimals. All figures are before taxes, advisory fees, and transaction costs."
+    )
+
+
+# ===========================================================================
+# 2. WHAT DROVE THE MONTH (return attribution)
+# ===========================================================================
+
+def compute_month_attribution(period, ae_series, holdings_values, totals, prices):
+    """Each holding's contribution to one month's return.
+
+    Contribution is built day by day: a holding's weight at the prior close
+    (from the reconstructed holdings, so intramonth trades and deposits are
+    reflected) times its adjusted-close return that day, scaled by the
+    portfolio's growth so far in the month. Summed over the month, those daily
+    pieces add up to the month's return exactly for a portfolio whose daily
+    return is the weighted sum of its holdings. The remainder against the
+    published (Fidelity-anchored) month is reported as its own line rather than
+    spread across holdings: it is cash and money-market income, fees, intraday
+    trade timing, and the anchoring adjustment.
+    """
+    s = ae_series.dropna()
+    idx = s.index
+    in_month = idx[idx.to_period("M") == period]
+    if len(in_month) == 0:
+        return None
+    before = idx[idx < in_month[0]]
+    if len(before):
+        dates = [before[-1]] + list(in_month)
+    else:
+        dates = list(in_month)
+    if len(dates) < 2:
+        return None
+    dates = pd.DatetimeIndex(dates)
+
+    S = s.reindex(dates)
+    start_val = float(S.iloc[0])
+    month_return = float(S.iloc[-1]) / start_val - 1.0
+
+    # Refuse to attribute a window the price data does not reach. Carrying
+    # stale closes forward would book zero returns for the missing days and
+    # push the whole gap into the cash, fees and timing line.
+    if prices is None or prices.empty or prices.index.max() < dates[-1] - pd.Timedelta(days=4):
+        return {"period": period, "stale_prices": True,
+                "price_through": None if prices is None or prices.empty else prices.index.max()}
+
+    hv = holdings_values.reindex(dates).ffill().fillna(0.0)
+    if totals is not None and not totals.empty:
+        acct = totals["account_value"].reindex(dates).ffill()
+    else:
+        acct = hv.sum(axis=1)
+    px = _price_frame_on(prices, dates)
+
+    contrib, weight_sum, held_growth, unpriced = {}, {}, {}, set()
+    n_days = len(dates) - 1
+    for k in range(1, len(dates)):
+        d0, d1 = dates[k - 1], dates[k]
+        a0 = float(acct.loc[d0]) if pd.notna(acct.loc[d0]) else 0.0
+        if a0 <= 0:
+            continue
+        growth = float(S.loc[d0]) / start_val
+        row = hv.loc[d0]
+        for ticker, value in row.items():
+            if value <= 1.0 or ticker in CASH_LIKE_TICKERS:
+                continue
+            w = float(value) / a0
+            weight_sum[ticker] = weight_sum.get(ticker, 0.0) + w
+            p0 = px.at[d0, ticker] if ticker in px.columns else np.nan
+            p1 = px.at[d1, ticker] if ticker in px.columns else np.nan
+            if pd.notna(p0) and pd.notna(p1) and p0 > 0:
+                r_day = float(p1) / float(p0) - 1.0
+                contrib[ticker] = contrib.get(ticker, 0.0) + growth * w * r_day
+                held_growth[ticker] = held_growth.get(ticker, 1.0) * (1.0 + r_day)
+            else:
+                unpriced.add(ticker)
+
+    rows = []
+    for ticker, wsum in weight_sum.items():
+        avg_w = wsum / n_days
+        c = contrib.get(ticker)
+        if c is None:
+            continue
+        if avg_w < 0.005 and abs(c) < 0.0001:
+            continue
+        # The holding's own return over the days it was actually held this
+        # month, so a position bought mid-month is not credited with moves
+        # from before it was owned.
+        ret = held_growth[ticker] - 1.0 if ticker in held_growth else None
+        rows.append({"ticker": ticker, "avg_weight": avg_w, "return": ret, "contribution": c})
+    rows.sort(key=lambda r: -r["avg_weight"])
+    explained = sum(r["contribution"] for r in rows)
+    residual = month_return - explained
+    # Fold the small remainder (cash income, fees, timing and dividend-date
+    # differences against the reported return) into the holdings in proportion
+    # to their average weight, so the rows add up exactly to the reported month.
+    # Tyler, October 22, 2026: a separate residual bar invited questions it
+    # could not answer. The raw figures stay in the result for checking.
+    wsum = sum(r["avg_weight"] for r in rows)
+    for r in rows:
+        r["raw_contribution"] = r["contribution"]
+        if wsum > 0:
+            r["contribution"] = r["contribution"] + residual * r["avg_weight"] / wsum
+    return {
+        "period": period,
+        "start": dates[0],
+        "end": dates[-1],
+        "month_return": month_return,
+        "rows": rows,
+        "residual": residual,
+        "unpriced": sorted(unpriced),
+    }
+
+
+
+
+def render_attribution_section(portfolio_series, holdings_values, totals, prices, latest_date):
+    if holdings_values is None or holdings_values.empty:
+        st.info("Attribution needs holdings_daily_values.csv from the pipeline.")
+        return
+    s = portfolio_series.dropna()
+    inception = s.index[0]
+    last_hold = holdings_values.index.max()
+    open_p = _open_period(latest_date)
+    periods = sorted({p for p in s.index.to_period("M")
+                      if p.to_timestamp() <= last_hold and p >= inception.to_period("M")})
+    # Keep the months the holdings data fully covers (plus the open month).
+    usable = [p for p in periods
+              if p == open_p or (p.to_timestamp(how="end") <= last_hold + pd.Timedelta(days=4))]
+    if not usable:
+        st.info("No month has enough holdings data for an attribution yet.")
+        return
+    options = usable[-6:]
+    labels = [p.strftime("%b-%y") + (" (MTD)" if p == open_p else "") for p in options]
+    closed_labels = [lab for p, lab in zip(options, labels) if p != open_p]
+    default = closed_labels[-1] if closed_labels else labels[-1]
+    choice = st.pills("Select month", labels, default=default, selection_mode="single",
+                      key="attr_month")
+    if not choice:
+        choice = default
+    period = options[labels.index(choice)]
+    result = compute_month_attribution(period, s, holdings_values, totals, prices)
+    if result is not None and result.get("stale_prices"):
+        through = result["price_through"]
+        st.info(
+            f"Prices for {period.strftime('%B %Y')} are not available yet"
+            + (f" (they currently run through {_long_date(through)})" if through is not None else "")
+            + ". The attribution will appear once Yahoo Finance or the price snapshot covers the month."
+        )
+        return
+    if result is None or not result["rows"]:
+        st.info("Not enough data to attribute that month.")
+        return
+    is_open = period == open_p
+    st.plotly_chart(build_attribution_figure(result, is_open), use_container_width=False,
+                    config=chart_config(f"What Drove the Month {period.strftime('%b-%y')}", static=True),
+                    key=f"attr_fig_{period}")
+    if not is_open:
+        total_src = "Fidelity's reported return for the month"
+    elif _open_month_anchored(latest_date):
+        total_src = "Fidelity's reported month-to-date return"
+    else:
+        total_src = "estimated from the daily reconstruction, as the month is still open"
+    unpriced = ""
+    if result["unpriced"]:
+        unpriced = (" Holdings without a price history (" + ", ".join(result["unpriced"]) +
+                    ") are reconciled into the other holdings.")
+    _footnote(
+        f"{period.strftime('%B %Y')}, measured from the {_long_date(result['start'])} close to the "
+        f"{_long_date(result['end'])} close. Contribution, the share of the month's return each holding produced (in percentage points), is built day by day "
+        "from each holding's weight at the prior close (actual reconstructed holdings, so intramonth "
+        "trades and deposits are reflected) times its adjusted-close return, compounded through the "
+        f"month. Avg. weight is the average of those daily weights, and Return is the holding's own adjusted-close return over the days it was held. The total is {total_src}. "
+        "Contributions are reconciled to that total: the small difference between the sum of the "
+        "funds' price moves and the account's reported return (cash income, fees, and timing "
+        "differences) is spread across the holdings in proportion to their weight." + unpriced
+    )
+
+
+# ===========================================================================
+# 3. REBALANCE LOG
+# ===========================================================================
+
+def _weights_at(hv, totals, date):
+    """Weights (percent) at a date's close, with uninvested cash and
+    money-market balances grouped as 'Cash'."""
+    row = hv.loc[date]
+    values = {t: float(v) for t, v in row.items() if v > 1.0 and t not in CASH_LIKE_TICKERS}
+    cash = float(sum(row.get(t, 0.0) for t in CASH_LIKE_TICKERS if t in row.index))
+    if totals is not None and date in totals.index:
+        cash += max(float(totals.at[date, "cash"]), 0.0)
+    total = sum(values.values()) + cash
+    if total <= 0:
+        return {}
+    w = {t: v / total * 100.0 for t, v in values.items()}
+    if cash > 0:
+        w["Cash"] = cash / total * 100.0
+    return w
+
+
+def compute_rebalance_log(holdings_values, totals, prices):
+    """One row per month-end rebalance since inception, oldest first.
+
+    After-trade weights are the rebalance day's closing holdings (or the
+    intended basket where ALLOC_HISTORY_EXECUTION_CORRECTIONS or an active
+    month-start override applies, matching the allocation chart). Before-trade
+    weights are the prior close's holdings drifted by the rebalance day's
+    price moves.
+    """
+    if holdings_values is None or holdings_values.empty:
+        return []
+    hv = holdings_values.fillna(0.0).sort_index()
+    inception = pd.Timestamp(ALLOC_HISTORY_START)
+    rebalances = sorted(d for d in find_rebalance_dates(hv) if d > inception)
+    override = load_month_start_override()
+    override_date = override["period_start_date"] if override else ""
+    px = _price_frame_on(prices, hv.index) if prices is not None else pd.DataFrame()
+
+    rows = []
+    for date in rebalances:
+        pos = hv.index.get_loc(date)
+        if pos == 0:
+            continue
+        prev = hv.index[pos - 1]
+        before = _weights_at(hv, totals, prev)
+        # Drift the prior close forward by the rebalance day's moves.
+        drifted = {}
+        for t, w in before.items():
+            factor = 1.0
+            if t != "Cash" and t in px.columns:
+                p0, p1 = px.at[prev, t], px.at[date, t]
+                if pd.notna(p0) and pd.notna(p1) and p0 > 0:
+                    factor = float(p1) / float(p0)
+            drifted[t] = w * factor
+        dsum = sum(drifted.values())
+        before = {t: v / dsum * 100.0 for t, v in drifted.items()} if dsum > 0 else before
+
+        key = date.strftime("%Y-%m-%d")
+        correction = ALLOC_HISTORY_EXECUTION_CORRECTIONS.get(key)
+        if correction is None and override and key == override_date:
+            correction = override["weights"]
+        if correction:
+            csum = sum(float(v) for v in correction.values())
+            after = {t: float(v) / csum * 100.0 for t, v in correction.items()}
+        else:
+            after = _weights_at(hv, totals, date)
+        if not after:
+            continue
+
+        def held(weights, t):
+            threshold = 2.0 if t == "Cash" else 0.5
+            return weights.get(t, 0.0) >= threshold
+
+        names = set(before) | set(after)
+        added = sorted((t for t in names if held(after, t) and not held(before, t)),
+                       key=lambda t: -after[t])
+        exited = sorted((t for t in names if held(before, t) and not held(after, t)),
+                        key=lambda t: -before[t])
+        continuing = [t for t in names if t != "Cash" and held(before, t) and held(after, t)]
+        shifts = sorted(((t, after[t] - before[t]) for t in continuing
+                         if abs(after[t] - before[t]) >= 0.5), key=lambda x: -abs(x[1]))[:3]
+        turnover = 0.5 * sum(abs(after.get(t, 0.0) - before.get(t, 0.0)) for t in names)
+        rows.append({
+            "date": date,
+            "period": (date.to_period("M") + 1),
+            "added": [(t, after[t]) for t in added],
+            "exited": [(t, before[t]) for t in exited],
+            "shifts": shifts,
+            "turnover": turnover,
+            "n_holdings": sum(1 for t in after if t != "Cash" and after[t] >= 0.5),
+            "new_holding": any(t != "Cash" for t in added),
+        })
+    return rows
+
+
+
+
+def render_rebalance_log_section(holdings_values, totals, prices):
+    rows = compute_rebalance_log(holdings_values, totals, prices)
+    if not rows:
+        st.info("No month-end rebalance found in the holdings history yet.")
+        return
+    view = st.pills("Show", ["Last 12 months", "Since inception"], default="Last 12 months",
+                    selection_mode="single", key="rebal_view")
+    if not view:
+        view = "Last 12 months"
+    shown = rows[-12:] if view == "Last 12 months" else rows
+    # The tiles describe the rows on screen, so they follow the pills.
+    stats = {
+        "avg_turnover": float(np.mean([r["turnover"] for r in shown])),
+        "new_months": sum(1 for r in shown if r["new_holding"]),
+        "n": len(shown),
+        "avg_holdings": float(np.mean([r["n_holdings"] for r in shown])),
+    }
+    fig = build_rebalance_log_figure(list(reversed(shown)), stats)
+    st.plotly_chart(fig, use_container_width=False,
+                    config=chart_config(f"Rebalance Log {view}", static=True),
+                    # A key per view makes the browser draw a fresh chart when the
+                    # pills change; with one shared identity the old figure stayed up.
+                    key=f"rebal_fig_{view}")
+    _footnote(
+        "Each row is the month the new allocation applies to; its trades are placed on the prior "
+        "month's final trading day (Traded). After-trade weights come from that day's closing "
+        "holdings; before-trade weights are the prior close drifted by the rebalance day's price "
+        "moves. Added and Exited list positions crossing 0.5% of the portfolio, with uninvested cash "
+        "and money-market balances grouped as Cash and listed at 2% or more. Reweighted shows the "
+        "largest changes, in percentage points, among continuing holdings. Turnover is one-way: the "
+        f"share of the portfolio bought, which equals the share sold. The tiles cover the {len(shown)} "
+        f"month-end rebalances shown ({'the last 12 months' if view == 'Last 12 months' else 'since inception'}). Computed from the reconstructed holdings, so the log "
+        "refreshes whenever the pipeline does."
+    )
+
+
+# ===========================================================================
+# 4. DRAWDOWNS OVER TIME
+# ===========================================================================
+
+def find_drawdown_episodes(series):
+    """Every peak-to-recovery decline in a daily series, deepest first."""
+    s = series.dropna()
+    if len(s) < 2:
+        return []
+    dd = s / s.cummax() - 1.0
+    idx, vals = s.index, dd.values
+    episodes, cur = [], None
+    for i in range(len(s)):
+        v = vals[i]
+        if v < -1e-9:
+            if cur is None:
+                cur = {"peak": idx[i - 1] if i > 0 else idx[i], "trough": idx[i], "depth": float(v)}
+            elif v < cur["depth"]:
+                cur["trough"], cur["depth"] = idx[i], float(v)
+        elif cur is not None:
+            cur["recovered"] = idx[i]
+            episodes.append(cur)
+            cur = None
+    if cur is not None:
+        cur["recovered"] = None
+        episodes.append(cur)
+    return sorted(episodes, key=lambda e: e["depth"])
+
+
+# --- Drawdowns Over Time (October 22, 2026 redesign; mockup variation 9) ----------
+# Asymmetric Edge is a standard-weight purple line over a fill that deepens with
+# depth. Benchmarks are dashed lines in their usual colors, except the S&P 500,
+# which is drawn in a darker slate on this chart only so its declines carry
+# visual weight. "Rank by" picks whose five deepest episodes are numbered on the
+# chart and listed in the table; "Show" picks which portfolios are drawn and
+# compared; "Period" picks the start and end month. Drawdowns restart at the
+# period start: every line measures from its own highest close inside the period.
+DD_KEYS = ["AsymEdge", "80/20", "60/40", "S&P 500"]
+DD_LINE = {"AsymEdge": BRAND_PURPLE, "80/20": "#4361EE", "60/40": "#4CC9F0", "S&P 500": "#6B7280"}
+DD_DASH = {"80/20": "7px,4px", "60/40": "3px,4px", "S&P 500": "11px,4px,3px,4px"}
+DD_WIDTH = {"AsymEdge": 2.4, "80/20": 2.0, "60/40": 2.6, "S&P 500": 2.0}
+DD_TEXT = {"AsymEdge": BRAND_PURPLE, "80/20": "#3451D1", "60/40": "#0B7AA3", "S&P 500": "#4B5563"}
+DD_DEFAULT_SHOW = ["AsymEdge", "S&P 500"]
+DD_LEGEND_PAD = "\u2003\u2003"   # breathing room between legend entries
+DD_DAILY_MAX_SESSIONS = 130     # periods this short plot every close instead of weekly lows
+DD_COUNT_WORDS = ["No", "The deepest", "Two deepest", "Three deepest", "Four deepest", "Five deepest"]
+DD_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August",
+             "September", "October", "November", "December"]
+
+
+def _dd_text_width(text, size, bold=False):
+    """Approximate DM Sans width in px, used only to size table columns."""
+    w = 0.0
+    for ch in str(text):
+        if ch.isdigit():
+            w += 0.6
+        elif ch in ".,' ":
+            w += 0.27
+        elif ch == "%":
+            w += 0.84
+        elif ch in (MINUS, "+", "-"):
+            w += 0.6
+        elif ch == "/":
+            w += 0.4
+        elif ch == "&":
+            w += 0.68
+        elif ch != ch.lower():
+            w += 0.68
+        else:
+            w += 0.53
+    return w * size * (1.06 if bold else 1.0)
+
+
+def _dd_short_date(d):
+    d = pd.Timestamp(d)
+    return f"{d:%b} {d.day}, {d.year}"
+
+
+def _dd_window_drawdown(series):
+    s = series.dropna()
+    return (s / s.cummax() - 1.0) * 100.0
+
+
+def build_underwater_chart(window, shown, rank, episodes):
+    """Underwater chart for the selected period. window: daily values (columns
+    in DD_KEYS), already cut to the period. episodes: the ranked portfolio's
+    deepest episodes inside the period, deepest first."""
+    start, end = window.index[0], window.index[-1]
+    daily = len(window) <= DD_DAILY_MAX_SESSIONS
+    if daily:
+        bucket = pd.Series(np.arange(len(window)), index=window.index)
+    else:
+        bucket = pd.Series(window.index.to_period("W-FRI").astype(str), index=window.index)
+    bucket_last = window.index.to_series().groupby(bucket.values).max()
+
+    curves, worst = {}, {}
+    for k in shown:
+        dd = _dd_window_drawdown(window[k])
+        lows = dd.groupby(bucket.reindex(dd.index).values).min()
+        x = [start] + list(bucket_last.reindex(lows.index).values)
+        y = [0.0] + list(lows.values)
+        curves[k] = (x, y)
+        t = dd.idxmin()
+        worst[k] = (float(dd.min()), t, pd.Timestamp(bucket_last[bucket[t]]))
+
+    lo = min([v for v, _t, _x in worst.values()] + [0.0])
+    step = 0.5 if lo > -3 else 1 if lo > -6 else 2 if lo > -12 else 4 if lo > -24 else 5
+    ymin = min(-2 * step, np.floor((lo - 0.55 * step) / step) * step)
+
+    fig = go.Figure()
+    # Benchmarks first so Asymmetric Edge draws on top.
+    for k in ["S&P 500", "60/40", "80/20"]:
+        if k not in curves:
+            continue
+        x, y = curves[k]
+        fig.add_trace(go.Scatter(
+            x=x, y=y, mode="lines", name=series_label(k) + DD_LEGEND_PAD, legendrank=DD_KEYS.index(k) + 1,
+            line=dict(color=DD_LINE[k], width=DD_WIDTH[k], dash=DD_DASH[k]),
+            hovertemplate=series_label(k).replace("&", "&amp;") + ": %{y:.1f}%<extra></extra>",
+        ))
+    if "AsymEdge" in curves:
+        x, y = curves["AsymEdge"]
+        fig.add_trace(go.Scatter(
+            x=x, y=y, mode="lines", name="Asymmetric Edge" + DD_LEGEND_PAD, legendrank=1,
+            line=dict(color=DD_LINE["AsymEdge"], width=DD_WIDTH["AsymEdge"]),
+            fill="tozeroy",
+            # Shading deepens with depth: lightest at 0%, darkest at the low point.
+            fillgradient=dict(type="vertical",
+                              colorscale=[[0.0, "rgba(58,12,163,0.26)"], [1.0, "rgba(58,12,163,0.04)"]]),
+            hovertemplate="Asymmetric Edge: %{y:.1f}%<extra></extra>",
+        ))
+
+    # Each portfolio's worst point: a ringed dot and its depth and date.
+    HEIGHT, M_T, M_B = 470, 44, 84
+    plot_h = HEIGHT - M_T - M_B
+    span = max(1.0, (end - start).total_seconds())
+    labels = []
+    for k, (v, t, xb) in worst.items():
+        if v > -0.05:
+            continue
+        fig.add_trace(go.Scatter(
+            x=[xb], y=[v], mode="markers", showlegend=False, hoverinfo="skip",
+            marker=dict(size=11, color=DD_LINE[k], line=dict(color="#ffffff", width=2)),
+        ))
+        frac = (xb - start).total_seconds() / span
+        labels.append(dict(k=k, v=v, x=xb, frac=frac, py=v / ymin * plot_h, date=_dd_short_date(t)))
+    labels.sort(key=lambda d: d["py"])
+    for i in range(1, len(labels)):
+        prev, cur = labels[i - 1], labels[i]
+        if abs(cur["frac"] - prev["frac"]) < 0.09 and cur["py"] - prev["py"] < 30:
+            cur["py"] = prev["py"] + 30
+    annotations = []
+    for d in labels:
+        right = d["frac"] > 0.86
+        annotations.append(dict(
+            x=d["x"], y=d["v"], xref="x", yref="y", showarrow=False,
+            xanchor="right" if right else "left", xshift=-10 if right else 10,
+            yanchor="middle", yshift=-(d["py"] - d["v"] / ymin * plot_h),
+            align="right" if right else "left",
+            text=(f"<b>{_fmt_pct(d['v'])}</b><br>"
+                  f"<span style='font-size:11px;color:{TEXT_MUTED}'>{d['date']}</span>"),
+            font=dict(size=13, color=DD_TEXT[d["k"]], family=ANALYTICS_FONT),
+        ))
+
+    # The ranked portfolio's episodes: soft bands with a numbered badge above.
+    shapes = []
+    for i, e in enumerate(episodes):
+        x0 = pd.Timestamp(e["peak"])
+        x1 = pd.Timestamp(e["recovered"]) if e["recovered"] is not None else end
+        shapes.append(dict(type="rect", xref="x", yref="paper", x0=x0, x1=x1, y0=0, y1=1,
+                           fillcolor="rgba(40,36,70,0.045)", line=dict(width=0), layer="below"))
+        mid = x0 + (x1 - x0) / 2
+        shapes.append(dict(type="circle", xref="x", yref="paper", xsizemode="pixel", ysizemode="pixel",
+                           xanchor=mid, yanchor=1, x0=-10, x1=10, y0=8, y1=28,
+                           fillcolor="#F3F3F6", line=dict(color="#D5D6DD", width=1)))
+        annotations.append(dict(x=mid, y=1, xref="x", yref="paper", yshift=18, yanchor="middle", showarrow=False,
+                                text=f"<b>{i + 1}</b>", font=dict(size=11, color=TEXT_PRIMARY,
+                                                                 family=ANALYTICS_FONT)))
+
+    tick_dates, tick_labels = make_x_axis_labels(start, end)
+    fig.update_layout(
+        **DARK_LAYOUT,
+        height=HEIGHT,
+        margin=dict(t=M_T, b=M_B, l=60, r=30),
+        yaxis=dict(ticksuffix="%", dtick=step, range=[ymin, step * 0.08], gridcolor="#EDEDF1",
+                   zeroline=True, zerolinecolor="#C9C9D3", tickfont=dict(size=16, color=TEXT_MUTED),
+                   fixedrange=True),
+        xaxis=dict(tickmode="array", tickvals=tick_dates, ticktext=tick_labels,
+                   gridcolor="rgba(0,0,0,0)", tickfont=dict(size=16, color=TEXT_MUTED), ticklabelstandoff=10,
+                   range=[start - timedelta(days=2), end + timedelta(days=2)],
+                   hoverformat="%B %-d, %Y" if daily else "Week ending %b %-d, %Y"),
+        legend=dict(orientation="h", yanchor="top", y=-0.13, xanchor="center", x=0.5,
+                    font=dict(size=16, color=TEXT_SECONDARY, weight=500)),
+        hovermode="x unified",
+        hoverlabel=dict(font=dict(family=ANALYTICS_FONT, size=13)),
+        shapes=shapes,
+        annotations=annotations,
+    )
+    return fig
+
+
+def build_drawdown_rank_table(rows, rank, compare):
+    """Deepest-episode table. rows: dicts with rank, depth, peak, trough,
+    recovered, duration (display strings) plus compare values keyed by series.
+    Columns are sized to their content and the spare width is shared evenly
+    between them, so no column drifts away from its neighbors. Comparison
+    columns are shaded and centered."""
+    W = ANALYTICS_WIDTH
+    HEAD_H, ROW_H = 40, 38
+    cols = [
+        dict(key="rank", head="Rank", align="left"),
+        dict(key="depth", head="Depth", align="right", size=14, bold=True),
+        dict(key="peak", head="Peak", align="left"),
+        dict(key="trough", head="Low point", align="left"),
+        dict(key="recovered", head="Recovered", align="left"),
+        dict(key="duration", head="Duration", align="right"),
+    ] + [dict(key=k, head=series_label(k), align="center", same=True) for k in compare]
+    for c in cols:
+        w = _dd_text_width(c["head"], 12 if c.get("same") else 13, True)
+        for r in rows:
+            bold = c.get("bold") or (c.get("same") and c["key"] == "AsymEdge") or \
+                (c["key"] == "recovered" and r.get("open"))
+            w = max(w, 20 if c["key"] == "rank" else _dd_text_width(r[c["key"]], c.get("size", 13), bold))
+        c["w"] = np.ceil(w) + 2 + (16 if c.get("same") else 0)
+    used = 16 + sum(c["w"] for c in cols)
+    gap = max(12.0, min(44.0, (W - used) / max(1, len(cols) - 1)))
+    x = 0.0
+    for i, c in enumerate(cols):
+        c["x0"] = x
+        x += c["w"] + (gap if i else 8)
+        c["x1"] = x
+    H = HEAD_H + ROW_H * len(rows) + 4
+    shapes, ann = [], []
+    shapes.append(dict(type="rect", x0=0, x1=W, y0=0, y1=HEAD_H, fillcolor=ANALYTICS_HEADER_BG,
+                       line_width=0, layer="below"))
+    for c in cols:
+        if c.get("same"):
+            shapes.append(dict(type="rect", x0=c["x1"] - c["w"], x1=c["x1"], y0=0, y1=HEAD_H,
+                               fillcolor="#F0EEF7", line_width=0, layer="below"))
+            shapes.append(dict(type="rect", x0=c["x1"] - c["w"], x1=c["x1"], y0=HEAD_H, y1=H - 4,
+                               fillcolor="#F8F7FC", line_width=0, layer="below"))
+
+    def place(c):
+        if c["align"] == "right":
+            return c["x1"], "right"
+        if c["align"] == "center":
+            return c["x1"] - c["w"] / 2, "center"
+        return c["x1"] - c["w"], "left"
+
+    for c in cols:
+        px, anchor = place(c)
+        _px_text(ann, px, HEAD_H / 2, c["head"].replace("&", "&amp;"), anchor=anchor,
+                 size=12 if c.get("same") else 13, bold=True,
+                 color=DD_TEXT.get(c["key"], TEXT_PRIMARY) if c.get("same") else TEXT_PRIMARY)
+    shapes.append(dict(type="line", x0=0, x1=W, y0=HEAD_H, y1=HEAD_H,
+                       line=dict(color=BRAND_PURPLE, width=2)))
+    for i, r in enumerate(rows):
+        top = HEAD_H + i * ROW_H
+        mid = top + ROW_H / 2
+        shapes.append(dict(type="line", x0=0, x1=W, y0=top + ROW_H, y1=top + ROW_H,
+                           line=dict(color=ANALYTICS_RULE, width=1)))
+        for c in cols:
+            px, anchor = place(c)
+            if c["key"] == "rank":
+                shapes.append(dict(type="circle", x0=px, x1=px + 20, y0=mid - 10, y1=mid + 10,
+                                   fillcolor="#F3F3F6", line=dict(color="#D5D6DD", width=1)))
+                _px_text(ann, px + 10, mid, r["rank"], anchor="center", size=11, bold=True)
+                continue
+            color, bold, size = TEXT_SECONDARY, False, 13
+            if c["key"] == "depth":
+                color, bold, size = DD_TEXT[rank], True, 14
+            elif c["key"] == "recovered" and r.get("open"):
+                color, bold = TEXT_PRIMARY, True
+            elif c.get("same"):
+                color = BRAND_PURPLE if c["key"] == "AsymEdge" else TEXT_PRIMARY
+                bold = c["key"] == "AsymEdge"
+            _px_text(ann, px, mid, r[c["key"]], anchor=anchor, size=size, color=color, bold=bold)
+    return _pixel_layout(go.Figure(), W, int(H), shapes, ann)
+
+
+def _dd_month_index(ts):
+    ts = pd.Timestamp(ts)
+    return ts.year * 12 + ts.month - 1
+
+
+def _dd_clamp_period(which):
+    """Keep the start month on or before the end month. Moving one past the
+    other pulls the other along. Months outside the data are allowed in the
+    pickers; the chart simply stops at the first or last available day."""
+    def mi(prefix):
+        return int(st.session_state[f"{prefix}_y"]) * 12 + DD_MONTHS.index(st.session_state[f"{prefix}_m"])
+    def put(prefix, v):
+        st.session_state[f"{prefix}_y"] = v // 12
+        st.session_state[f"{prefix}_m"] = DD_MONTHS[v % 12]
+    f, t = mi("dd_from"), mi("dd_to")
+    if f > t:
+        if which == "from":
+            put("dd_to", f)
+        else:
+            put("dd_from", t)
+
+
+def _dd_reset_period():
+    lo, hi = st.session_state.get("dd_bounds", (None, None))
+    if lo is None:
+        return
+    st.session_state["dd_from_y"], st.session_state["dd_from_m"] = lo // 12, DD_MONTHS[lo % 12]
+    st.session_state["dd_to_y"], st.session_state["dd_to_m"] = hi // 12, DD_MONTHS[hi % 12]
+
+
+def _dd_rank_changed():
+    rank = st.session_state.get("dd_rank")
+    show = list(st.session_state.get("dd_show") or [])
+    if rank and rank not in show:
+        st.session_state["dd_show"] = show + [rank]
+
+
+def render_underwater_section(combined, latest_date):
+    if "AsymEdge" not in combined.columns:
+        st.info("Drawdowns unavailable: the portfolio series did not load.")
+        return
+    keys = [k for k in DD_KEYS if k in combined.columns]
+    label_of = {k: series_label(k) for k in keys}
+    key_of = {v: k for k, v in label_of.items()}
+    data = combined[keys].sort_index()
+    data = data[data.index <= pd.Timestamp(latest_date)].ffill()
+    lo_mi, hi_mi = _dd_month_index(data.index[0]), _dd_month_index(data.index[-1])
+
+    ss = st.session_state
+    ss["dd_bounds"] = (lo_mi, hi_mi)
+    ss.setdefault("dd_rank", label_of["AsymEdge"])
+    ss.setdefault("dd_show", [label_of[k] for k in DD_DEFAULT_SHOW if k in label_of])
+    ss.setdefault("dd_from_y", lo_mi // 12)
+    ss.setdefault("dd_from_m", DD_MONTHS[lo_mi % 12])
+    ss.setdefault("dd_to_y", hi_mi // 12)
+    ss.setdefault("dd_to_m", DD_MONTHS[hi_mi % 12])
+
+    st.pills("Rank by", [label_of[k] for k in keys], selection_mode="single", key="dd_rank",
+             on_change=_dd_rank_changed)
+    st.pills("Show", [label_of[k] for k in keys], selection_mode="multi", key="dd_show")
+    years = list(range(lo_mi // 12, hi_mi // 12 + 1))
+    c1, c2, c3, c4, c5 = st.columns([1.25, 0.9, 1.25, 0.9, 1.1], vertical_alignment="bottom")
+    c1.selectbox("From", DD_MONTHS, key="dd_from_m", on_change=_dd_clamp_period, args=("from",))
+    c2.selectbox("From year", years, key="dd_from_y", on_change=_dd_clamp_period, args=("from",),
+                 label_visibility="hidden")
+    c3.selectbox("To", DD_MONTHS, key="dd_to_m", on_change=_dd_clamp_period, args=("to",))
+    c4.selectbox("To year", years, key="dd_to_y", on_change=_dd_clamp_period, args=("to",),
+                 label_visibility="hidden")
+    c5.button("Since inception", key="dd_reset", on_click=_dd_reset_period)
+
+    rank = key_of.get(ss.get("dd_rank")) or "AsymEdge"
+    picked = {key_of[v] for v in (ss.get("dd_show") or []) if v in key_of}
+    shown = [k for k in DD_KEYS if k in keys and (k == rank or k in picked)]
+    compare = [k for k in shown if k != rank]
+
+    f_mi = int(ss["dd_from_y"]) * 12 + DD_MONTHS.index(ss["dd_from_m"])
+    t_mi = int(ss["dd_to_y"]) * 12 + DD_MONTHS.index(ss["dd_to_m"])
+    f_mi, t_mi = max(lo_mi, min(hi_mi, f_mi)), max(lo_mi, min(hi_mi, t_mi))
+    months = data.index.year * 12 + data.index.month - 1
+    window = data[(months >= f_mi) & (months <= t_mi)]
+    if len(window) < 2:
+        st.info("Pick a period with at least two trading days.")
+        return
+    full = f_mi == lo_mi and t_mi == hi_mi
+    w_start, w_end = window.index[0], window.index[-1]
+    at_latest = w_end == data.index[-1]
+
+    episodes = find_drawdown_episodes(window[rank])[:5]
+    fig = build_underwater_chart(window, shown, rank, episodes)
+    tag = f"{rank}_{'-'.join(shown)}_{w_start:%Y%m}_{w_end:%Y%m}".replace("/", "").replace(" ", "")
+    st.plotly_chart(fig, use_container_width=True, config=chart_config("Drawdowns Over Time"),
+                    key=f"dd_fig_{tag}")
+
+    rows = []
+    for i, e in enumerate(episodes):
+        end = e["recovered"] if e["recovered"] is not None else w_end
+        days = (pd.Timestamp(end) - pd.Timestamp(e["peak"])).days
+        row = dict(rank=str(i + 1), depth=_fmt_pct(e["depth"] * 100.0),
+                   peak=_dd_short_date(e["peak"]), trough=_dd_short_date(e["trough"]),
+                   recovered=(_dd_short_date(e["recovered"]) if e["recovered"] is not None
+                              else ("Ongoing" if at_latest else "After period")),
+                   duration=f"{days}{'' if e['recovered'] is not None else '+'} days",
+                   open=e["recovered"] is None)
+        for k in compare:
+            row[k] = _fmt_pct(compute_max_drawdown(window[k], e["peak"], end))
+        rows.append(row)
+
+    if rows:
+        title = f"{DD_COUNT_WORDS[len(rows)]} {label_of[rank]} drawdowns"
+        if not full:
+            title += f", {w_start:%b %Y} to {w_end:%b %Y}"
+        the = {"AsymEdge": "Asymmetric Edge", "80/20": "the 80/20 portfolio",
+               "60/40": "the 60/40 portfolio", "S&P 500": "the S&amp;P 500"}
+        note = ""
+        if len(compare) == 1:
+            note = (f"The shaded column shows how far {the[compare[0]]} fell between the same "
+                    "peak and recovery dates.")
+        elif compare:
+            note = ("The shaded columns show how far each of the other portfolios fell between "
+                    "the same peak and recovery dates.")
+        st.markdown(
+            f'<p style="font-size:1.0rem; font-weight:700; color:{TEXT_PRIMARY}; '
+            f'margin:0.6rem 0 0.1rem 0;">{title.replace("&", "&amp;")}</p>'
+            + (f'<p style="font-size:0.8rem; color:{TEXT_SECONDARY}; margin:0 0 0.4rem 0;">{note}</p>'
+               if note else ""),
+            unsafe_allow_html=True,
+        )
+        st.plotly_chart(build_drawdown_rank_table(rows, rank, compare), use_container_width=False,
+                        config=chart_config("Deepest Drawdowns", static=True), key=f"dd_tbl_{tag}")
+
+    period = (f"from the {_long_date(w_start)} inception" if full else f"from {_long_date(w_start)}")
+    sample = ("Lines plot every daily close." if len(window) <= DD_DAILY_MAX_SESSIONS else
+              "Lines plot the lowest close of each week, so every trough is shown at its full depth.")
+    _footnote(
+        "Drawdown is the percentage decline from each portfolio's highest close within the selected "
+        f"period, {period} through {_long_date(w_end)}, so every line starts at 0%. {sample} The "
+        "numbered bands are the episodes in the table, ranked by the portfolio chosen above. Duration "
+        "counts calendar days from the peak to the first close back at or above it. A shaded column is "
+        "that portfolio's own largest decline between the ranked portfolio's peak and recovery dates. "
+        "Asymmetric Edge daily values come from a close-only reconstruction anchored to Fidelity's "
+        "monthly time-weighted returns, so within-month depths are approximations. 80/20 (AOA), "
+        "60/40 (AOR) and S&amp;P 500 (SPY) are total returns from Yahoo Finance, dividends reinvested."
+    )
+
+
+# ===========================================================================
+# 5. THE ASYMMETRY (upside / downside capture)
+# ===========================================================================
+
+def _annualized_geo(returns):
+    r = np.asarray(returns, dtype="float64")
+    if len(r) == 0:
+        return np.nan
+    return float(np.prod(1.0 + r) ** (12.0 / len(r)) - 1.0)
+
+
+def compute_capture(port_monthly, bench_monthly):
+    """Morningstar-style capture ratios: the annualized geometric return in the
+    benchmark's up (down) months, divided by the benchmark's own."""
+    j = pd.concat([port_monthly, bench_monthly], axis=1, join="inner").dropna()
+    if j.empty:
+        return None
+    p, b = j.iloc[:, 0], j.iloc[:, 1]
+    up, down = b > 0, b < 0
+    up_cap = _annualized_geo(p[up]) / _annualized_geo(b[up]) * 100.0 if up.any() else np.nan
+    down_cap = _annualized_geo(p[down]) / _annualized_geo(b[down]) * 100.0 if down.any() else np.nan
+    ratio = up_cap / down_cap if np.isfinite(down_cap) and down_cap > 0 else np.nan
+    return {"up": up_cap, "down": down_cap, "ratio": ratio,
+            "n": len(j), "n_up": int(up.sum()), "n_down": int(down.sum())}
+
+
+
+
+def render_capture_section(combined, latest_date):
+    choices = [b for b in CAPTURE_BENCHMARK_CHOICES if b in combined.columns]
+    if "AsymEdge" not in combined.columns or not choices:
+        st.info("Capture ratios need both the portfolio series and a benchmark.")
+        return
+    # S&P 500 is the default because it is the benchmark capture ratios are
+    # conventionally quoted against; 80/20 (AOA) and 60/40 (AOR) can be swapped in.
+    default = CAPTURE_BENCHMARK if CAPTURE_BENCHMARK in choices else choices[0]
+    bench_name = st.pills("Compare against", choices, default=default,
+                          selection_mode="single", key="capture_bench")
+    if not bench_name:
+        bench_name = default
+    inception = combined.index[0]
+    monthly = {name: _closed_only(_monthly_returns(combined[name], inception), latest_date)
+               for name in SERIES_ORDER if name in combined.columns}
+    bench = monthly[bench_name]
+    captures = {name: compute_capture(monthly[name], bench)
+                for name in monthly if name != bench_name}
+    both = pd.concat({"AsymEdge": monthly["AsymEdge"], "bench": bench}, axis=1).dropna()
+    worst = both[both["bench"] < 0].sort_values("bench").head(8)
+    file_tag = "" if bench_name == CAPTURE_BENCHMARK else f" vs {bench_name.replace('/', '-')}"
+    st.plotly_chart(build_capture_figure(captures, worst, bench_label=bench_name),
+                    use_container_width=False,
+                    config=chart_config(f"The Asymmetry{file_tag}", static=True),
+                    key=f"capture_fig_{bench_name}")
+    n = captures["AsymEdge"]["n"] if captures.get("AsymEdge") else 0
+    bench_with = {
+        "S&P 500": "the S&amp;P 500's, the benchmark capture ratios are most commonly quoted against",
+        "80/20": "the 80/20 portfolio's (AOA)",
+        "60/40": "the 60/40 portfolio's (AOR)",
+    }[bench_name]
+    bench_the = {"S&P 500": "the S&amp;P 500", "80/20": "the 80/20 portfolio",
+                 "60/40": "the 60/40 portfolio"}[bench_name]
+    default_note = ("" if bench_name == CAPTURE_BENCHMARK else
+                    "The S&amp;P 500 view is the standard comparison; this view applies the same "
+                    "measure to a balanced portfolio. ")
+    _footnote(
+        f"Capture ratios compare closed monthly returns since inception ({n} months) with "
+        f"{bench_with}, using the Morningstar method: the strategy's annualized return across the "
+        f"months {bench_the} rose (fell), divided by {bench_the}'s annualized return across those "
+        "same months. Above 100% upside or below 100% downside favors the strategy, and Ratio is "
+        "upside divided by downside. " + default_note +
+        "The sample is still small, so these figures will move as months accumulate. Asymmetric "
+        "Edge months are anchored to Fidelity's reported returns; 80/20 (AOA), 60/40 (AOR), and "
+        "S&amp;P 500 (SPY) are total returns from Yahoo Finance."
+    )
+
+
+# ===========================================================================
+# 6. ROLLING 12-MONTH RETURN
+# ===========================================================================
+
+def _spread_end_labels(items, y_range, min_gap_frac=0.055):
+    """Nudge end-of-line labels apart vertically so they never overlap."""
+    if not items:
+        return items
+    gap = (y_range[1] - y_range[0]) * min_gap_frac
+    items = sorted(items, key=lambda it: it["y"])
+    for i in range(1, len(items)):
+        if items[i]["y_label"] - items[i - 1]["y_label"] < gap:
+            items[i]["y_label"] = items[i - 1]["y_label"] + gap
+    return items
+
+
+def build_rolling_figure(frame, view):
+    """frame: DataFrame of month-end rolling values (percent), columns = series."""
+    fig = go.Figure()
+    if frame.empty:
+        return fig
+    start, end = frame.index[0], frame.index[-1]
+    tick_dates, tick_labels = make_x_axis_labels(start, end)
+    vmin = float(np.nanmin(frame.values))
+    vmax = float(np.nanmax(frame.values))
+    pad = max(1.0, (vmax - vmin) * 0.12)
+    y_range = [min(0.0, vmin - pad), vmax + pad]
+    ends = []
+    for name in reversed(list(frame.columns)):
+        s = frame[name].dropna()
+        if s.empty:
+            continue
+        if view == "Excess return":
+            # The primary benchmark's line leads; the others sit behind it.
+            color = SERIES_COLORS.get(name, "#999")
+            label = f"vs {name}"
+            width, opacity = (4, 1.0) if name == PRIMARY_BENCHMARK else (2.5, 0.55)
+        else:
+            color = SERIES_COLORS.get(name, "#999")
+            label = "Asymmetric Edge" if name == "AsymEdge" else name
+            width = 4 if name == "AsymEdge" else 3
+            opacity = SERIES_OPACITY.get(name, 1.0)
+        r, g, b = int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
+        rgba = f"rgba({r},{g},{b},{opacity})"
+        fig.add_trace(go.Scatter(
+            x=s.index, y=s.values, mode="lines+markers", name=label,
+            line=dict(color=rgba, width=width), marker=dict(size=5, color=rgba),
+            hovertemplate="%{x|%b %Y}<br>%{y:.1f}%<extra>" + label + "</extra>",
+        ))
+        label_color = color if name != "S&P 500" else "#6B7280"
+        if name == "60/40":
+            label_color = "#1C8FB3"
+        ends.append({"x": s.index[-1], "y": float(s.iloc[-1]), "y_label": float(s.iloc[-1]),
+                     "text": _fmt_pct(float(s.iloc[-1])), "color": label_color})
+    ends = _spread_end_labels(ends, y_range)
+    annotations = [dict(x=e["x"], y=e["y_label"], xref="x", yref="y", text=f"<b>{e['text']}</b>",
+                        showarrow=False, xanchor="left", xshift=10, yanchor="middle",
+                        font=dict(size=14, color=e["color"], family=ANALYTICS_FONT))
+                   for e in ends]
+    fig.update_layout(
+        **DARK_LAYOUT,
+        yaxis=dict(ticksuffix="%", gridcolor=GRID_COLOR, zeroline=True, zerolinecolor="#c9c9d3",
+                   range=y_range, tickfont=dict(size=16, color=TEXT_MUTED)),
+        xaxis=dict(tickmode="array", tickvals=tick_dates, ticktext=tick_labels,
+                   gridcolor="rgba(0,0,0,0)", tickfont=dict(size=16, color=TEXT_MUTED),
+                   ticklabelstandoff=10,
+                   range=[start - timedelta(days=12), end + timedelta(days=45)]),
+        legend=dict(orientation="h", yanchor="top", y=-0.12, xanchor="center", x=0.5,
+                    traceorder="reversed", font=dict(size=16, color=TEXT_SECONDARY, weight=500)),
+        hovermode="x unified",
+        margin=dict(t=15, b=80, l=60, r=30),
+        height=440,
+        annotations=annotations,
+    )
+    return fig
+
+
+def compute_rolling_frame(combined, latest_date, view):
+    """Month-end rolling figures in percent, one column per series, closed
+    months only, indexed by month-end date."""
+    inception = combined.index[0]
+    open_p = _open_period(latest_date)
+    names = [n for n in SERIES_ORDER if n in combined.columns]
+    values, rets = {}, {}
+    for n in names:
+        v = _month_end_values(combined[n], inception)
+        if open_p is not None:
+            v = v[v.index < open_p]
+        values[n] = v
+        rets[n] = v.pct_change().dropna()
+    if view == "12-month return":
+        frame = pd.DataFrame({n: (values[n] / values[n].shift(12) - 1.0) * 100.0 for n in names})
+    elif view == "12-month volatility":
+        frame = pd.DataFrame({n: rets[n].rolling(12).std() * np.sqrt(12) * 100.0 for n in names})
+    else:
+        ae12 = values["AsymEdge"] / values["AsymEdge"].shift(12) - 1.0
+        frame = pd.DataFrame({n: (ae12 - (values[n] / values[n].shift(12) - 1.0)) * 100.0
+                              for n in names if n != "AsymEdge"})
+    frame = frame.dropna(how="all")
+    if not frame.empty:
+        frame.index = pd.DatetimeIndex([p.to_timestamp(how="end").normalize() for p in frame.index])
+    return frame
+
+
+def render_rolling_section(combined, latest_date):
+    if "AsymEdge" not in combined.columns:
+        st.info("Rolling returns unavailable: the portfolio series did not load.")
+        return
+    view = st.pills("Select view", ["12-month return", "Excess return", "12-month volatility"],
+                    default="12-month return", selection_mode="single", key="rolling_view")
+    if not view:
+        view = "12-month return"
+    frame = compute_rolling_frame(combined, latest_date, view)
+    if frame.empty:
+        st.info("Rolling figures need at least 12 closed months.")
+        return
+    st.plotly_chart(build_rolling_figure(frame, view), use_container_width=True,
+                    config=chart_config(f"Rolling 12-Month {view.replace('12-month ', '').title()}"),
+                    key=f"rolling_fig_{view}")
+    first_full = frame.index[0]
+    view_text = {
+        "12-month return": "Each point is the total return for the 12 months ending that month-end.",
+        "Excess return": ("Each point is Asymmetric Edge's trailing 12-month return minus the named "
+                          "benchmark's over the same 12 months, in percentage points; above zero means "
+                          "the strategy was ahead."),
+        "12-month volatility": ("Each point is the annualized standard deviation of the 12 monthly returns "
+                                "ending that month-end."),
+    }[view]
+    _footnote(
+        f"{view_text} Only closed months are used. The first full window ends {first_full:%B %Y}, "
+        "measured from the January 2, 2024 inception close. Asymmetric Edge months are anchored to "
+        "Fidelity's reported returns; 80/20 (AOA), 60/40 (AOR), and S&amp;P 500 (SPY) are total returns "
+        "from Yahoo Finance with dividends reinvested. Before taxes, advisory fees, and transaction costs."
+    )
+
+
+# ===========================================================================
+# 7. RISK VS. RETURN
+# ===========================================================================
+
+# Hollow-point colors for the asset universe on Risk vs. Return. Each asset
+# takes its Asset Universe category hue (the card text colors in
+# asset_universe.json), stepped lighter for the second and third asset in a
+# category so every point is distinct. Bitcoin is orange everywhere on the
+# dashboard; its point is one step brighter than the crypto card text so it
+# stays clear of HGER's brown. All pass 3:1 contrast on white. Tickers not
+# listed fall back to their category color.
+ASSET_POINT_COLORS = {
+    "QQQ": "#1F4D87", "IWM": "#4F7FC4",          # U.S. equities (blues)
+    "DXJ": "#14543E", "EMXC": "#2F8A66",         # International (greens)
+    "HGER": "#7E4A0A", "GLD": "#A57A08",         # Commodities (amber / gold)
+    "IBIT": "#C8650A",                           # Crypto (bitcoin orange)
+    "BTAL": "#4A463D", "TLT": "#6E6A62", "BIL": "#8C867C",  # Defensive (warm grays)
+}
+
+
+def build_risk_return_figure(points, spx_point):
+    """points: list of dicts {label, vol, cagr, kind ('family'|'asset'), color, size}."""
+    # Every point stays on the chart (Tyler, October 22, 2026), even bitcoin's
+    # much higher volatility; the axis simply extends to include it.
+    inliers = points
+    x_max = max(5.0, np.ceil(max(p["vol"] for p in inliers) * 1.08 / 5.0) * 5.0)
+    x_dtick = 10 if x_max > 40 else 5
+    y_lo = min(0.0, np.floor(min(p["cagr"] for p in inliers) / 5.0) * 5.0)
+    y_hi = np.ceil(max(p["cagr"] for p in inliers) * 1.08 / 5.0) * 5.0
+    y_range = [y_lo - 1.5, y_hi + 1.5]
+
+    fig = go.Figure()
+    annotations, shapes = [], []
+    if spx_point and spx_point["vol"] > 0:
+        slope = spx_point["cagr"] / spx_point["vol"]
+        x_end = x_max
+        if slope > 0 and slope * x_end > y_range[1]:
+            x_end = y_range[1] / slope
+        shapes.append(dict(type="line", xref="x", yref="y", x0=0, y0=0, x1=x_end, y1=slope * x_end,
+                           line=dict(color="#9CA3AF", width=1.5, dash="dash"), layer="below"))
+        lx = x_end * 0.8
+        annotations.append(dict(x=lx, y=slope * lx, xref="x", yref="y",
+                                text=f"{PRIMARY_BENCHMARK} return per unit of risk", showarrow=False,
+                                xanchor="right", yanchor="bottom", xshift=-4, yshift=2,
+                                font=dict(size=12, color=TEXT_SECONDARY, family=ANALYTICS_FONT)))
+
+    # Label placement: right of the point unless another point sits just to
+    # its right, in which case the label goes left.
+    xr = x_max
+    yr = y_range[1] - y_range[0]
+    positions = {}
+    for p in inliers:
+        crowded = any(q is not p and 0 < q["vol"] - p["vol"] < 0.16 * xr
+                      and abs(q["cagr"] - p["cagr"]) < 0.06 * yr for q in inliers)
+        positions[p["label"]] = "middle left" if crowded else "middle right"
+
+    for kind in ["asset", "family"]:
+        group = [p for p in inliers if p["kind"] == kind]
+        if not group:
+            continue
+        for p in group:
+            is_ae = p["label"] == "Asymmetric Edge"
+            fig.add_trace(go.Scatter(
+                x=[p["vol"]], y=[p["cagr"]], mode="markers+text",
+                text=[f"<b>{p['label']}</b>"],
+                textposition=positions[p["label"]],
+                textfont=dict(size=15 if is_ae else (13 if kind == "family" else 12),
+                              color=p["text_color"], family=ANALYTICS_FONT),
+                marker=dict(size=p["size"],
+                            color=p["color"] if kind == "family" else "#ffffff",
+                            line=dict(color="#ffffff" if kind == "family" else p["color"],
+                                      width=2 if kind == "family" else 2.5)),
+                hovertemplate=(f"<b>{p['label']}</b><br>Annualized return %{{y:.1f}}%"
+                               f"<br>Volatility %{{x:.1f}}%<extra></extra>"),
+                showlegend=False, cliponaxis=False,
+            ))
+    fig.update_layout(
+        **DARK_LAYOUT,
+        xaxis=dict(range=[0, x_max], ticksuffix="%", gridcolor=GRID_COLOR, zeroline=False,
+                   title=dict(text="Annualized volatility", font=dict(size=15, color=TEXT_PRIMARY)),
+                   tickfont=dict(size=15, color=TEXT_MUTED), dtick=x_dtick),
+        yaxis=dict(range=y_range, ticksuffix="%", gridcolor=GRID_COLOR, zeroline=True,
+                   zerolinecolor="#c9c9d3", dtick=5,
+                   title=dict(text="Annualized return", font=dict(size=15, color=TEXT_PRIMARY)),
+                   tickfont=dict(size=15, color=TEXT_MUTED)),
+        margin=dict(t=20, b=60, l=75, r=30),
+        height=560,
+        shapes=shapes, annotations=annotations,
+        hovermode="closest",
+    )
+    return fig
+
+
+def compute_risk_return_points(combined, latest_date):
+    """Points for the Risk vs. Return chart: the four series plus every visible
+    asset in the universe. Returns (points, spx_point, late_start_notes)."""
+    inception = combined.index[0]
+    end = pd.Timestamp(latest_date)
+    family_style = {
+        "AsymEdge": ("Asymmetric Edge", SERIES_COLORS["AsymEdge"], 20, BRAND_PURPLE),
+        "80/20": ("80/20", SERIES_COLORS["80/20"], 14, "#3550C9"),
+        "60/40": ("60/40", SERIES_COLORS["60/40"], 14, "#1C8FB3"),
+        "S&P 500": ("S&P 500", SERIES_COLORS["S&P 500"], 14, "#6B7280"),
+    }
+    points, spx_point, late_start = [], None, []
+    for name in SERIES_ORDER:
+        if name not in combined.columns:
+            continue
+        m = compute_summary_metrics(combined[name], start_date=inception, end_date=end)
+        if not m:
+            continue
+        label, color, size, text_color = family_style[name]
+        p = {"label": label, "vol": m["Annualized Vol"] * 100.0, "cagr": m["CAGR"] * 100.0,
+             "kind": "family", "color": color, "size": size, "text_color": text_color}
+        points.append(p)
+        if name == PRIMARY_BENCHMARK:
+            spx_point = p
+
+    universe = load_asset_universe()
+    tickers, cat_color = [], {}
+    for cat in universe.get("categories", []):
+        if not cat.get("visible", True):
+            continue
+        for a in cat.get("assets", []):
+            t = str(a.get("ticker", "")).strip().upper()
+            if t and t not in tickers and t != "SPY":
+                tickers.append(t)
+                cat_color[t] = cat.get("color_text") or "#8a8f9c"
+    if tickers:
+        closes = load_asset_class_data(tuple(tickers), inception.strftime("%Y-%m-%d"),
+                                       end.strftime("%Y-%m-%d"))
+        for t in tickers:
+            if closes is None or t not in closes.columns:
+                continue
+            s = closes[t].dropna()
+            s = s[(s.index >= inception) & (s.index <= end)]
+            if len(s) < 40:
+                continue
+            if s.index[0] > inception + pd.Timedelta(days=5):
+                late_start.append(f"{t} from {_long_date(s.index[0])}")
+            m = compute_summary_metrics(s, start_date=s.index[0], end_date=end)
+            if not m:
+                continue
+            color = ASSET_POINT_COLORS.get(t, cat_color.get(t, "#8a8f9c"))
+            points.append({"label": t, "vol": m["Annualized Vol"] * 100.0, "cagr": m["CAGR"] * 100.0,
+                           "kind": "asset", "color": color, "size": 12,
+                           "text_color": color})
+    return points, spx_point, late_start
+
+
+def render_risk_return_section(combined, latest_date):
+    inception = combined.index[0]
+    end = pd.Timestamp(latest_date)
+    points, spx_point, late_start = compute_risk_return_points(combined, latest_date)
+    if not points:
+        st.info("Risk and return figures could not be computed.")
+        return
+    st.plotly_chart(build_risk_return_figure(points, spx_point), use_container_width=True,
+                    config=chart_config("Risk vs. Return"))
+    late = (" Assets that began trading after inception are measured from their first day: "
+            + "; ".join(late_start) + ".") if late_start else ""
+    _footnote(
+        f"Annualized return (CAGR) against annualized volatility of monthly returns, from the "
+        f"{_long_date(inception)} inception through {_long_date(end)}, computed the same way as the "
+        "Performance Summary table. Up and to the left is better. Points above the dashed line earned "
+        "more return per unit of volatility than the 80/20 portfolio (AOA). Hollow points are the assets in the "
+        "strategy's universe, colored by their Asset Universe category; the strategy rotates among them "
+        "rather than holding all of them." + late +
+        " Asymmetric Edge is anchored to Fidelity's reported returns; everything else uses Yahoo Finance "
+        "adjusted closes with distributions reinvested."
+    )
+
+
 def main():
     # Branded header
     st.markdown("""
@@ -4807,6 +6795,24 @@ def main():
     st.divider()
 
     # ================================================================
+    # REBALANCE LOG (added October 22, 2026)
+    # ================================================================
+    _analytics_totals = _load_reconstructed_totals()
+    _held = _held_tickers(holdings_values_df, since=inception_date)
+    holding_prices = (
+        load_holding_prices(
+            tuple(sorted(_held)),
+            (inception_date - timedelta(days=10)).strftime("%Y-%m-%d"),
+            latest_date.strftime("%Y-%m-%d"),
+        )
+        if _held else pd.DataFrame()
+    )
+    _render_guarded("Rebalance Log", render_rebalance_log_section,
+                    holdings_values_df, _analytics_totals, holding_prices)
+
+    st.divider()
+
+    # ================================================================
     # 1. PERFORMANCE COMPARISON
     # ================================================================
     st.markdown("## Performance Comparison")
@@ -4899,7 +6905,7 @@ def main():
         toggle_cols = st.columns(len(all_possible_series))
         for i, name in enumerate(all_possible_series):
             with toggle_cols[i]:
-                st.toggle(name, key=f"growth_toggle_{name}")
+                st.toggle(series_label(name), key=f"growth_toggle_{name}")
 
     footnote_growth = (
         f"Growth of $10,000 invested on {start_g.strftime('%m/%d/%Y')}, the start of the selected "
@@ -4977,6 +6983,19 @@ def main():
     st.divider()
 
     # ================================================================
+    # MONTHLY RETURNS and WHAT DROVE THE MONTH (added October 22, 2026)
+    # ================================================================
+    _render_guarded("Monthly Returns", render_monthly_returns_section, combined, latest_date)
+
+    st.divider()
+
+    _render_guarded("What Drove the Month", render_attribution_section,
+                    portfolio_series, holdings_values_df, _analytics_totals,
+                    holding_prices, latest_date)
+
+    st.divider()
+
+    # ================================================================
     # 3. MAXIMUM DRAWDOWN
     # ================================================================
     st.markdown("## Maximum Drawdown")
@@ -5021,6 +7040,26 @@ def main():
         f"All performance figures are shown before taxes, advisory fees, and transaction costs, which would reduce returns."
     )
     st.markdown(f'<p class="footer-text">{footnote_dd}</p>', unsafe_allow_html=True)
+
+    st.divider()
+
+    # ================================================================
+    # DRAWDOWNS OVER TIME, THE ASYMMETRY, ROLLING 12-MONTH RETURN,
+    # RISK VS. RETURN (added October 22, 2026)
+    # ================================================================
+    _render_guarded("Drawdowns Over Time", render_underwater_section, combined, latest_date)
+
+    st.divider()
+
+    _render_guarded("The Asymmetry", render_capture_section, combined, latest_date)
+
+    st.divider()
+
+    _render_guarded("Rolling 12-Month Return", render_rolling_section, combined, latest_date)
+
+    st.divider()
+
+    _render_guarded("Risk vs. Return", render_risk_return_section, combined, latest_date)
 
     st.divider()
 
@@ -5117,11 +7156,11 @@ def main():
             tickers.append(t)
 
     # Build the list of all labels (AE first if toggled, then tickers)
-    include_ae = st.checkbox("Include AsymEdge", value=True, key="tr_include_ae")
+    include_ae = st.checkbox("Include Asymmetric Edge", value=True, key="tr_include_ae")
 
     all_labels = []
     if include_ae:
-        all_labels.append("AsymEdge")
+        all_labels.append("Asymmetric Edge")
     all_labels.extend(tickers)
 
     # Color pickers for each series
@@ -5156,7 +7195,7 @@ def main():
     tr_series = {}
 
     if include_ae:
-        tr_series["AsymEdge"] = portfolio_series
+        tr_series["Asymmetric Edge"] = portfolio_series
 
     for ticker in tickers:
         if not custom_close.empty and ticker in custom_close.columns:
