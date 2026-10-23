@@ -11,6 +11,7 @@ import yfinance as yf
 from datetime import datetime, timedelta
 import os
 import json
+import re
 import textwrap
 import time
 
@@ -4427,6 +4428,11 @@ PRIMARY_BENCHMARK = "80/20"
 # directly with other managers' published capture ratios.
 CAPTURE_BENCHMARK = "S&P 500"   # default for The Asymmetry: the standard capture-ratio benchmark
 CAPTURE_BENCHMARK_CHOICES = ["S&P 500", "80/20", "60/40"]   # swappable in The Asymmetry
+CAPTURE_CUSTOM_LABEL = "Custom ticker"   # fourth choice: any ticker typed in, QQQ by default
+CAPTURE_CUSTOM_DEFAULT = "QQQ"
+CAPTURE_CUSTOM_BAR = "#5F6B7A"   # default bar color for a typed-in ticker: a neutral slate that no portfolio
+                                 # or asset category uses, darker than the S&P 500's light gray so negative
+                                 # bars read solidly, and clearly apart from Asymmetric Edge purple
 
 # Money-market and sweep positions are cash for every analytics purpose.
 CASH_LIKE_TICKERS = {"389930108", "SPAXX"}
@@ -4996,12 +5002,14 @@ def build_rebalance_log_figure(rows_newest_first, stats):
     return _pixel_layout(go.Figure(), W, int(H), shapes, ann)
 
 
-def build_capture_figure(captures, worst, bench_label=None):
+def build_capture_figure(captures, worst, bench_label=None, bench_color=None):
     """Capture tiles, sentence and table across the top; the benchmark's worst
     months as grouped bars across the bottom. Built for 780 px."""
     bench_label = bench_label or CAPTURE_BENCHMARK
     # Running text says "the 80/20 portfolio"; tiles and headers keep the short name.
-    bench_noun = bench_label if bench_label == "S&P 500" else f"{bench_label} portfolio"
+    bench_noun = f"{bench_label} portfolio" if bench_label in ("80/20", "60/40") else bench_label
+    # House benchmarks take "the"; a typed-in ticker reads better bare ("QQQ rose").
+    the_noun = f"the {bench_noun}" if bench_label in ("S&P 500", "80/20", "60/40") else bench_noun
     W, H = ANALYTICS_WIDTH, 560
     shapes, ann = [], []
     ae = captures.get("AsymEdge")
@@ -5022,7 +5030,7 @@ def build_capture_figure(captures, worst, bench_label=None):
         _px_text(ann, x0 + 14, 100, sub.replace("&", "&amp;"), size=11, color=TEXT_SECONDARY)
 
     if ae and np.isfinite(ae["up"]) and np.isfinite(ae["down"]):
-        sentence = (f"In months the {bench_noun} rose, the strategy captured about {ae['up']:.0f}% "
+        sentence = (f"In months {the_noun} rose, the strategy captured about {ae['up']:.0f}% "
                     f"of its gains. In months it fell, it took about {ae['down']:.0f}% of its losses.")
         _px_text(ann, 0, 132, "<br>".join(textwrap.wrap(sentence, width=52)).replace("&", "&amp;"),
                  size=13, valign="top")
@@ -5055,12 +5063,12 @@ def build_capture_figure(captures, worst, bench_label=None):
                            line=dict(color=ANALYTICS_RULE, width=1)))
     if ae:
         _px_text(ann, TX, y + 18,
-                 f"{ae['n']} months: {ae['n_up']} up and {ae['n_down']} down for the "
-                 f"{bench_noun.replace('&', '&amp;')}", size=11, color=TEXT_SECONDARY)
+                 f"{ae['n']} months: {ae['n_up']} up and {ae['n_down']} down for "
+                 f"{the_noun.replace('&', '&amp;')}", size=11, color=TEXT_SECONDARY)
 
     fig = go.Figure()
     if worst is not None and not worst.empty:
-        bench_bar = BAR_SERIES_COLORS.get(bench_label, "#C5CAD3")
+        bench_bar = bench_color or BAR_SERIES_COLORS.get(bench_label, CAPTURE_CUSTOM_BAR)
         labels = [p.strftime("%b-%y") for p in worst.index]
         fig.add_trace(go.Bar(
             x=labels, y=worst["AsymEdge"] * 100.0, name="Asymmetric Edge",
@@ -5081,7 +5089,7 @@ def build_capture_figure(captures, worst, bench_label=None):
         low = float(min(worst["AsymEdge"].min(), worst["bench"].min()) * 100.0)
         high = float(max(worst["AsymEdge"].max(), worst["bench"].max(), 0.0) * 100.0)
         span = high - low
-        title = f"The {bench_noun}'s {len(worst)} worst months since inception"
+        title = f"{the_noun[0].upper() + the_noun[1:]}'s {len(worst)} worst months since inception"
         _px_text(ann, 0, 236, title.replace("&", "&amp;"), size=14, bold=True)
         lx = W - 230
         for name, color in [("Asymmetric Edge", BAR_SERIES_COLORS["AsymEdge"]), (bench_label, bench_bar)]:
@@ -5903,42 +5911,92 @@ def compute_capture(port_monthly, bench_monthly):
 
 
 
+def _capture_custom_monthly(ticker, combined, latest_date):
+    """Closed monthly total returns for a typed-in ticker, anchored like the
+    house series. Returns None when no usable price history comes back."""
+    inception = combined.index[0]
+    prices = load_custom_ticker_data((ticker,), inception.strftime("%Y-%m-%d"),
+                                     pd.Timestamp(latest_date).strftime("%Y-%m-%d"))
+    if prices is None or prices.empty or ticker not in prices.columns:
+        return None
+    daily = _price_frame_on(prices[[ticker]], combined.index)[ticker].dropna()
+    if len(daily) < 30:
+        return None
+    monthly = _closed_only(_monthly_returns(daily, inception), latest_date)
+    # A fund that launched after inception: its first month is partial, so drop it.
+    if daily.index[0] > pd.Timestamp(inception) + timedelta(days=5) and len(monthly):
+        monthly = monthly.iloc[1:]
+    return monthly if len(monthly) >= 6 else None
+
+
 def render_capture_section(combined, latest_date):
     choices = [b for b in CAPTURE_BENCHMARK_CHOICES if b in combined.columns]
     if "AsymEdge" not in combined.columns or not choices:
         st.info("Capture ratios need both the portfolio series and a benchmark.")
         return
     # S&P 500 is the default because it is the benchmark capture ratios are
-    # conventionally quoted against; 80/20 (AOA) and 60/40 (AOR) can be swapped in.
+    # conventionally quoted against; 80/20 (AOA) and 60/40 (AOR) can be swapped
+    # in, or any ticker typed into the custom box (QQQ by default).
     default = CAPTURE_BENCHMARK if CAPTURE_BENCHMARK in choices else choices[0]
-    bench_name = st.pills("Compare against", choices, default=default,
-                          selection_mode="single", key="capture_bench")
-    if not bench_name:
-        bench_name = default
+    pick = st.pills("Compare against", choices + [CAPTURE_CUSTOM_LABEL], default=default,
+                    selection_mode="single", key="capture_bench")
+    if not pick:
+        pick = default
     inception = combined.index[0]
     monthly = {name: _closed_only(_monthly_returns(combined[name], inception), latest_date)
                for name in SERIES_ORDER if name in combined.columns}
+    full_months = len(monthly["AsymEdge"])
+
+    bench_name, custom, custom_color = pick, None, None
+    if pick == CAPTURE_CUSTOM_LABEL:
+        col, col_c, _ = st.columns([1, 0.55, 2.45], vertical_alignment="bottom")
+        raw = col.text_input("ETF ticker", value=CAPTURE_CUSTOM_DEFAULT, max_chars=12,
+                             key="capture_ticker",
+                             help="Any ticker Yahoo Finance carries, such as QQQ, VTI or SCHD.")
+        custom_color = col_c.color_picker("Bar color", value=CAPTURE_CUSTOM_BAR, key="capture_color")
+        ticker = re.sub(r"[^A-Za-z0-9.\-^=]", "", raw or "").upper() or CAPTURE_CUSTOM_DEFAULT
+        custom_monthly = _capture_custom_monthly(ticker, combined, latest_date)
+        if custom_monthly is None:
+            st.warning(f"Couldn't load enough price history for {ticker}. Showing the S&P 500 instead.")
+            bench_name = default
+        else:
+            bench_name, custom = ticker, ticker
+            monthly[ticker] = custom_monthly
+
     bench = monthly[bench_name]
     captures = {name: compute_capture(monthly[name], bench)
                 for name in monthly if name != bench_name}
     both = pd.concat({"AsymEdge": monthly["AsymEdge"], "bench": bench}, axis=1).dropna()
     worst = both[both["bench"] < 0].sort_values("bench").head(8)
     file_tag = "" if bench_name == CAPTURE_BENCHMARK else f" vs {bench_name.replace('/', '-')}"
-    st.plotly_chart(build_capture_figure(captures, worst, bench_label=bench_name),
+    st.plotly_chart(build_capture_figure(captures, worst, bench_label=bench_name,
+                                         bench_color=custom_color if custom else None),
                     use_container_width=False,
                     config=chart_config(f"The Asymmetry{file_tag}", static=True),
-                    key=f"capture_fig_{bench_name}")
+                    key=f"capture_fig_{pick}_{bench_name}_{custom_color if custom else ''}"
+                    .replace("/", "").replace(" ", "").replace("#", ""))
     n = captures["AsymEdge"]["n"] if captures.get("AsymEdge") else 0
-    bench_with = {
-        "S&P 500": "the S&amp;P 500's, the benchmark capture ratios are most commonly quoted against",
-        "80/20": "the 80/20 portfolio's (AOA)",
-        "60/40": "the 60/40 portfolio's (AOR)",
-    }[bench_name]
-    bench_the = {"S&P 500": "the S&amp;P 500", "80/20": "the 80/20 portfolio",
-                 "60/40": "the 60/40 portfolio"}[bench_name]
-    default_note = ("" if bench_name == CAPTURE_BENCHMARK else
-                    "The S&amp;P 500 view is the standard comparison; this view applies the same "
-                    "measure to a balanced portfolio. ")
+    if custom:
+        bench_with, bench_the = f"{custom}'s", custom
+        default_note = ("The S&amp;P 500 view is the standard comparison; this view applies the same "
+                        f"measure to {custom}. ")
+        if n < full_months:
+            default_note += (f"{custom}'s price history covers only the last {n} of the "
+                             f"{full_months} closed months, so the comparison uses those. ")
+        sources = (f"80/20 (AOA), 60/40 (AOR), S&amp;P 500 (SPY) and {custom} are total returns "
+                   "from Yahoo Finance.")
+    else:
+        bench_with = {
+            "S&P 500": "the S&amp;P 500's, the benchmark capture ratios are most commonly quoted against",
+            "80/20": "the 80/20 portfolio's (AOA)",
+            "60/40": "the 60/40 portfolio's (AOR)",
+        }[bench_name]
+        bench_the = {"S&P 500": "the S&amp;P 500", "80/20": "the 80/20 portfolio",
+                     "60/40": "the 60/40 portfolio"}[bench_name]
+        default_note = ("" if bench_name == CAPTURE_BENCHMARK else
+                        "The S&amp;P 500 view is the standard comparison; this view applies the same "
+                        "measure to a balanced portfolio. ")
+        sources = "80/20 (AOA), 60/40 (AOR), and S&amp;P 500 (SPY) are total returns from Yahoo Finance."
     _footnote(
         f"Capture ratios compare closed monthly returns since inception ({n} months) with "
         f"{bench_with}, using the Morningstar method: the strategy's annualized return across the "
@@ -5946,8 +6004,7 @@ def render_capture_section(combined, latest_date):
         "same months. Above 100% upside or below 100% downside favors the strategy, and Ratio is "
         "upside divided by downside. " + default_note +
         "The sample is still small, so these figures will move as months accumulate. Asymmetric "
-        "Edge months are anchored to Fidelity's reported returns; 80/20 (AOA), 60/40 (AOR), and "
-        "S&amp;P 500 (SPY) are total returns from Yahoo Finance."
+        "Edge months are anchored to Fidelity's reported returns; " + sources
     )
 
 
@@ -6107,95 +6164,250 @@ ASSET_POINT_COLORS = {
 }
 
 
-def build_risk_return_figure(points, spx_point):
-    """points: list of dicts {label, vol, cagr, kind ('family'|'asset'), color, size}."""
-    # Every point stays on the chart (Tyler, October 22, 2026), even bitcoin's
-    # much higher volatility; the axis simply extends to include it.
-    inliers = points
-    x_max = max(5.0, np.ceil(max(p["vol"] for p in inliers) * 1.08 / 5.0) * 5.0)
-    x_dtick = 10 if x_max > 40 else 5
-    y_lo = min(0.0, np.floor(min(p["cagr"] for p in inliers) / 5.0) * 5.0)
-    y_hi = np.ceil(max(p["cagr"] for p in inliers) * 1.08 / 5.0) * 5.0
+# --- Risk vs. Return (October 23, 2026 redesign; mockup option C) ------------------
+# The volatility axis is linear up to just past the most volatile point at or
+# below RR_OUTLIER_VOL, then breaks; anything more volatile (bitcoin, or a
+# volatile custom ticker) sits in a narrow compressed strip so it stays on the
+# chart without stretching it. The dashed 80/20 line stops at the break. Cash
+# (BIL) is hidden by default and bitcoin (IBIT) shown; both can be toggled.
+# A period picker recomputes every point for any span of three months or more,
+# and a custom ticker can be added in a color of the viewer's choosing.
+RR_OUTLIER_VOL = 25.0           # percent; points above this go in the compressed strip
+RR_STRIP_FRAC = 0.13            # share of the plot width given to the compressed strip
+RR_GAP_FRAC = 0.017             # the white gap that marks the break
+RR_TOGGLES = {"Cash (BIL)": "BIL", "Bitcoin (IBIT)": "IBIT"}
+RR_DEFAULT_SHOW = ["Bitcoin (IBIT)"]
+RR_MIN_MONTHS = 3
+
+
+def _period_clamp(prefix, which):
+    """Keep a month/year period picker's start on or before its end."""
+    ss = st.session_state
+    f = int(ss[f"{prefix}_from_y"]) * 12 + DD_MONTHS.index(ss[f"{prefix}_from_m"])
+    t = int(ss[f"{prefix}_to_y"]) * 12 + DD_MONTHS.index(ss[f"{prefix}_to_m"])
+    if f > t:
+        v = f if which == "from" else t
+        side = "to" if which == "from" else "from"
+        ss[f"{prefix}_{side}_y"], ss[f"{prefix}_{side}_m"] = v // 12, DD_MONTHS[v % 12]
+
+
+def _period_reset(prefix):
+    ss = st.session_state
+    lo, hi = ss.get(f"{prefix}_bounds", (None, None))
+    if lo is None:
+        return
+    ss[f"{prefix}_from_y"], ss[f"{prefix}_from_m"] = lo // 12, DD_MONTHS[lo % 12]
+    ss[f"{prefix}_to_y"], ss[f"{prefix}_to_m"] = hi // 12, DD_MONTHS[hi % 12]
+
+
+def _period_picker(prefix, lo_mi, hi_mi):
+    """From month/year, To month/year and a Since inception reset. Returns the
+    picked (from, to) as month indices, clamped to the data's months."""
+    ss = st.session_state
+    ss[f"{prefix}_bounds"] = (lo_mi, hi_mi)
+    ss.setdefault(f"{prefix}_from_y", lo_mi // 12)
+    ss.setdefault(f"{prefix}_from_m", DD_MONTHS[lo_mi % 12])
+    ss.setdefault(f"{prefix}_to_y", hi_mi // 12)
+    ss.setdefault(f"{prefix}_to_m", DD_MONTHS[hi_mi % 12])
+    years = list(range(lo_mi // 12, hi_mi // 12 + 1))
+    c1, c2, c3, c4, c5 = st.columns([1.25, 0.9, 1.25, 0.9, 1.1], vertical_alignment="bottom")
+    c1.selectbox("From", DD_MONTHS, key=f"{prefix}_from_m", on_change=_period_clamp, args=(prefix, "from"))
+    c2.selectbox("From year", years, key=f"{prefix}_from_y", on_change=_period_clamp,
+                 args=(prefix, "from"), label_visibility="hidden")
+    c3.selectbox("To", DD_MONTHS, key=f"{prefix}_to_m", on_change=_period_clamp, args=(prefix, "to"))
+    c4.selectbox("To year", years, key=f"{prefix}_to_y", on_change=_period_clamp,
+                 args=(prefix, "to"), label_visibility="hidden")
+    c5.button("Since inception", key=f"{prefix}_reset", on_click=_period_reset, args=(prefix,))
+    f = int(ss[f"{prefix}_from_y"]) * 12 + DD_MONTHS.index(ss[f"{prefix}_from_m"])
+    t = int(ss[f"{prefix}_to_y"]) * 12 + DD_MONTHS.index(ss[f"{prefix}_to_m"])
+    return max(lo_mi, min(hi_mi, f)), max(lo_mi, min(hi_mi, t))
+
+
+def build_risk_return_figure(points, ref_point):
+    """points: dicts {label, vol, cagr, kind ('family'|'asset'|'custom'), color, size, text_color}.
+    The x axis is drawn in a 0-to-1 display coordinate so the linear section and
+    the compressed strip can share one axis; hover shows the true volatility."""
+    vmax = max(p["vol"] for p in points)
+    in_max = max([p["vol"] for p in points if p["vol"] <= RR_OUTLIER_VOL] + [1.0])
+    broken = vmax > RR_OUTLIER_VOL
+    if broken:
+        brk = max(5.0, float(np.ceil(in_max * 1.06)))
+        x_hi = vmax * 1.06
+        w1 = 1.0 - RR_STRIP_FRAC - RR_GAP_FRAC
+
+        def fx(v):
+            if v <= brk:
+                return v / brk * w1
+            return w1 + RR_GAP_FRAC + (v - RR_OUTLIER_VOL) / max(1.0, x_hi - RR_OUTLIER_VOL) * RR_STRIP_FRAC
+        lin_end = brk
+    else:
+        lin_end = max(5.0, float(np.ceil(vmax * 1.08 / 5.0) * 5.0))
+        w1 = 1.0
+
+        def fx(v):
+            return v / lin_end
+
+    step = 10 if (not broken and lin_end > 40) else 5
+    tickvals, ticktext = [], []
+    t = 0.0
+    while t <= lin_end + 1e-9:
+        tickvals.append(fx(t)); ticktext.append(f"{t:g}%")
+        t += step
+    if broken:
+        last = w1
+        for v in (30, 40, 50, 60, 75, 100):
+            if RR_OUTLIER_VOL < v < x_hi and fx(v) - last >= 0.055:
+                tickvals.append(fx(v)); ticktext.append(f"{v}%"); last = fx(v)
+
+    y_lo = min(0.0, np.floor(min(p["cagr"] for p in points) / 5.0) * 5.0)
+    y_hi = np.ceil(max(p["cagr"] for p in points) * 1.08 / 5.0) * 5.0
     y_range = [y_lo - 1.5, y_hi + 1.5]
+    y_step = 10 if (y_hi - y_lo) > 40 else 5
 
     fig = go.Figure()
     annotations, shapes = [], []
-    if spx_point and spx_point["vol"] > 0:
-        slope = spx_point["cagr"] / spx_point["vol"]
-        x_end = x_max
+    # ---- label placement: try the spots around each point and keep the first
+    # one that collides with no other point or label (approximate pixels at the
+    # dashboard's usual plot size) ----
+    PW_PX, PH_PX = 665.0, 464.0   # 780 wide less the side margins; 560 tall less top and bottom
+    yr = y_range[1] - y_range[0]
+
+    def to_px(xd, yd):
+        return (xd + 0.005) / 1.005 * PW_PX, (y_range[1] - yd) / yr * PH_PX
+
+    def overlap(a, b):
+        return max(0.0, min(a[2], b[2]) - max(a[0], b[0])) * max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+
+    obstacles = []
+    for p in points:
+        cx, cy = to_px(fx(p["vol"]), p["cagr"])
+        r = p["size"] / 2 + 2
+        obstacles.append((cx - r, cy - r, cx + r, cy + r))
+    order = sorted(range(len(points)), key=lambda i: (points[i]["label"] != "Asymmetric Edge",
+                                                       points[i]["kind"] != "family",
+                                                       points[i]["kind"] != "custom"))
+    positions, placed = {}, []
+    for i in order:
+        p = points[i]
+        is_ae = p["label"] == "Asymmetric Edge"
+        size = 15 if is_ae else (13 if p["kind"] == "family" else 12)
+        w, h = _dd_text_width(p["label"], size, bold=True), size * 1.25
+        cx, cy = to_px(fx(p["vol"]), p["cagr"])
+        r = p["size"] / 2 + 3
+        cands = {
+            "middle right": (cx + r, cy - h / 2, cx + r + w, cy + h / 2),
+            "middle left": (cx - r - w, cy - h / 2, cx - r, cy + h / 2),
+            "top center": (cx - w / 2, cy - r - h, cx + w / 2, cy - r),
+            "bottom center": (cx - w / 2, cy + r, cx + w / 2, cy + r + h),
+            "top right": (cx + r * 0.6, cy - r - h, cx + r * 0.6 + w, cy - r),
+            "bottom right": (cx + r * 0.6, cy + r, cx + r * 0.6 + w, cy + r + h),
+            "top left": (cx - r * 0.6 - w, cy - r - h, cx - r * 0.6, cy - r),
+            "bottom left": (cx - r * 0.6 - w, cy + r, cx - r * 0.6, cy + r + h),
+        }
+        if is_ae:   # the hero label prefers the open space to its left
+            cands = {k: cands[k] for k in ("middle left", "top left", "bottom left", "top center",
+                                           "bottom center", "middle right", "top right", "bottom right")}
+        best, best_cost = None, None
+        for pos, box in cands.items():
+            cost = sum(overlap(box, o) for j, o in enumerate(obstacles) if j != i)
+            cost += sum(overlap(box, b) for b in placed)
+            if box[0] < -8 or box[2] > PW_PX + 24 or box[1] < -6 or box[3] > PH_PX + 6:
+                cost += 10000
+            if best_cost is None or cost < best_cost - 1e-6:
+                best, best_cost = pos, cost
+            if cost == 0:
+                break
+        positions[p["label"]] = best
+        placed.append(cands[best])
+
+    if ref_point and ref_point["vol"] > 0:
+        slope = ref_point["cagr"] / ref_point["vol"]
+        x_end = lin_end                       # the line stops at the break
         if slope > 0 and slope * x_end > y_range[1]:
             x_end = y_range[1] / slope
-        shapes.append(dict(type="line", xref="x", yref="y", x0=0, y0=0, x1=x_end, y1=slope * x_end,
+        if slope < 0 and slope * x_end < y_range[0]:
+            x_end = y_range[0] / slope
+        shapes.append(dict(type="line", xref="x", yref="y", x0=0, y0=0, x1=fx(x_end), y1=slope * x_end,
                            line=dict(color="#9CA3AF", width=1.5, dash="dash"), layer="below"))
-        lx = x_end * 0.8
-        annotations.append(dict(x=lx, y=slope * lx, xref="x", yref="y",
-                                text=f"{PRIMARY_BENCHMARK} return per unit of risk", showarrow=False,
-                                xanchor="right", yanchor="bottom", xshift=-4, yshift=2,
-                                font=dict(size=12, color=TEXT_SECONDARY, family=ANALYTICS_FONT)))
+        # The line is named in a one-item key above the plot, not along the line
+        # itself, so it never competes with the point labels.
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None], mode="lines", name=f"{PRIMARY_BENCHMARK} return per unit of risk",
+            line=dict(color="#9CA3AF", width=1.5, dash="dash"), hoverinfo="skip", showlegend=True,
+        ))
+    if broken:
+        g0, g1 = w1 + 0.002, w1 + RR_GAP_FRAC - 0.002
+        shapes.append(dict(type="rect", xref="x", yref="paper", x0=g0, x1=g1, y0=0, y1=1,
+                           fillcolor="#ffffff", line=dict(width=0), layer="between"))
+        mid = (g0 + g1) / 2
+        for dx in (-4, 4):
+            shapes.append(dict(type="line", xref="x", yref="paper", xsizemode="pixel", ysizemode="pixel",
+                               xanchor=mid, yanchor=0, x0=dx - 3, x1=dx + 3, y0=-7, y1=7,
+                               line=dict(color="#9A9AAE", width=1.4)))
+        annotations.append(dict(x=w1 + RR_GAP_FRAC + RR_STRIP_FRAC / 2, y=1, xref="x", yref="paper",
+                                yanchor="bottom", showarrow=False, text="compressed",
+                                font=dict(size=11, color=TEXT_MUTED, family=ANALYTICS_FONT)))
 
-    # Label placement: right of the point unless another point sits just to
-    # its right, in which case the label goes left.
-    xr = x_max
-    yr = y_range[1] - y_range[0]
-    positions = {}
-    for p in inliers:
-        crowded = any(q is not p and 0 < q["vol"] - p["vol"] < 0.16 * xr
-                      and abs(q["cagr"] - p["cagr"]) < 0.06 * yr for q in inliers)
-        positions[p["label"]] = "middle left" if crowded else "middle right"
-
-    for kind in ["asset", "family"]:
-        group = [p for p in inliers if p["kind"] == kind]
-        if not group:
-            continue
-        for p in group:
+    for kind in ["asset", "custom", "family"]:
+        for p in [q for q in points if q["kind"] == kind]:
             is_ae = p["label"] == "Asymmetric Edge"
+            solid = kind == "family"
             fig.add_trace(go.Scatter(
-                x=[p["vol"]], y=[p["cagr"]], mode="markers+text",
+                x=[fx(p["vol"])], y=[p["cagr"]], customdata=[p["vol"]], mode="markers+text",
                 text=[f"<b>{p['label']}</b>"],
                 textposition=positions[p["label"]],
                 textfont=dict(size=15 if is_ae else (13 if kind == "family" else 12),
                               color=p["text_color"], family=ANALYTICS_FONT),
-                marker=dict(size=p["size"],
-                            color=p["color"] if kind == "family" else "#ffffff",
-                            line=dict(color="#ffffff" if kind == "family" else p["color"],
-                                      width=2 if kind == "family" else 2.5)),
+                marker=dict(size=p["size"], symbol="circle",
+                            color=p["color"] if solid else "#ffffff",
+                            line=dict(color="#ffffff" if solid else p["color"],
+                                      width=2 if solid else 2.5)),
                 hovertemplate=(f"<b>{p['label']}</b><br>Annualized return %{{y:.1f}}%"
-                               f"<br>Volatility %{{x:.1f}}%<extra></extra>"),
+                               f"<br>Volatility %{{customdata:.1f}}%<extra></extra>"),
                 showlegend=False, cliponaxis=False,
             ))
+    title = "Annualized volatility" + (" (compressed scale above 25%)" if broken else "")
     fig.update_layout(
         **DARK_LAYOUT,
-        xaxis=dict(range=[0, x_max], ticksuffix="%", gridcolor=GRID_COLOR, zeroline=False,
-                   title=dict(text="Annualized volatility", font=dict(size=15, color=TEXT_PRIMARY)),
-                   tickfont=dict(size=15, color=TEXT_MUTED), dtick=x_dtick),
-        yaxis=dict(range=y_range, ticksuffix="%", gridcolor=GRID_COLOR, zeroline=True,
-                   zerolinecolor="#c9c9d3", dtick=5,
-                   title=dict(text="Annualized return", font=dict(size=15, color=TEXT_PRIMARY)),
+        xaxis=dict(range=[-0.005, 1.0], tickmode="array", tickvals=tickvals, ticktext=ticktext,
+                   gridcolor=GRID_COLOR, zeroline=False, fixedrange=True,
+                   title=dict(text=title, font=dict(size=15, color=TEXT_PRIMARY)),
                    tickfont=dict(size=15, color=TEXT_MUTED)),
-        margin=dict(t=20, b=60, l=75, r=30),
+        yaxis=dict(range=y_range, ticksuffix="%", gridcolor=GRID_COLOR, zeroline=True,
+                   zerolinecolor="#c9c9d3", tick0=0, dtick=y_step, fixedrange=True,
+                   title=dict(text="Annualized return", font=dict(size=15, color=TEXT_PRIMARY),
+                              standoff=9),   # a little room between the title and the tick labels
+                   tickfont=dict(size=15, color=TEXT_MUTED)),
+        margin=dict(t=36, b=60, l=85, r=30),
         height=560,
         shapes=shapes, annotations=annotations,
         hovermode="closest",
+        showlegend=True,
+        legend=dict(orientation="h", x=0, xanchor="left", y=1.0, yanchor="bottom",
+                    bgcolor="rgba(0,0,0,0)", borderwidth=0, itemwidth=30,
+                    itemclick=False, itemdoubleclick=False,
+                    font=dict(size=12, color=TEXT_SECONDARY, family=ANALYTICS_FONT)),
     )
     return fig
 
 
-def compute_risk_return_points(combined, latest_date):
-    """Points for the Risk vs. Return chart: the four series plus every visible
-    asset in the universe. Returns (points, spx_point, late_start_notes)."""
+def compute_risk_return_points(combined, start, end, hide=(), custom=None, custom_color=None):
+    """Points for the Risk vs. Return chart over [start, end]: the four series,
+    every visible universe asset not in ``hide``, and an optional custom ticker.
+    Returns (points, ref_point, late_start_notes, custom_ok)."""
     inception = combined.index[0]
-    end = pd.Timestamp(latest_date)
+    start, end = pd.Timestamp(start), pd.Timestamp(end)
     family_style = {
         "AsymEdge": ("Asymmetric Edge", SERIES_COLORS["AsymEdge"], 20, BRAND_PURPLE),
         "80/20": ("80/20", SERIES_COLORS["80/20"], 14, "#3550C9"),
         "60/40": ("60/40", SERIES_COLORS["60/40"], 14, "#1C8FB3"),
         "S&P 500": ("S&P 500", SERIES_COLORS["S&P 500"], 14, "#6B7280"),
     }
-    points, spx_point, late_start = [], None, []
+    points, ref_point, late_start = [], None, []
     for name in SERIES_ORDER:
         if name not in combined.columns:
             continue
-        m = compute_summary_metrics(combined[name], start_date=inception, end_date=end)
+        m = compute_summary_metrics(combined[name], start_date=start, end_date=end)
         if not m:
             continue
         label, color, size, text_color = family_style[name]
@@ -6203,7 +6415,27 @@ def compute_risk_return_points(combined, latest_date):
              "kind": "family", "color": color, "size": size, "text_color": text_color}
         points.append(p)
         if name == PRIMARY_BENCHMARK:
-            spx_point = p
+            ref_point = p
+
+    def asset_point(s, label, kind, color):
+        # Pass the full history so the first month is anchored on the prior
+        # month-end, exactly as for the four portfolios; an asset that began
+        # trading after the period start is measured from its first day.
+        s = s.dropna()
+        s = s[(s.index >= inception) & (s.index <= end)]   # nothing before the strategy's inception
+        in_range = s[s.index >= start]
+        if len(in_range) < 40:
+            return None
+        first = in_range.index[0]
+        late = s.index[0] > start + pd.Timedelta(days=5)
+        if late:
+            late_start.append(f"{label} from {_long_date(s.index[0])}")
+        m = compute_summary_metrics(s, start_date=s.index[0] if late else start, end_date=end)
+        if not m:
+            return None
+        return {"label": label, "vol": m["Annualized Vol"] * 100.0, "cagr": m["CAGR"] * 100.0,
+                "kind": kind, "color": color, "size": 12 if kind == "custom" else 12,
+                "text_color": color}
 
     universe = load_asset_universe()
     tickers, cat_color = [], {}
@@ -6217,44 +6449,88 @@ def compute_risk_return_points(combined, latest_date):
                 cat_color[t] = cat.get("color_text") or "#8a8f9c"
     if tickers:
         closes = load_asset_class_data(tuple(tickers), inception.strftime("%Y-%m-%d"),
-                                       end.strftime("%Y-%m-%d"))
+                                       pd.Timestamp(combined.index[-1]).strftime("%Y-%m-%d"))
         for t in tickers:
-            if closes is None or t not in closes.columns:
+            if t in hide or closes is None or t not in closes.columns:
                 continue
-            s = closes[t].dropna()
-            s = s[(s.index >= inception) & (s.index <= end)]
-            if len(s) < 40:
-                continue
-            if s.index[0] > inception + pd.Timedelta(days=5):
-                late_start.append(f"{t} from {_long_date(s.index[0])}")
-            m = compute_summary_metrics(s, start_date=s.index[0], end_date=end)
-            if not m:
-                continue
-            color = ASSET_POINT_COLORS.get(t, cat_color.get(t, "#8a8f9c"))
-            points.append({"label": t, "vol": m["Annualized Vol"] * 100.0, "cagr": m["CAGR"] * 100.0,
-                           "kind": "asset", "color": color, "size": 12,
-                           "text_color": color})
-    return points, spx_point, late_start
+            p = asset_point(closes[t], t, "asset", ASSET_POINT_COLORS.get(t, cat_color.get(t, "#8a8f9c")))
+            if p:
+                points.append(p)
+
+    custom_ok = None
+    if custom:
+        shown = {p["label"] for p in points}
+        if custom in shown or custom in tickers:
+            custom_ok = "already"
+        else:
+            data = load_custom_ticker_data((custom,), inception.strftime("%Y-%m-%d"),
+                                           pd.Timestamp(combined.index[-1]).strftime("%Y-%m-%d"))
+            p = None
+            if data is not None and not data.empty and custom in data.columns:
+                p = asset_point(data[custom], custom, "custom", custom_color or CAPTURE_CUSTOM_BAR)
+            if p:
+                points.append(p)
+                custom_ok = "ok"
+            else:
+                custom_ok = "missing"
+    return points, ref_point, late_start, custom_ok
 
 
 def render_risk_return_section(combined, latest_date):
-    inception = combined.index[0]
-    end = pd.Timestamp(latest_date)
-    points, spx_point, late_start = compute_risk_return_points(combined, latest_date)
+    data_end = pd.Timestamp(latest_date)
+    idx = combined.index[combined.index <= data_end]
+    lo_mi, hi_mi = _dd_month_index(idx[0]), _dd_month_index(idx[-1])
+    f_mi, t_mi = _period_picker("rr", lo_mi, hi_mi)
+    show = st.pills("Show", list(RR_TOGGLES), default=RR_DEFAULT_SHOW, selection_mode="multi", key="rr_show")
+    hide = {RR_TOGGLES[k] for k in RR_TOGGLES if k not in (show or [])}
+    col_t, col_c, _ = st.columns([1, 0.55, 2.45], vertical_alignment="bottom")
+    raw = col_t.text_input("Custom ticker", value="", max_chars=12, key="rr_custom",
+                           placeholder="e.g. SMH",
+                           help="Add any ticker Yahoo Finance carries to the chart.")
+    custom_color = col_c.color_picker("Color", value=CAPTURE_CUSTOM_BAR, key="rr_custom_color")
+    custom = re.sub(r"[^A-Za-z0-9.\-^=]", "", raw or "").upper() or None
+
+    if t_mi - f_mi + 1 < RR_MIN_MONTHS:
+        st.info("Pick a period of at least three months; volatility needs several monthly returns.")
+        return
+    months = idx.year * 12 + idx.month - 1
+    window = idx[(months >= f_mi) & (months <= t_mi)]
+    start, end = window[0], window[-1]
+    full = f_mi == lo_mi and t_mi == hi_mi
+
+    points, ref_point, late_start, custom_ok = compute_risk_return_points(
+        combined, start, end, hide=hide, custom=custom, custom_color=custom_color)
     if not points:
         st.info("Risk and return figures could not be computed.")
         return
-    st.plotly_chart(build_risk_return_figure(points, spx_point), use_container_width=True,
-                    config=chart_config("Risk vs. Return"))
-    late = (" Assets that began trading after inception are measured from their first day: "
+    if custom_ok == "missing":
+        st.warning(f"Couldn't load enough price history for {custom} in this period.")
+    elif custom_ok == "already":
+        st.caption(f"{custom} is already on the chart.")
+    tag = f"{f_mi}_{t_mi}_{'-'.join(sorted(hide))}_{custom or ''}_{custom_color}".replace("#", "")
+    st.plotly_chart(build_risk_return_figure(points, ref_point), use_container_width=True,
+                    config=chart_config("Risk vs. Return"), key=f"rr_fig_{tag}")
+
+    # A later period is measured from the prior month-end close, so name it by month.
+    period = (f"from the {_long_date(start)} inception through {_long_date(end)}" if full
+              else f"from {start:%B %Y} through "
+                   + (_long_date(end) if t_mi == hi_mi else f"{end:%B %Y}"))
+    hidden = [n for n, t in (("cash (BIL)", "BIL"), ("bitcoin (IBIT)", "IBIT")) if t in hide]
+    late = (" Assets that began trading after the period start are measured from their first day: "
             + "; ".join(late_start) + ".") if late_start else ""
+    broken = max(p["vol"] for p in points) > RR_OUTLIER_VOL
     _footnote(
-        f"Annualized return (CAGR) against annualized volatility of monthly returns, from the "
-        f"{_long_date(inception)} inception through {_long_date(end)}, computed the same way as the "
-        "Performance Summary table. Up and to the left is better. Points above the dashed line earned "
-        "more return per unit of volatility than the 80/20 portfolio (AOA). Hollow points are the assets in the "
-        "strategy's universe, colored by their Asset Universe category; the strategy rotates among them "
-        "rather than holding all of them." + late +
+        f"Annualized return (CAGR) against annualized volatility of monthly returns, {period}, computed "
+        "the same way as the Performance Summary table. Up and to the left is better. Points above the "
+        "dashed line earned more return per unit of volatility than the 80/20 portfolio (AOA). Hollow "
+        "points are the assets in the strategy's universe, colored by their Asset Universe category; the "
+        "strategy rotates among them rather than holding all of them."
+        + (f" {custom} is the custom ticker you added." if custom_ok == "ok" else "")
+        + (" The volatility axis is linear up to the break; anything above 25% sits in a compressed strip "
+           "at the right, so distances there are not to scale and the dashed line stops at the break."
+           if broken else "")
+        + (f" Hidden: {' and '.join(hidden)}." if hidden else "")
+        + late +
         " Asymmetric Edge is anchored to Fidelity's reported returns; everything else uses Yahoo Finance "
         "adjusted closes with distributions reinvested."
     )
