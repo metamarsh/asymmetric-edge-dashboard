@@ -6179,6 +6179,50 @@ RR_STRIP_FRAC = 0.13            # share of the plot width given to the compresse
 RR_GAP_FRAC = 0.017             # the white gap that marks the break
 RR_TOGGLES = {"Cash (BIL)": "BIL", "Bitcoin (IBIT)": "IBIT"}
 RR_DEFAULT_SHOW = ["Bitcoin (IBIT)"]
+# Dot toggles (October 27, 2026). One "Show" pill per dot: the four series, then
+# every visible Asset Universe ETF in universe order (cash and bitcoin keep the
+# names above). Everything is shown by default except cash, which matches the
+# chart before the toggles existed. The axes are fit to the visible dots only,
+# so hiding bitcoin also removes the compressed strip; the dashed 80/20 line is
+# computed whether or not the 80/20 dot is shown.
+RR_DEFAULT_HIDDEN = ["Cash (BIL)"]
+RR_PRESETS = ["Strategy + benchmarks", "Everything"]
+RR_SHOW_KEY = "rr_dots"
+
+
+def _rr_show_options():
+    """Ordered {pill label: (kind, id)} for the Show pills. The option list is
+    fixed by SERIES_ORDER and the Asset Universe, not by what loaded, so a
+    benchmark that fails to download does not reset the viewer's choices."""
+    opts = {series_label(n): ("family", n) for n in SERIES_ORDER}
+    names = {t: label for label, t in RR_TOGGLES.items()}
+    seen = set()
+    for cat in load_asset_universe().get("categories", []):
+        if not cat.get("visible", True):
+            continue
+        for a in cat.get("assets", []):
+            t = str(a.get("ticker", "")).strip().upper()
+            if t and t not in seen and t != "SPY":
+                seen.add(t)
+                opts[names.get(t, t)] = ("asset", t)
+    return opts
+
+
+def _rr_apply_preset(labels):
+    """Presets pill callback: set the Show pills, then clear itself so it acts
+    like a button and can be clicked again."""
+    ss = st.session_state
+    pick = ss.get("rr_preset")
+    if pick == "Strategy + benchmarks":
+        family = {series_label(n) for n in SERIES_ORDER}
+        ss[RR_SHOW_KEY] = [l for l in labels if l in family]
+    elif pick == "Everything":
+        ss[RR_SHOW_KEY] = list(labels)
+    ss["rr_preset"] = None
+
+
+def _rr_join(names):
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
 RR_MIN_MONTHS = 3
 # Risk measure toggle (October 27, 2026). "Downside risk (Sortino)" swaps the x
 # axis to annualized downside deviation, the Sortino denominator, and starts the
@@ -6282,6 +6326,9 @@ def build_risk_return_figure(points, ref_point, measure="vol"):
 
     y_lo = min(0.0, np.floor(min(p["cagr"] for p in points) / 5.0) * 5.0)
     y_hi = np.ceil(max(p["cagr"] for p in points) * 1.08 / 5.0) * 5.0
+    if downside and ref_point:
+        # Only matters when every visible dot sits below the T-bill return.
+        y_hi = max(y_hi, np.ceil(ref_point.get("rf", 0.0) * 1.08 / 5.0) * 5.0)
     y_range = [y_lo - 1.5, y_hi + 1.5]
     y_step = 10 if (y_hi - y_lo) > 40 else 5
 
@@ -6424,7 +6471,7 @@ def build_risk_return_figure(points, ref_point, measure="vol"):
 
 
 def compute_risk_return_points(combined, start, end, hide=(), custom=None, custom_color=None,
-                               rf_monthly=None):
+                               rf_monthly=None, hide_family=()):
     """Points for the Risk vs. Return chart over [start, end]: the four series,
     every visible universe asset not in ``hide``, and an optional custom ticker.
     Returns (points, ref_point, late_start_notes, custom_ok)."""
@@ -6448,9 +6495,10 @@ def compute_risk_return_points(combined, start, end, hide=(), custom=None, custo
              "dd": m["Downside Dev"] * 100.0, "sortino": m["Sortino Ratio"],
              "rf": m["Risk-Free Annual"] * 100.0,
              "kind": "family", "color": color, "size": size, "text_color": text_color}
-        points.append(p)
+        if name not in hide_family:
+            points.append(p)
         if name == PRIMARY_BENCHMARK:
-            ref_point = p
+            ref_point = p     # the dashed line needs it even when its dot is hidden
 
     def asset_point(s, label, kind, color):
         # Pass the full history so the first month is anchored on the prior
@@ -6498,7 +6546,9 @@ def compute_risk_return_points(combined, start, end, hide=(), custom=None, custo
     custom_ok = None
     if custom:
         shown = {p["label"] for p in points}
-        if custom in shown or custom in tickers:
+        if custom in tickers and custom in hide:
+            custom_ok = "hidden"
+        elif custom in shown or custom in tickers:
             custom_ok = "already"
         else:
             data = load_custom_ticker_data((custom,), inception.strftime("%Y-%m-%d"),
@@ -6522,8 +6572,21 @@ def render_risk_return_section(combined, latest_date):
                             selection_mode="single", key="rr_measure")
     downside = (measure_pick or RR_MEASURE_DEFAULT) == RR_MEASURES[1]
     f_mi, t_mi = _period_picker("rr", lo_mi, hi_mi)
-    show = st.pills("Show", list(RR_TOGGLES), default=RR_DEFAULT_SHOW, selection_mode="multi", key="rr_show")
-    hide = {RR_TOGGLES[k] for k in RR_TOGGLES if k not in (show or [])}
+    opts = _rr_show_options()
+    labels = list(opts)
+    ss = st.session_state
+    # Seed through session state rather than default= so the presets can set
+    # it; the key persists across reruns and other controls.
+    if RR_SHOW_KEY not in ss:
+        ss[RR_SHOW_KEY] = [l for l in labels if l not in RR_DEFAULT_HIDDEN]
+    elif any(l not in opts for l in ss[RR_SHOW_KEY]):
+        ss[RR_SHOW_KEY] = [l for l in ss[RR_SHOW_KEY] if l in opts]   # the universe was edited
+    st.pills("Presets", RR_PRESETS, selection_mode="single", key="rr_preset",
+             on_change=_rr_apply_preset, args=(labels,))
+    show = st.pills("Show", labels, selection_mode="multi", key=RR_SHOW_KEY)
+    shown = set(show or [])
+    hide = {i for l, (k, i) in opts.items() if k == "asset" and l not in shown}
+    hide_family = {i for l, (k, i) in opts.items() if k == "family" and l not in shown}
     col_t, col_c, _ = st.columns([1, 0.55, 2.45], vertical_alignment="bottom")
     raw = col_t.text_input("Custom ticker", value="", max_chars=12, key="rr_custom",
                            placeholder="e.g. SMH",
@@ -6531,6 +6594,9 @@ def render_risk_return_section(combined, latest_date):
     custom_color = col_c.color_picker("Color", value=CAPTURE_CUSTOM_BAR, key="rr_custom_color")
     custom = re.sub(r"[^A-Za-z0-9.\-^=]", "", raw or "").upper() or None
 
+    if not shown and not custom:
+        st.info("Every dot is hidden. Turn some on under Show, or pick a preset.")
+        return
     if t_mi - f_mi + 1 < RR_MIN_MONTHS:
         st.info("Pick a period of at least three months; volatility needs several monthly returns.")
         return
@@ -6544,7 +6610,7 @@ def render_risk_return_section(combined, latest_date):
     rf_monthly = load_bil_data(combined.index[0].strftime("%Y-%m-%d"), data_end.strftime("%Y-%m-%d"))
     points, ref_point, late_start, custom_ok = compute_risk_return_points(
         combined, start, end, hide=hide, custom=custom, custom_color=custom_color,
-        rf_monthly=rf_monthly)
+        rf_monthly=rf_monthly, hide_family=hide_family)
     if not points:
         st.info("Risk and return figures could not be computed.")
         return
@@ -6552,8 +6618,10 @@ def render_risk_return_section(combined, latest_date):
         st.warning(f"Couldn't load enough price history for {custom} in this period.")
     elif custom_ok == "already":
         st.caption(f"{custom} is already on the chart.")
+    elif custom_ok == "hidden":
+        st.caption(f"{custom} is in the strategy's universe; turn it on under Show.")
     measure = "downside" if downside else "vol"
-    tag = (f"{measure}_{f_mi}_{t_mi}_{'-'.join(sorted(hide))}_{custom or ''}_{custom_color}"
+    tag = (f"{measure}_{f_mi}_{t_mi}_{'-'.join(sorted(hide | hide_family))}_{custom or ''}_{custom_color}"
            .replace("#", ""))
     st.plotly_chart(build_risk_return_figure(points, ref_point, measure), use_container_width=True,
                     config=chart_config("Risk vs. Downside Risk" if downside else "Risk vs. Return"),
@@ -6563,7 +6631,9 @@ def render_risk_return_section(combined, latest_date):
     period = (f"from the {_long_date(start)} inception through {_long_date(end)}" if full
               else f"from {start:%B %Y} through "
                    + (_long_date(end) if t_mi == hi_mi else f"{end:%B %Y}"))
-    hidden = [n for n, t in (("cash (BIL)", "BIL"), ("bitcoin (IBIT)", "IBIT")) if t in hide]
+    friendly = {"Cash (BIL)": "cash (BIL)", "Bitcoin (IBIT)": "bitcoin (IBIT)"}
+    hidden = [friendly.get(l, l) for l in labels if l not in shown]
+    visible = [friendly.get(l, l) for l in labels if l in shown]
     late = (" Assets that began trading after the period start are measured from their first day: "
             + "; ".join(late_start) + ".") if late_start else ""
     broken = max(p["dd" if downside else "vol"] for p in points) > RR_OUTLIER_VOL
@@ -6581,16 +6651,20 @@ def render_risk_return_section(combined, latest_date):
                 "computed the same way as the Performance Summary table. Up and to the left is better. "
                 "Points above the dashed line earned more return per unit of volatility than the 80/20 "
                 "portfolio (AOA).")
+    if ref_point and PRIMARY_BENCHMARK in hide_family:
+        lead += " The 80/20 dot is hidden; the dashed line still marks its ratio."
     _footnote(
-        lead + " Hollow "
-        "points are the assets in the strategy's universe, colored by their Asset Universe category; the "
-        "strategy rotates among them rather than holding all of them."
+        lead
+        + (" Hollow points are the assets in the strategy's universe, colored by their Asset Universe "
+           "category; the strategy rotates among them rather than holding all of them."
+           if any(p["kind"] == "asset" for p in points) else "")
         + (f" {custom} is the custom ticker you added." if custom_ok == "ok" else "")
         + (f" The {'downside deviation' if downside else 'volatility'} axis is linear up to the break; "
            "anything above 25% sits in a compressed strip at the right, so distances there are not to "
            "scale and the dashed line stops at the break."
            if broken else "")
-        + (f" Hidden: {' and '.join(hidden)}." if hidden else "")
+        + ((f" Showing only {_rr_join(visible)}." if len(visible) < len(hidden)
+            else f" Hidden: {_rr_join(hidden)}.") if hidden and visible else "")
         + late +
         " Asymmetric Edge is anchored to Fidelity's reported returns; everything else uses Yahoo Finance "
         "adjusted closes with distributions reinvested."
