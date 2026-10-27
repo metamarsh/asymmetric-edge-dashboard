@@ -896,6 +896,8 @@ def compute_summary_metrics(daily_series, rf_monthly=None, start_date=None, end_
         "Best Month Date": best_month_date,
         "Calmar Ratio": calmar,
         "Annualized Vol": ann_vol,
+        "Downside Dev": downside_dev,
+        "Risk-Free Annual": rf_annual,
         "Best Year": best_year,
         "Worst Year": worst_year,
         "Win Rate": win_rate,
@@ -3872,7 +3874,7 @@ DEFAULT_ASSET_UNIVERSE = {
             "color_text": "#7E4A0A",
             "assets": [
                 {"name": "Gold", "ticker": "GLD"},
-                {"name": "All-weather", "ticker": "HGER"},
+                {"name": "Broad commodities", "ticker": "HGER"},
             ],
         },
         {
@@ -6178,6 +6180,11 @@ RR_GAP_FRAC = 0.017             # the white gap that marks the break
 RR_TOGGLES = {"Cash (BIL)": "BIL", "Bitcoin (IBIT)": "IBIT"}
 RR_DEFAULT_SHOW = ["Bitcoin (IBIT)"]
 RR_MIN_MONTHS = 3
+# Risk measure toggle (October 27, 2026). "Downside risk (Sortino)" swaps the x
+# axis to annualized downside deviation, the Sortino denominator, and starts the
+# dashed line at the T-bill return so its slope is the 80/20 Sortino ratio.
+RR_MEASURES = ["Volatility", "Downside risk (Sortino)"]
+RR_MEASURE_DEFAULT = "Volatility"
 
 
 def _period_clamp(prefix, which):
@@ -6223,10 +6230,24 @@ def _period_picker(prefix, lo_mi, hi_mi):
     return max(lo_mi, min(hi_mi, f)), max(lo_mi, min(hi_mi, t))
 
 
-def build_risk_return_figure(points, ref_point):
-    """points: dicts {label, vol, cagr, kind ('family'|'asset'|'custom'), color, size, text_color}.
-    The x axis is drawn in a 0-to-1 display coordinate so the linear section and
-    the compressed strip can share one axis; hover shows the true volatility."""
+def build_risk_return_figure(points, ref_point, measure="vol"):
+    """points: dicts {label, vol, dd, sortino, rf, cagr, kind ('family'|'asset'|'custom'),
+    color, size, text_color}. The x axis is drawn in a 0-to-1 display coordinate so
+    the linear section and the compressed strip can share one axis; hover shows
+    the true value.
+
+    measure "vol" plots annualized volatility, with the dashed line from the
+    origin through the 80/20 portfolio. measure "downside" plots annualized
+    downside deviation (the Sortino denominator) and starts the dashed line at
+    the T-bill return, so its slope is the 80/20 Sortino ratio and every point
+    above it has a higher Sortino ratio."""
+    downside = measure == "downside"
+    if downside:
+        # Put downside deviation in the "vol" slot so the axis, break and label
+        # placement below work unchanged.
+        points = [dict(p, vol=p["dd"]) for p in points]
+        if ref_point:
+            ref_point = dict(ref_point, vol=ref_point["dd"])
     vmax = max(p["vol"] for p in points)
     in_max = max([p["vol"] for p in points if p["vol"] <= RR_OUTLIER_VOL] + [1.0])
     broken = vmax > RR_OUTLIER_VOL
@@ -6321,18 +6342,24 @@ def build_risk_return_figure(points, ref_point):
         placed.append(cands[best])
 
     if ref_point and ref_point["vol"] > 0:
-        slope = ref_point["cagr"] / ref_point["vol"]
+        # Volatility: from the origin. Downside: from the T-bill return, so the
+        # slope is (CAGR - risk-free) / downside deviation, the Sortino ratio.
+        y0 = ref_point.get("rf", 0.0) if downside else 0.0
+        slope = (ref_point["cagr"] - y0) / ref_point["vol"]
         x_end = lin_end                       # the line stops at the break
-        if slope > 0 and slope * x_end > y_range[1]:
-            x_end = y_range[1] / slope
-        if slope < 0 and slope * x_end < y_range[0]:
-            x_end = y_range[0] / slope
-        shapes.append(dict(type="line", xref="x", yref="y", x0=0, y0=0, x1=fx(x_end), y1=slope * x_end,
+        if slope > 0 and y0 + slope * x_end > y_range[1]:
+            x_end = (y_range[1] - y0) / slope
+        if slope < 0 and y0 + slope * x_end < y_range[0]:
+            x_end = (y_range[0] - y0) / slope
+        shapes.append(dict(type="line", xref="x", yref="y", x0=0, y0=y0, x1=fx(x_end),
+                           y1=y0 + slope * x_end,
                            line=dict(color="#9CA3AF", width=1.5, dash="dash"), layer="below"))
         # The line is named in a one-item key above the plot, not along the line
         # itself, so it never competes with the point labels.
         fig.add_trace(go.Scatter(
-            x=[None], y=[None], mode="lines", name=f"{PRIMARY_BENCHMARK} return per unit of risk",
+            x=[None], y=[None], mode="lines",
+            name=(f"{PRIMARY_BENCHMARK} Sortino ratio: return above T-bills per unit of downside risk"
+                  if downside else f"{PRIMARY_BENCHMARK} return per unit of risk"),
             line=dict(color="#9CA3AF", width=1.5, dash="dash"), hoverinfo="skip", showlegend=True,
         ))
     if broken:
@@ -6353,7 +6380,7 @@ def build_risk_return_figure(points, ref_point):
             is_ae = p["label"] == "Asymmetric Edge"
             solid = kind == "family"
             fig.add_trace(go.Scatter(
-                x=[fx(p["vol"])], y=[p["cagr"]], customdata=[p["vol"]], mode="markers+text",
+                x=[fx(p["vol"])], y=[p["cagr"]], mode="markers+text",
                 text=[f"<b>{p['label']}</b>"],
                 textposition=positions[p["label"]],
                 textfont=dict(size=15 if is_ae else (13 if kind == "family" else 12),
@@ -6363,10 +6390,15 @@ def build_risk_return_figure(points, ref_point):
                             line=dict(color="#ffffff" if solid else p["color"],
                                       width=2 if solid else 2.5)),
                 hovertemplate=(f"<b>{p['label']}</b><br>Annualized return %{{y:.1f}}%"
-                               f"<br>Volatility %{{customdata:.1f}}%<extra></extra>"),
+                               + ((f"<br>Downside deviation {p['vol']:.1f}%<br>Sortino ratio "
+                                   + (f"{p['sortino']:.2f}" if p["vol"] >= 0.05
+                                      else "n/a (never trailed T-bills)"))
+                                  if downside else f"<br>Volatility {p['vol']:.1f}%")
+                               + "<extra></extra>"),
                 showlegend=False, cliponaxis=False,
             ))
-    title = "Annualized volatility" + (" (compressed scale above 25%)" if broken else "")
+    title = (("Annualized downside deviation" if downside else "Annualized volatility")
+             + (" (compressed scale above 25%)" if broken else ""))
     fig.update_layout(
         **DARK_LAYOUT,
         xaxis=dict(range=[-0.005, 1.0], tickmode="array", tickvals=tickvals, ticktext=ticktext,
@@ -6391,7 +6423,8 @@ def build_risk_return_figure(points, ref_point):
     return fig
 
 
-def compute_risk_return_points(combined, start, end, hide=(), custom=None, custom_color=None):
+def compute_risk_return_points(combined, start, end, hide=(), custom=None, custom_color=None,
+                               rf_monthly=None):
     """Points for the Risk vs. Return chart over [start, end]: the four series,
     every visible universe asset not in ``hide``, and an optional custom ticker.
     Returns (points, ref_point, late_start_notes, custom_ok)."""
@@ -6407,11 +6440,13 @@ def compute_risk_return_points(combined, start, end, hide=(), custom=None, custo
     for name in SERIES_ORDER:
         if name not in combined.columns:
             continue
-        m = compute_summary_metrics(combined[name], start_date=start, end_date=end)
+        m = compute_summary_metrics(combined[name], rf_monthly=rf_monthly, start_date=start, end_date=end)
         if not m:
             continue
         label, color, size, text_color = family_style[name]
         p = {"label": label, "vol": m["Annualized Vol"] * 100.0, "cagr": m["CAGR"] * 100.0,
+             "dd": m["Downside Dev"] * 100.0, "sortino": m["Sortino Ratio"],
+             "rf": m["Risk-Free Annual"] * 100.0,
              "kind": "family", "color": color, "size": size, "text_color": text_color}
         points.append(p)
         if name == PRIMARY_BENCHMARK:
@@ -6430,10 +6465,13 @@ def compute_risk_return_points(combined, start, end, hide=(), custom=None, custo
         late = s.index[0] > start + pd.Timedelta(days=5)
         if late:
             late_start.append(f"{label} from {_long_date(s.index[0])}")
-        m = compute_summary_metrics(s, start_date=s.index[0] if late else start, end_date=end)
+        m = compute_summary_metrics(s, rf_monthly=rf_monthly,
+                                    start_date=s.index[0] if late else start, end_date=end)
         if not m:
             return None
         return {"label": label, "vol": m["Annualized Vol"] * 100.0, "cagr": m["CAGR"] * 100.0,
+                "dd": m["Downside Dev"] * 100.0, "sortino": m["Sortino Ratio"],
+                "rf": m["Risk-Free Annual"] * 100.0,
                 "kind": kind, "color": color, "size": 12 if kind == "custom" else 12,
                 "text_color": color}
 
@@ -6480,6 +6518,9 @@ def render_risk_return_section(combined, latest_date):
     data_end = pd.Timestamp(latest_date)
     idx = combined.index[combined.index <= data_end]
     lo_mi, hi_mi = _dd_month_index(idx[0]), _dd_month_index(idx[-1])
+    measure_pick = st.pills("Measure risk by", RR_MEASURES, default=RR_MEASURE_DEFAULT,
+                            selection_mode="single", key="rr_measure")
+    downside = (measure_pick or RR_MEASURE_DEFAULT) == RR_MEASURES[1]
     f_mi, t_mi = _period_picker("rr", lo_mi, hi_mi)
     show = st.pills("Show", list(RR_TOGGLES), default=RR_DEFAULT_SHOW, selection_mode="multi", key="rr_show")
     hide = {RR_TOGGLES[k] for k in RR_TOGGLES if k not in (show or [])}
@@ -6498,8 +6539,12 @@ def render_risk_return_section(combined, latest_date):
     start, end = window[0], window[-1]
     full = f_mi == lo_mi and t_mi == hi_mi
 
+    # BIL as the risk-free rate, loaded the same way as the Performance Summary,
+    # so each point's Sortino ratio matches that table.
+    rf_monthly = load_bil_data(combined.index[0].strftime("%Y-%m-%d"), data_end.strftime("%Y-%m-%d"))
     points, ref_point, late_start, custom_ok = compute_risk_return_points(
-        combined, start, end, hide=hide, custom=custom, custom_color=custom_color)
+        combined, start, end, hide=hide, custom=custom, custom_color=custom_color,
+        rf_monthly=rf_monthly)
     if not points:
         st.info("Risk and return figures could not be computed.")
         return
@@ -6507,9 +6552,12 @@ def render_risk_return_section(combined, latest_date):
         st.warning(f"Couldn't load enough price history for {custom} in this period.")
     elif custom_ok == "already":
         st.caption(f"{custom} is already on the chart.")
-    tag = f"{f_mi}_{t_mi}_{'-'.join(sorted(hide))}_{custom or ''}_{custom_color}".replace("#", "")
-    st.plotly_chart(build_risk_return_figure(points, ref_point), use_container_width=True,
-                    config=chart_config("Risk vs. Return"), key=f"rr_fig_{tag}")
+    measure = "downside" if downside else "vol"
+    tag = (f"{measure}_{f_mi}_{t_mi}_{'-'.join(sorted(hide))}_{custom or ''}_{custom_color}"
+           .replace("#", ""))
+    st.plotly_chart(build_risk_return_figure(points, ref_point, measure), use_container_width=True,
+                    config=chart_config("Risk vs. Downside Risk" if downside else "Risk vs. Return"),
+                    key=f"rr_fig_{tag}")
 
     # A later period is measured from the prior month-end close, so name it by month.
     period = (f"from the {_long_date(start)} inception through {_long_date(end)}" if full
@@ -6518,16 +6566,29 @@ def render_risk_return_section(combined, latest_date):
     hidden = [n for n, t in (("cash (BIL)", "BIL"), ("bitcoin (IBIT)", "IBIT")) if t in hide]
     late = (" Assets that began trading after the period start are measured from their first day: "
             + "; ".join(late_start) + ".") if late_start else ""
-    broken = max(p["vol"] for p in points) > RR_OUTLIER_VOL
+    broken = max(p["dd" if downside else "vol"] for p in points) > RR_OUTLIER_VOL
+    if downside:
+        lead = (f"Annualized return (CAGR) against annualized downside deviation, {period}. Downside "
+                "deviation counts only the months that trailed T-bills (BIL), so gains add no risk; it "
+                "is the denominator of the Sortino ratio, computed the same way as the Performance "
+                "Summary table. Up and to the left is better. The dashed line starts at the T-bill "
+                "return and runs through the 80/20 portfolio (AOA), so its slope is the 80/20 Sortino "
+                "ratio and points above it have a higher Sortino ratio. Hover a point for its ratio."
+                + (" Over less than a year, downside deviation rests on only a few down months and can "
+                   "swing widely." if t_mi - f_mi + 1 < 12 else ""))
+    else:
+        lead = (f"Annualized return (CAGR) against annualized volatility of monthly returns, {period}, "
+                "computed the same way as the Performance Summary table. Up and to the left is better. "
+                "Points above the dashed line earned more return per unit of volatility than the 80/20 "
+                "portfolio (AOA).")
     _footnote(
-        f"Annualized return (CAGR) against annualized volatility of monthly returns, {period}, computed "
-        "the same way as the Performance Summary table. Up and to the left is better. Points above the "
-        "dashed line earned more return per unit of volatility than the 80/20 portfolio (AOA). Hollow "
+        lead + " Hollow "
         "points are the assets in the strategy's universe, colored by their Asset Universe category; the "
         "strategy rotates among them rather than holding all of them."
         + (f" {custom} is the custom ticker you added." if custom_ok == "ok" else "")
-        + (" The volatility axis is linear up to the break; anything above 25% sits in a compressed strip "
-           "at the right, so distances there are not to scale and the dashed line stops at the break."
+        + (f" The {'downside deviation' if downside else 'volatility'} axis is linear up to the break; "
+           "anything above 25% sits in a compressed strip at the right, so distances there are not to "
+           "scale and the dashed line stops at the break."
            if broken else "")
         + (f" Hidden: {' and '.join(hidden)}." if hidden else "")
         + late +
