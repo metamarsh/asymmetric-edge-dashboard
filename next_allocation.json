@@ -4,27 +4,27 @@
     "asset": "Nasdaq-100",
     "emoji": "\ud83d\udcbb",
     "purpose": "Growth via U.S. tech stocks",
-    "weight": "31.13%"
+    "weight": "27.44%"
   },
   {
-    "ticker": "EMXC",
-    "asset": "Emerging Mkts",
-    "emoji": "\ud83c\udf0f",
-    "purpose": "Emerging-economy growth, ex-China",
-    "weight": "21.49%"
+    "ticker": "IWM",
+    "asset": "Russell 2000",
+    "emoji": "\ud83d\udd37",
+    "purpose": "Upside from U.S. economic expansion",
+    "weight": "30.36%"
   },
   {
     "ticker": "HGER",
     "asset": "Active Commodities",
     "emoji": "\ud83c\udfed",
     "purpose": "Hedge against inflation and price spikes",
-    "weight": "33.81%"
+    "weight": "29.94%"
   },
   {
     "ticker": "IBIT",
     "asset": "Bitcoin",
     "emoji": "\ud83d\udfe0",
     "purpose": "High-upside, fixed-supply digital asset",
-    "weight": "13.58%"
+    "weight": "12.26%"
   }
 ]
