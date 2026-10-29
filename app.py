@@ -3982,6 +3982,11 @@ def build_asset_universe_html(universe):
 # False to show every card alike.
 UNIVERSE_HIGHLIGHT_HELD = True
 
+# Pills above the grid switch the outlines between the holdings owned now and
+# next month's basket from next_allocation.json (October 29, 2026).
+UNIVERSE_VIEW_NOW = "Held now"
+UNIVERSE_VIEW_NEXT = "Next month"
+
 # Approximate DM Sans advance widths in em, used only to center the ticker
 # and weight pill as one group under each held card's name.
 _DM_SANS_EM = {".": 0.27, "%": 0.82, " ": 0.25, "-": 0.36}
@@ -4001,7 +4006,7 @@ def _est_text_width(text, size, bold=False):
     return w * size * (1.04 if bold else 1.0)
 
 
-def build_asset_universe_chart(universe, held=None):
+def build_asset_universe_chart(universe, held=None, held_label="Held now, with weight"):
     """Build a Plotly figure that renders the asset universe grid.
 
     Uses pixel-based coordinates (xaxis 0 to WIDTH, yaxis HEIGHT to 0 so
@@ -4016,6 +4021,8 @@ def build_asset_universe_chart(universe, held=None):
 
     held: optional {ticker: weight percent} for the current allocation. Held
     cards get an outline and a weight pill; see UNIVERSE_HIGHLIGHT_HELD.
+    held_label: the key's text for outlined cards. Pass next month's wording
+    when held is the upcoming basket rather than the current holdings.
     """
     held = held if (held and UNIVERSE_HIGHLIGHT_HELD) else {}
     categories = [
@@ -4171,7 +4178,7 @@ def build_asset_universe_chart(universe, held=None):
         # Neutral cool gray, so the key reads as applying to every category
         # rather than matching the Defensive row's warm tan.
         legend_bg, legend_txt = "#DFE1E7", "#5F6573"
-        for outlined, label in [(True, "Held now, with weight"), (False, "In the universe")]:
+        for outlined, label in [(True, held_label), (False, "In the universe")]:
             shapes.append(dict(
                 type="path",
                 path=_round_rect_path(x + 1, ly - 6, x + 13, ly + 6, 2) if outlined
@@ -4183,7 +4190,8 @@ def build_asset_universe_chart(universe, held=None):
                 x=x + 20, y=ly, text=label, showarrow=False, xanchor="left", yanchor="middle",
                 font=dict(size=12, color=TEXT_SECONDARY, family=font),
             ))
-            x += 190
+            # Longer keys (next month's wording) push the second item right.
+            x += max(190, 20 + _est_text_width(label, 12) + 34)
 
     fig = go.Figure()
     fig.update_layout(
@@ -4260,16 +4268,58 @@ def render_asset_universe_section():
         held = {r["ticker"]: float(r["weight_pct"]) for r in (rows or [])}
     except Exception:
         held = {}
-    fig = build_asset_universe_chart(universe, held)
-    au_config = chart_config("Asset Universe", static=True)
+
+    # Next month's basket, the same targets as the Allocation Drift table's
+    # New Target column. Blank or zero weights are skipped.
+    next_held = {}
+    for r in load_next_allocation():
+        try:
+            t = str(r.get("ticker", "")).strip().upper()
+            w = float(str(r.get("weight", "")).strip().rstrip("%"))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if t and w > 0:
+            next_held[t] = w
+
+    view = UNIVERSE_VIEW_NOW
+    if next_held and UNIVERSE_HIGHLIGHT_HELD:
+        view = st.pills("Show", [UNIVERSE_VIEW_NOW, UNIVERSE_VIEW_NEXT],
+                        default=UNIVERSE_VIEW_NOW, selection_mode="single",
+                        key="universe_view") or UNIVERSE_VIEW_NOW
+    show_next = view == UNIVERSE_VIEW_NEXT
+    shown = next_held if show_next else held
+
+    if show_next:
+        fig = build_asset_universe_chart(universe, next_held,
+                                         held_label="Next month, with target weight")
+        au_config = chart_config("Asset Universe Next Month", static=True)
+    else:
+        fig = build_asset_universe_chart(universe, held)
+        au_config = chart_config("Asset Universe", static=True)
     # Drawn at its native 720 px. The old centering column squeezed it below
     # that width in narrower windows, which shrank the cards and crowded the text.
     st.plotly_chart(fig, use_container_width=False, config=au_config)
 
+    # A held or targeted ticker with no card would otherwise vanish silently.
+    grid_tickers = {str(a.get("ticker", "")).strip().upper()
+                    for c in universe.get("categories", []) if c.get("visible", True)
+                    for a in c.get("assets", [])}
+    missing = sorted(t for t in shown if t not in grid_tickers)
+    if missing and UNIVERSE_HIGHLIGHT_HELD:
+        st.warning("Not shown in the grid (no visible card): " + ", ".join(missing)
+                   + ". Add it under Edit Asset Universe.")
+
+    if show_next:
+        outline_note = ("Outlined cards are next month's holdings, with their target weights "
+                        "for the upcoming month-end rebalance. ")
+    elif held and UNIVERSE_HIGHLIGHT_HELD:
+        outline_note = ("Outlined cards are the current holdings, with their weights as of the "
+                        "latest rebalance. ")
+    else:
+        outline_note = ""
     footnote_au = (
         "Current asset universe used by the Asymmetric Edge strategy. "
-        + ("Outlined cards are the current holdings, with their weights as of the latest rebalance. "
-           if held and UNIVERSE_HIGHLIGHT_HELD else "")
+        + outline_note
         + "Holdings rotate based on regime signals and are rebalanced as market conditions evolve."
     )
     st.markdown(f'<p class="footer-text">{footnote_au}</p>', unsafe_allow_html=True)
