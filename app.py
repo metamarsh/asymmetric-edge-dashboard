@@ -2159,6 +2159,63 @@ def load_holdings_values():
     return pd.DataFrame()
 
 
+FIDELITY_LEDGER_NAME = "History_for_Account_Z27314115.csv"
+
+
+@st.cache_data(ttl=3600)
+def load_position_flows():
+    """Per-ticker daily cash moving into or out of each position, from the
+    Fidelity transaction export the pipeline is built on.
+
+    Positive means cash came out of the position into the account (a sale or a
+    dividend), negative means cash went into it (a purchase or a reinvested
+    dividend). An in-kind ACAT transfer counts as money put into the position
+    at the value Fidelity records, since those shares arrived from outside the
+    account rather than being earned. Added October 29, 2026 so What Drove the
+    Month can measure each position's actual dollar gain, including trades
+    filled at prices other than the close.
+
+    Returns a DataFrame indexed by trade date with one column per ticker, or
+    None if the export is missing or unreadable.
+    """
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    pipeline_dir = os.path.join(os.path.dirname(script_dir), "Portfolio Hist Val Reconstruction")
+    path = os.path.join(pipeline_dir, FIDELITY_LEDGER_NAME)
+    if not os.path.exists(path):
+        # The cloud deploy gets position_flows.csv, written by
+        # portfolio_valuation.py with the same logic, instead of the raw export.
+        for flows_path in (os.path.join(pipeline_dir, "position_flows.csv"),
+                           os.path.join(script_dir, "position_flows.csv")):
+            if os.path.exists(flows_path):
+                try:
+                    return pd.read_csv(flows_path, parse_dates=["date"]).set_index("date").sort_index()
+                except Exception:
+                    return None
+        return None
+    try:
+        df = pd.read_csv(path, encoding="utf-8-sig")
+        df.columns = [c.strip() for c in df.columns]
+        df["date"] = pd.to_datetime(df["Run Date"], errors="coerce")
+        df["sym"] = (df["Symbol"].astype(str).str.strip().str.upper()
+                     .replace({"NAN": "", "NONE": ""}))
+        amt = pd.to_numeric(df["Amount ($)"], errors="coerce").fillna(0.0)
+        qty = pd.to_numeric(df["Quantity"], errors="coerce").fillna(0.0)
+        act = df["Action"].astype(str).str.upper()
+        trade = (act.str.startswith("YOU BOUGHT") | act.str.startswith("YOU SOLD")
+                 | act.str.startswith("DIVIDEND RECEIVED") | act.str.contains("REINVESTMENT")
+                 | act.str.contains("SPINOFF") | act.str.contains("IN LIEU OF"))
+        acat_in_kind = act.str.contains("TRANSFER OF ASSETS") & (df["sym"] != "") & (qty.abs() > 0)
+        flow = amt.where(trade, 0.0) - amt.where(acat_in_kind, 0.0)
+        keep = (trade | acat_in_kind) & (df["sym"] != "") & df["date"].notna() \
+            & ~df["sym"].isin(CASH_LIKE_TICKERS)
+        out = (pd.DataFrame({"date": df.loc[keep, "date"], "sym": df.loc[keep, "sym"],
+                             "flow": flow[keep]})
+               .groupby(["date", "sym"])["flow"].sum().unstack(fill_value=0.0).sort_index())
+        return out
+    except Exception:
+        return None
+
+
 MONTH_START_OVERRIDE_NAME = "month_start_override.json"
 
 
@@ -4885,7 +4942,9 @@ def build_attribution_figure(result, is_open):
     level = 0.0
     for r in result["rows"]:
         c = r["contribution"] * 100.0
-        rows.append({"label": _asset_row_label(r["ticker"]), "weight": r["avg_weight"] * 100.0,
+        rows.append({"label": _asset_row_label(r["ticker"]),
+                     "weight": None if r.get("avg_weight") is None else r["avg_weight"] * 100.0,
+                     "entered_on": r.get("entered_on"),
                      "ret": None if r["return"] is None else r["return"] * 100.0,
                      "start": level, "end": level + c, "value": c,
                      "color": GAIN_GREEN if c >= 0 else LOSS_RED})
@@ -4904,7 +4963,9 @@ def build_attribution_figure(result, is_open):
     n = len(rows)
     rows_bottom = HEAD_H + n * ROW_H + TOTAL_H
     TICK_H = 24
-    H = rows_bottom + TICK_H + 50
+    notes = _attribution_notes(result)
+    note_lines = sum(len(textwrap.wrap(t, width=118)) for t in notes)
+    H = rows_bottom + TICK_H + 50 + note_lines * 19 + (8 if notes else 0)
 
     shapes, ann = [], []
     # Header
@@ -4942,6 +5003,9 @@ def build_attribution_figure(result, is_open):
         if r["weight"] is not None:
             _px_text(ann, WEIGHT_R, mid, f"{r['weight']:.1f}%", anchor="right", size=13,
                      color=TEXT_SECONDARY)
+        elif r.get("entered_on") is not None:
+            _px_text(ann, WEIGHT_R, mid, f"Bought {r['entered_on'].month}/{r['entered_on'].day}",
+                     anchor="right", size=12, color=TEXT_MUTED)
         if r["ret"] is not None:
             _px_text(ann, RETURN_R, mid, _fmt_pct(r["ret"], 2), anchor="right", size=13,
                      color=TEXT_SECONDARY)
@@ -4984,8 +5048,43 @@ def build_attribution_figure(result, is_open):
             parts.append("No holding detracted.")
         wrapped = "<br>".join(textwrap.wrap(" ".join(parts), width=118))
         _px_text(ann, 0, rows_bottom + TICK_H + 14, wrapped, size=13, valign="top")
+        y = rows_bottom + TICK_H + 14 + 19 * len(textwrap.wrap(" ".join(parts), width=118)) + 8
+        for t in notes:
+            lines = textwrap.wrap(t, width=118)
+            _px_text(ann, 0, y, "<br>".join(lines), size=12, color=TEXT_SECONDARY, valign="top")
+            y += 19 * len(lines)
 
     return _pixel_layout(go.Figure(), W, int(H), shapes, ann)
+
+
+def _attribution_notes(result):
+    """Plain-language notes for rows a reader would otherwise question: a
+    contribution whose sign differs from the fund's return, and a position
+    bought on the month's last day for the next month. Added October 29, 2026."""
+    notes = []
+    for r in result["rows"]:
+        c = r["contribution"] * 100.0
+        if round(c, 2) == 0:
+            continue
+        name = _asset_label(r["ticker"])
+        if r.get("entered_on") is not None:
+            d = r["entered_on"]
+            notes.append(f"{name} was bought on {d.strftime('%B')} {d.day} for the next month. "
+                         f"The move from its purchase price to that day's close "
+                         f"({_fmt_pct(c, 2)}) counts in this month.")
+            continue
+        ret = r.get("return")
+        if ret is None or round(ret * 100.0, 2) == 0 or (ret > 0) == (c > 0):
+            continue
+        fw, lw = r.get("first_weight"), r.get("last_weight")
+        if fw is None or lw is None:
+            continue
+        notes.append(f"{name} returned {_fmt_pct(ret * 100.0, 2)} but contributed "
+                     f"{_fmt_pct(c, 2)}: its weight went from {fw * 100:.1f}% at the start "
+                     f"of the month to {lw * 100:.1f}%, so its "
+                     f"{'losing' if c < 0 else 'winning'} days landed on more money than its "
+                     f"{'winning' if c < 0 else 'losing'} days.")
+    return notes
 
 
 def build_rebalance_log_figure(rows_newest_first, stats):
@@ -5218,8 +5317,20 @@ def render_monthly_returns_section(combined, latest_date):
 # 2. WHAT DROVE THE MONTH (return attribution)
 # ===========================================================================
 
-def compute_month_attribution(period, ae_series, holdings_values, totals, prices):
+def compute_month_attribution(period, ae_series, holdings_values, totals, prices, flows=None):
     """Each holding's contribution to one month's return.
+
+    Changed October 29, 2026. When the Fidelity ledger is available (flows),
+    each holding's daily piece is its actual dollar gain that day: closing
+    value minus the prior close, plus any cash it paid out (sales,
+    dividends) and minus any cash put into it (purchases), divided by the
+    prior close's account value. That captures trades filled at prices other
+    than the close and positions bought on a month's final day for the next
+    month, both of which the price-only method below missed. September 2026
+    showed the gap: two rebalance days (September 8 and 30) left 0.21 points
+    unexplained, and spreading that across the holdings flipped the sign of
+    Japan's and active commodities' contributions. Without the ledger, the
+    price-only method below is the fallback.
 
     Contribution is built day by day: a holding's weight at the prior close
     (from the reconstructed holdings, so intramonth trades and deposits are
@@ -5263,7 +5374,9 @@ def compute_month_attribution(period, ae_series, holdings_values, totals, prices
         acct = hv.sum(axis=1)
     px = _price_frame_on(prices, dates)
 
+    use_ledger = flows is not None and not flows.empty
     contrib, weight_sum, held_growth, unpriced = {}, {}, {}, set()
+    first_w, last_w, entered_on = {}, {}, {}
     n_days = len(dates) - 1
     for k in range(1, len(dates)):
         d0, d1 = dates[k - 1], dates[k]
@@ -5272,34 +5385,59 @@ def compute_month_attribution(period, ae_series, holdings_values, totals, prices
             continue
         growth = float(S.loc[d0]) / start_val
         row = hv.loc[d0]
-        for ticker, value in row.items():
-            if value <= 1.0 or ticker in CASH_LIKE_TICKERS:
+        row1 = hv.loc[d1]
+        day_flows = (flows[(flows.index > d0) & (flows.index <= d1)].sum()
+                     if use_ledger else pd.Series(dtype=float))
+        tickers = set(t for t, v in row.items() if v > 1.0)
+        if use_ledger:
+            tickers |= set(t for t, v in row1.items() if v > 1.0)
+            tickers |= set(t for t, f in day_flows.items() if abs(f) >= 0.005 and t in hv.columns)
+        for ticker in tickers:
+            if ticker in CASH_LIKE_TICKERS:
                 continue
-            w = float(value) / a0
-            weight_sum[ticker] = weight_sum.get(ticker, 0.0) + w
+            value = float(row.get(ticker, 0.0))
+            w = value / a0 if value > 1.0 else 0.0
+            if w > 0:
+                weight_sum[ticker] = weight_sum.get(ticker, 0.0) + w
+                first_w.setdefault(ticker, w)
+                last_w[ticker] = w
+            elif use_ledger and ticker not in weight_sum:
+                entered_on.setdefault(ticker, d1)
             p0 = px.at[d0, ticker] if ticker in px.columns else np.nan
             p1 = px.at[d1, ticker] if ticker in px.columns else np.nan
-            if pd.notna(p0) and pd.notna(p1) and p0 > 0:
+            priced = pd.notna(p0) and pd.notna(p1) and p0 > 0
+            if priced and w > 0:
                 r_day = float(p1) / float(p0) - 1.0
-                contrib[ticker] = contrib.get(ticker, 0.0) + growth * w * r_day
                 held_growth[ticker] = held_growth.get(ticker, 1.0) * (1.0 + r_day)
-            else:
-                unpriced.add(ticker)
+            if use_ledger:
+                pnl = float(row1.get(ticker, 0.0)) - value + float(day_flows.get(ticker, 0.0))
+                contrib[ticker] = contrib.get(ticker, 0.0) + growth * pnl / a0
+            elif w > 0:
+                if priced:
+                    contrib[ticker] = contrib.get(ticker, 0.0) + growth * w * r_day
+                else:
+                    unpriced.add(ticker)
 
     rows = []
-    for ticker, wsum in weight_sum.items():
-        avg_w = wsum / n_days
-        c = contrib.get(ticker)
-        if c is None:
+    for ticker, c in contrib.items():
+        avg_w = weight_sum.get(ticker, 0.0) / n_days
+        held = ticker in weight_sum
+        if held and avg_w < 0.005 and abs(c) < 0.0001:
             continue
-        if avg_w < 0.005 and abs(c) < 0.0001:
+        # A position bought on the month's last trading day for the next
+        # month: it gets its own row only when the slip from its purchase
+        # price to that day's close is big enough to see (0.05 points).
+        if not held and abs(c) < 0.0005:
             continue
         # The holding's own return over the days it was actually held this
         # month, so a position bought mid-month is not credited with moves
         # from before it was owned.
         ret = held_growth[ticker] - 1.0 if ticker in held_growth else None
-        rows.append({"ticker": ticker, "avg_weight": avg_w, "return": ret, "contribution": c})
-    rows.sort(key=lambda r: -r["avg_weight"])
+        rows.append({"ticker": ticker, "avg_weight": avg_w if held else None, "return": ret,
+                     "contribution": c,
+                     "first_weight": first_w.get(ticker), "last_weight": last_w.get(ticker),
+                     "entered_on": None if held else entered_on.get(ticker)})
+    rows.sort(key=lambda r: -(r["avg_weight"] or 0.0))
     explained = sum(r["contribution"] for r in rows)
     residual = month_return - explained
     # Fold the small remainder (cash income, fees, timing and dividend-date
@@ -5307,11 +5445,11 @@ def compute_month_attribution(period, ae_series, holdings_values, totals, prices
     # to their average weight, so the rows add up exactly to the reported month.
     # Tyler, October 22, 2026: a separate residual bar invited questions it
     # could not answer. The raw figures stay in the result for checking.
-    wsum = sum(r["avg_weight"] for r in rows)
+    wsum = sum((r["avg_weight"] or 0.0) for r in rows)
     for r in rows:
         r["raw_contribution"] = r["contribution"]
         if wsum > 0:
-            r["contribution"] = r["contribution"] + residual * r["avg_weight"] / wsum
+            r["contribution"] = r["contribution"] + residual * (r["avg_weight"] or 0.0) / wsum
     return {
         "period": period,
         "start": dates[0],
@@ -5320,6 +5458,7 @@ def compute_month_attribution(period, ae_series, holdings_values, totals, prices
         "rows": rows,
         "residual": residual,
         "unpriced": sorted(unpriced),
+        "method": "ledger" if use_ledger else "price",
     }
 
 
@@ -5350,7 +5489,8 @@ def render_attribution_section(portfolio_series, holdings_values, totals, prices
     if not choice:
         choice = default
     period = options[labels.index(choice)]
-    result = compute_month_attribution(period, s, holdings_values, totals, prices)
+    result = compute_month_attribution(period, s, holdings_values, totals, prices,
+                                       flows=load_position_flows())
     if result is not None and result.get("stale_prices"):
         through = result["price_through"]
         st.info(
@@ -5376,15 +5516,33 @@ def render_attribution_section(portfolio_series, holdings_values, totals, prices
     if result["unpriced"]:
         unpriced = (" Holdings without a price history (" + ", ".join(result["unpriced"]) +
                     ") are reconciled into the other holdings.")
+    if result.get("method") == "ledger":
+        how = ("is built day by day from each position's actual dollar gain in the account: its "
+               "value at the close, less its value at the prior close, plus any cash it paid out "
+               "(sales and dividends) and less any cash put into it (purchases, at the prices the "
+               "trades actually filled), divided by the account's value at the prior close and "
+               "compounded through the month. Trades and dividends come from the Fidelity "
+               "transaction history. A position bought on the month's last trading day for the "
+               "next month can appear with no average weight, because the move from its purchase "
+               "price to that day's close counts in this month. ")
+        recon = ("Contributions are reconciled to that total: the small remaining difference "
+                 "(cash interest and rounding) is spread across the holdings in proportion to "
+                 "their weight.")
+    else:
+        how = ("is built day by day from each holding's weight at the prior close times its "
+               "adjusted-close return, compounded through the month. ")
+        recon = ("Contributions are reconciled to that total: the difference between the sum of "
+                 "the funds' price moves and the account's reported return (cash income, fees, "
+                 "and trade timing) is spread across the holdings in proportion to their weight.")
     _footnote(
         f"{period.strftime('%B %Y')}, measured from the {_long_date(result['start'])} close to the "
-        f"{_long_date(result['end'])} close. Contribution, the share of the month's return each holding produced (in percentage points), is built day by day "
-        "from each holding's weight at the prior close (actual reconstructed holdings, so intramonth "
-        "trades and deposits are reflected) times its adjusted-close return, compounded through the "
-        f"month. Avg. weight is the average of those daily weights, and Return is the holding's own adjusted-close return over the days it was held. The total is {total_src}. "
-        "Contributions are reconciled to that total: the small difference between the sum of the "
-        "funds' price moves and the account's reported return (cash income, fees, and timing "
-        "differences) is spread across the holdings in proportion to their weight." + unpriced
+        f"{_long_date(result['end'])} close. Contribution, the share of the month's return each "
+        f"holding produced (in percentage points), {how}"
+        "Avg. weight is the average of the holding's weights at each prior close, and Return is "
+        "the fund's own adjusted-close return over the days it was held. A holding's contribution "
+        "can differ in sign from its return when its weight changed during the month, because "
+        f"its gains and losses then landed on different amounts of money. The total is {total_src}. "
+        + recon + unpriced
     )
 
 
