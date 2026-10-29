@@ -1,0 +1,140 @@
+{
+  "as_of": "2026-10-26",
+  "rows": [
+    {
+      "ticker": "COH7",
+      "sector": "Petroleum",
+      "commodity": "Brent Crude Oil",
+      "facility": "ICE",
+      "weight": 17.8552014328
+    },
+    {
+      "ticker": "HOF7",
+      "sector": "Petroleum",
+      "commodity": "Heating Oil",
+      "facility": "CME",
+      "weight": 13.5676918394
+    },
+    {
+      "ticker": "QSF7",
+      "sector": "Petroleum",
+      "commodity": "Gasoil",
+      "facility": "ICE",
+      "weight": 12.2503446665
+    },
+    {
+      "ticker": "GCG7",
+      "sector": "Precious",
+      "commodity": "Gold",
+      "facility": "CME",
+      "weight": 17.229927312500003
+    },
+    {
+      "ticker": "S F7",
+      "sector": "Grains And Soybean Products",
+      "commodity": "Soybeans",
+      "facility": "CME",
+      "weight": 2.53665244916
+    },
+    {
+      "ticker": "BOF7",
+      "sector": "Grains And Soybean Products",
+      "commodity": "Bean Oil",
+      "facility": "CME",
+      "weight": 1.88483093568
+    },
+    {
+      "ticker": "SMF7",
+      "sector": "Grains And Soybean Products",
+      "commodity": "Soymeal",
+      "facility": "CME",
+      "weight": 1.8510742267299998
+    },
+    {
+      "ticker": "W H7",
+      "sector": "Grains And Soybean Products",
+      "commodity": "Wheat",
+      "facility": "CME",
+      "weight": 1.73832865881
+    },
+    {
+      "ticker": "KWH7",
+      "sector": "Grains And Soybean Products",
+      "commodity": "Kansas Wheat",
+      "facility": "CME",
+      "weight": 1.7212178802900002
+    },
+    {
+      "ticker": "C H7",
+      "sector": "Grains And Soybean Products",
+      "commodity": "Corn",
+      "facility": "CME",
+      "weight": 1.6913563578100002
+    },
+    {
+      "ticker": "CCH7",
+      "sector": "Softs",
+      "commodity": "Cocoa",
+      "facility": "ICE",
+      "weight": 3.6590761511500003
+    },
+    {
+      "ticker": "SBH7",
+      "sector": "Softs",
+      "commodity": "Sugar",
+      "facility": "ICE",
+      "weight": 2.80053911421
+    },
+    {
+      "ticker": "KCH7",
+      "sector": "Softs",
+      "commodity": "Coffee",
+      "facility": "ICE",
+      "weight": 2.71943688501
+    },
+    {
+      "ticker": "CTH7",
+      "sector": "Softs",
+      "commodity": "Cotton",
+      "facility": "ICE",
+      "weight": 1.9794854183200001
+    },
+    {
+      "ticker": "LHG7",
+      "sector": "LivestockAndDairy",
+      "commodity": "Lean Hogs",
+      "facility": "CME",
+      "weight": 5.5481871277
+    },
+    {
+      "ticker": "LCG7",
+      "sector": "LivestockAndDairy",
+      "commodity": "Live Cattle",
+      "facility": "CME",
+      "weight": 5.36927982678
+    },
+    {
+      "ticker": "HGH7",
+      "sector": "Industrial",
+      "commodity": "Comex Copper",
+      "facility": "CME",
+      "weight": 1.90110685387
+    },
+    {
+      "ticker": "LXF7",
+      "sector": "Industrial",
+      "commodity": "Zinc",
+      "facility": "LME",
+      "weight": 1.8674854327000001
+    },
+    {
+      "ticker": "LAF27",
+      "sector": "Industrial",
+      "commodity": "Aluminum",
+      "facility": "LME",
+      "weight": 1.82877743062
+    }
+  ],
+  "source": "Harbor page data",
+  "fetched_at": "2026-10-26 23:02"
+}
