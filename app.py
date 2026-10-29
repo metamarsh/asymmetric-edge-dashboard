@@ -669,6 +669,18 @@ def load_bil_data(start_date: str, end_date: str):
     return monthly
 
 
+@st.cache_data(ttl=3600)
+def load_bil_daily(start_date: str, end_date: str):
+    """BIL daily adjusted closes, the risk-free leg of the rolling 12-month
+    Sortino ratio. None when no prices load; the caller then treats the
+    risk-free rate as zero."""
+    frame = _fetch_closes(["BIL"], start_date, end_date)
+    if frame.empty or "BIL" not in frame.columns:
+        return None
+    close = frame["BIL"].dropna()
+    return close if len(close) >= 2 else None
+
+
 def normalize_to_10k(series: pd.Series) -> pd.Series:
     """Rebase a price series to 10,000 at its first observation.
 
@@ -6083,10 +6095,13 @@ def build_rolling_figure(frame, view):
         return fig
     start, end = frame.index[0], frame.index[-1]
     tick_dates, tick_labels = make_x_axis_labels(start, end)
+    ratio = view == ROLLING_SORTINO_VIEW  # a ratio, not a percent
     vmin = float(np.nanmin(frame.values))
     vmax = float(np.nanmax(frame.values))
-    pad = max(1.0, (vmax - vmin) * 0.12)
+    pad = max(0.2 if ratio else 1.0, (vmax - vmin) * 0.12)
     y_range = [min(0.0, vmin - pad), vmax + pad]
+    if ratio and vmin >= 0:
+        y_range[0] = 0.0  # all ratios positive: start the axis at zero, not below it
     ends = []
     for name in reversed(list(frame.columns)):
         s = frame[name].dropna()
@@ -6107,13 +6122,16 @@ def build_rolling_figure(frame, view):
         fig.add_trace(go.Scatter(
             x=s.index, y=s.values, mode="lines+markers", name=label,
             line=dict(color=rgba, width=width), marker=dict(size=5, color=rgba),
-            hovertemplate="%{x|%b %Y}<br>%{y:.1f}%<extra>" + label + "</extra>",
+            hovertemplate=("%{x|%b %Y}<br>%{y:.2f}" if ratio else "%{x|%b %Y}<br>%{y:.1f}%")
+            + "<extra>" + label + "</extra>",
         ))
         label_color = color if name != "S&P 500" else "#6B7280"
         if name == "60/40":
             label_color = "#1C8FB3"
         ends.append({"x": s.index[-1], "y": float(s.iloc[-1]), "y_label": float(s.iloc[-1]),
-                     "text": _fmt_pct(float(s.iloc[-1])), "color": label_color})
+                     "text": (f"{float(s.iloc[-1]):.2f}".replace("-", "\u2212") if ratio
+                              else _fmt_pct(float(s.iloc[-1]))),
+                     "color": label_color})
     ends = _spread_end_labels(ends, y_range)
     annotations = [dict(x=e["x"], y=e["y_label"], xref="x", yref="y", text=f"<b>{e['text']}</b>",
                         showarrow=False, xanchor="left", xshift=10, yanchor="middle",
@@ -6121,7 +6139,7 @@ def build_rolling_figure(frame, view):
                    for e in ends]
     fig.update_layout(
         **DARK_LAYOUT,
-        yaxis=dict(ticksuffix="%", gridcolor=GRID_COLOR, zeroline=True, zerolinecolor="#c9c9d3",
+        yaxis=dict(ticksuffix="" if ratio else "%", gridcolor=GRID_COLOR, zeroline=True, zerolinecolor="#c9c9d3",
                    range=y_range, tickfont=dict(size=16, color=TEXT_MUTED)),
         xaxis=dict(tickmode="array", tickvals=tick_dates, ticktext=tick_labels,
                    gridcolor="rgba(0,0,0,0)", tickfont=dict(size=16, color=TEXT_MUTED),
@@ -6137,9 +6155,42 @@ def build_rolling_figure(frame, view):
     return fig
 
 
-def compute_rolling_frame(combined, latest_date, view):
-    """Month-end rolling figures in percent, one column per series, closed
-    months only, indexed by month-end date."""
+# Rolling 12-month Sortino (October 29, 2026). Measured from DAILY returns:
+# twelve monthly returns often hold only one or two months below T-bills, and
+# the monthly figure then explodes (55.9 for the window ending February 2026).
+# So it will not match the Performance Summary's monthly-based Sortino.
+ROLLING_VIEWS = ["12-month return", "Excess return", "12-month volatility", "12-month Sortino"]
+ROLLING_SORTINO_VIEW = "12-month Sortino"
+
+
+def _rolling_sortino(daily, periods, rf_daily):
+    """Sortino ratio for the 12 months ending each month-end in periods:
+    (window return - T-bill return) / annualized downside deviation, the
+    downside measured from daily returns below the T-bill's daily return."""
+    s = daily.dropna()
+    d = s.pct_change().dropna()
+    if rf_daily is not None:
+        rf = rf_daily.reindex(s.index).ffill().pct_change().reindex(d.index).fillna(0.0)
+    else:
+        rf = pd.Series(0.0, index=d.index)
+    out = {}
+    for p in periods:
+        end = p.to_timestamp(how="end").normalize()
+        start = (p - 12).to_timestamp(how="end").normalize()
+        mask = (d.index > start) & (d.index <= end)
+        if mask.sum() < 150:  # roughly 12 months of sessions; skip short windows
+            continue
+        w, wrf = d[mask], rf[mask]
+        excess_total = float((1 + w).prod() - (1 + wrf).prod())
+        dd = float(np.sqrt(np.mean(np.minimum(w.values - wrf.values, 0.0) ** 2)) * np.sqrt(252))
+        if dd > 0:
+            out[p] = excess_total / dd
+    return pd.Series(out, dtype="float64")
+
+
+def compute_rolling_frame(combined, latest_date, view, rf_daily=None):
+    """Month-end rolling figures in percent (a ratio for the Sortino view),
+    one column per series, closed months only, indexed by month-end date."""
     inception = combined.index[0]
     open_p = _open_period(latest_date)
     names = [n for n in SERIES_ORDER if n in combined.columns]
@@ -6154,6 +6205,10 @@ def compute_rolling_frame(combined, latest_date, view):
         frame = pd.DataFrame({n: (values[n] / values[n].shift(12) - 1.0) * 100.0 for n in names})
     elif view == "12-month volatility":
         frame = pd.DataFrame({n: rets[n].rolling(12).std() * np.sqrt(12) * 100.0 for n in names})
+    elif view == ROLLING_SORTINO_VIEW:
+        # Same windows as the other views: the first ends twelve closed months in.
+        periods = rets["AsymEdge"].index[11:]
+        frame = pd.DataFrame({n: _rolling_sortino(combined[n], periods, rf_daily) for n in names})
     else:
         ae12 = values["AsymEdge"] / values["AsymEdge"].shift(12) - 1.0
         frame = pd.DataFrame({n: (ae12 - (values[n] / values[n].shift(12) - 1.0)) * 100.0
@@ -6168,11 +6223,15 @@ def render_rolling_section(combined, latest_date):
     if "AsymEdge" not in combined.columns:
         st.info("Rolling returns unavailable: the portfolio series did not load.")
         return
-    view = st.pills("Select view", ["12-month return", "Excess return", "12-month volatility"],
+    view = st.pills("Select view", ROLLING_VIEWS,
                     default="12-month return", selection_mode="single", key="rolling_view")
     if not view:
         view = "12-month return"
-    frame = compute_rolling_frame(combined, latest_date, view)
+    rf_daily = None
+    if view == ROLLING_SORTINO_VIEW:
+        rf_daily = load_bil_daily(combined.index[0].strftime("%Y-%m-%d"),
+                                  pd.Timestamp(latest_date).strftime("%Y-%m-%d"))
+    frame = compute_rolling_frame(combined, latest_date, view, rf_daily=rf_daily)
     if frame.empty:
         st.info("Rolling figures need at least 12 closed months.")
         return
@@ -6187,6 +6246,15 @@ def render_rolling_section(combined, latest_date):
                           "the strategy was ahead."),
         "12-month volatility": ("Each point is the annualized standard deviation of the 12 monthly returns "
                                 "ending that month-end."),
+        ROLLING_SORTINO_VIEW: (
+            "Each point is the Sortino ratio for the 12 months ending that month-end: the return above "
+            "T-bills (BIL) divided by annualized downside deviation, which counts only the daily returns "
+            "that fell short of the T-bill return" + ("" if rf_daily is not None else
+                                                     " (T-bill prices did not load, so zero is used)")
+            + ". It is measured from daily returns, because 12 monthly returns can hold just one losing "
+            "month and swing the ratio wildly, so it will not match the monthly-based Sortino in the "
+            "Performance Summary. Asymmetric Edge's daily values within each month are approximations, "
+            "as with Max DD (Daily)."),
     }[view]
     _footnote(
         f"{view_text} Only closed months are used. The first full window ends {first_full:%B %Y}, "
