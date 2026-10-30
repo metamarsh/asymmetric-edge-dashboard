@@ -4971,6 +4971,34 @@ def build_monthly_returns_figure(ae_monthly, spx_monthly, open_period, last_date
 
 
 MONTHLY_LAYOUTS = ["Dashboard", "Newsletter (tall)"]
+MONTHLY_BENCH_FOOTNOTE = {
+    "80/20": ("vs 80/20 is the difference in percentage points from the 80/20 portfolio (AOA, total "
+              "return with dividends reinvested, Yahoo Finance) over the same months. "),
+    "60/40": ("vs 60/40 is the difference in percentage points from the 60/40 portfolio (AOR, total "
+              "return with dividends reinvested, Yahoo Finance) over the same months. "),
+    "S&P 500": ("vs S&amp;P 500 is the difference in percentage points from the S&amp;P 500 (SPY, "
+                "total return with dividends reinvested, Yahoo Finance) over the same months. "),
+}
+MONTHLY_BENCH_CAPTION = {"80/20": "the 80/20 portfolio (AOA)", "60/40": "the 60/40 portfolio (AOR)",
+                         "S&P 500": "the S&P 500 (SPY)"}
+
+
+def _monthly_custom_all(ticker, combined, latest_date):
+    """Monthly total returns for a typed-in ticker, open month included, for
+    the Monthly Returns grid. None when no usable history comes back."""
+    inception = combined.index[0]
+    prices = load_custom_ticker_data((ticker,), inception.strftime("%Y-%m-%d"),
+                                     pd.Timestamp(latest_date).strftime("%Y-%m-%d"))
+    if prices is None or prices.empty or ticker not in prices.columns:
+        return None
+    daily = _price_frame_on(prices[[ticker]], combined.index)[ticker].dropna()
+    if len(daily) < 30:
+        return None
+    monthly = _monthly_returns(daily, inception)
+    # A fund that launched after inception: its first month is partial, so drop it.
+    if daily.index[0] > pd.Timestamp(inception) + timedelta(days=5) and len(monthly):
+        monthly = monthly.iloc[1:]
+    return monthly if len(monthly) >= 1 else None
 
 
 def build_monthly_returns_tall_figure(ae_monthly, spx_monthly, open_period, last_date,
@@ -4982,7 +5010,7 @@ def build_monthly_returns_tall_figure(ae_monthly, spx_monthly, open_period, last
     years = sorted({p.year for p in ae_monthly.index})
     n = max(len(years), 1)
     W = 520
-    LABEL_W, GAP = 74, 6
+    LABEL_W, GAP = 88, 6
     cell_w = (W - LABEL_W - n * GAP) / n
     HEAD_H, ROW_H, ROW_GAP = 36, 38, 4
     TOT_H, VS_H = 44, 40
@@ -5474,18 +5502,40 @@ def render_monthly_returns_section(combined, latest_date):
         return
     inception = combined.index[0]
     ae_m = _monthly_returns(combined["AsymEdge"], inception)
-    spx_m = (_monthly_returns(combined[PRIMARY_BENCHMARK], inception)
-             if PRIMARY_BENCHMARK in combined.columns else None)
     open_p = _open_period(latest_date)
     layout = st.pills("Layout", MONTHLY_LAYOUTS, default=MONTHLY_LAYOUTS[0],
                       selection_mode="single", key="monthly_layout") or MONTHLY_LAYOUTS[0]
+    # Compare against (added October 29, 2026): the 80/20 stays the default
+    # as the primary benchmark; 60/40, the S&P 500 or any typed-in ticker can
+    # be swapped in for the vs column and the hover.
+    choices = [b for b in ("80/20", "60/40", "S&P 500") if b in combined.columns]
+    default = PRIMARY_BENCHMARK if PRIMARY_BENCHMARK in choices else (choices[0] if choices else None)
+    pick = st.pills("Compare against", choices + [CAPTURE_CUSTOM_LABEL], default=default,
+                    selection_mode="single", key="monthly_bench") or default
+    bench_label, spx_m, custom = pick, None, None
+    if pick == CAPTURE_CUSTOM_LABEL:
+        col, _ = st.columns([1, 3], vertical_alignment="bottom")
+        raw = col.text_input("ETF ticker", value=CAPTURE_CUSTOM_DEFAULT, max_chars=12,
+                             key="monthly_ticker",
+                             help="Any ticker Yahoo Finance carries, such as QQQ, VTI or SCHD.")
+        ticker = re.sub(r"[^A-Za-z0-9.\-^=]", "", raw or "").upper() or CAPTURE_CUSTOM_DEFAULT
+        spx_m = _monthly_custom_all(ticker, combined, latest_date)
+        if spx_m is None:
+            st.warning(f"Couldn't load enough price history for {ticker}. Showing the 80/20 instead.")
+            bench_label = default
+        else:
+            bench_label, custom = ticker, ticker
+    if spx_m is None and bench_label in combined.columns:
+        spx_m = _monthly_returns(combined[bench_label], inception)
     if layout == MONTHLY_LAYOUTS[1]:
-        fig = build_monthly_returns_tall_figure(ae_m, spx_m, open_p, latest_date)
+        fig = build_monthly_returns_tall_figure(ae_m, spx_m, open_p, latest_date,
+                                                bench_label=bench_label)
         st.plotly_chart(fig, use_container_width=False,
                         config=chart_config("Monthly Returns (newsletter)", static=True),
                         key="monthly_fig_tall")
     else:
-        fig = build_monthly_returns_figure(ae_m, spx_m, open_p, latest_date)
+        fig = build_monthly_returns_figure(ae_m, spx_m, open_p, latest_date,
+                                           bench_label=bench_label)
         st.plotly_chart(fig, use_container_width=False,
                         config=chart_config("Monthly Returns", static=True),
                         key="monthly_fig_wide")
@@ -5506,14 +5556,18 @@ def render_monthly_returns_section(combined, latest_date):
         "Monthly time-weighted returns. Closed months are anchored to Fidelity's reported "
         "returns for the account and tie exactly. " + open_note +
         "The Year column compounds the months shown, so the current year is year to date. "
-        "vs 80/20 is the difference in percentage points from the 80/20 portfolio (AOA, total "
-        "return with dividends reinvested, Yahoo Finance) over the same months. January 2024 is "
+        + MONTHLY_BENCH_FOOTNOTE.get(bench_label,
+            f"vs {bench_label} is the difference in percentage points from {bench_label} (total "
+            "return with dividends reinvested, Yahoo Finance) over the same months; a year shows "
+            "n/a when the ticker's history does not cover every month of it. ") +
+        "January 2024 is "
         "measured from the January 2, 2024 inception close. Hover a cell for both returns to two "
         "decimals. All figures are before taxes and advisory fees."
     )
     newsletter_caption(
         f"Asymmetric Edge monthly returns from {_cap_date(inception)} through "
-        f"{_cap_date(latest_date)}, with each year compared to the 80/20 portfolio (AOA)."
+        f"{_cap_date(latest_date)}, with each year compared to "
+        f"{MONTHLY_BENCH_CAPTION.get(bench_label, bench_label)}."
         + (f" {open_p.strftime('%B %Y')} is month to date." if open_p is not None else "")
         + " " + NEWSLETTER_RETURNS_SENTENCES
     )
