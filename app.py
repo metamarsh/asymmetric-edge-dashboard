@@ -4673,11 +4673,14 @@ def _long_date(d):
 # "Before taxes and fees" (Tyler, October 29, 2026): the live returns come from
 # actual fills, so trading costs are already in them. Backtest captions, which
 # the dashboard does not produce, still say "and transaction costs."
+# Shortened October 30, 2026 (November 2026 update). Captions whose description
+# already names the benchmarks end with NEWSLETTER_RETURNS_SENTENCES. Growth of
+# $10,000 names them in the ending instead (newsletter_returns_sentences).
+NEWSLETTER_YAHOO = "from Yahoo Finance adjusted closes with dividends reinvested"
+NEWSLETTER_CLOSE = "Before taxes and fees. Past performance does not guarantee future results."
 NEWSLETTER_RETURNS_SENTENCES = (
-    "Asymmetric Edge returns are anchored to Fidelity's time-weighted returns for personal "
-    "account. Benchmark data from Yahoo Finance (adjusted close, dividends reinvested). All "
-    "figures are shown before taxes and fees, which would reduce returns. "
-    "Past performance does not guarantee future results."
+    "Asymmetric Edge uses my account's time-weighted returns. "
+    f"Benchmark data {NEWSLETTER_YAHOO}. " + NEWSLETTER_CLOSE
 )
 CAPTION_SERIES = {"80/20": "80/20 (AOA)", "60/40": "60/40 (AOR)", "S&P 500": "S&P 500 (SPY)"}
 
@@ -4703,6 +4706,17 @@ def _cap_join(items):
 def _cap_vs(keys):
     bench = [CAPTION_SERIES[k] for k in SERIES_ORDER if k in keys and k in CAPTION_SERIES]
     return "Asymmetric Edge vs. " + _cap_join(bench) if bench else "Asymmetric Edge"
+
+
+def newsletter_returns_sentences(keys):
+    """Standard ending that names the benchmarks shown, for a caption whose
+    description doesn't (Growth of $10,000)."""
+    bench = [CAPTION_SERIES[k] for k in SERIES_ORDER if k in keys and k in CAPTION_SERIES]
+    out = "Asymmetric Edge uses my account's time-weighted returns. "
+    if bench:
+        lead = "Benchmarks are" if len(bench) > 1 else "The benchmark is"
+        out += f"{lead} {_cap_join(bench)}, {NEWSLETTER_YAHOO}. "
+    return out + NEWSLETTER_CLOSE
 
 
 def newsletter_caption(text):
@@ -5810,13 +5824,13 @@ def render_attribution_section(portfolio_series, holdings_values, totals, prices
         f"its gains and losses then landed on different amounts of money. The total is {total_src}. "
         + recon + unpriced
     )
-    how_short = ("based on actual position gains in my account, including trades and dividends"
+    how_short = ("from actual gains in my account"
                  if result.get("method") == "ledger" else
-                 "based on each holding's weight and return")
+                 "from each holding's weight and return")
     newsletter_caption(
-        f"Each holding's contribution to the Asymmetric Edge return from "
+        f"Each holding's contribution to my return, "
         f"{_cap_date(result['start'])} through {_cap_date(result['end'])}, {how_short}. "
-        + NEWSLETTER_RETURNS_SENTENCES.replace("Benchmark data from", "Fund returns from")
+        "Fund returns from Yahoo Finance (adjusted close). " + NEWSLETTER_CLOSE
     )
 
 
@@ -7927,8 +7941,8 @@ def main():
     )
     st.markdown(f'<p class="footer-text">{footnote_growth}</p>', unsafe_allow_html=True)
     newsletter_caption(
-        f"Growth of $10,000, {_cap_vs(enabled_series)}, {_cap_date(start_g)} through "
-        f"{_cap_date(end_g)}. " + NEWSLETTER_RETURNS_SENTENCES
+        f"Growth of $10,000, {_cap_date(start_g)} through {_cap_date(end_g)}. "
+        + newsletter_returns_sentences(enabled_series)
     )
 
     # Partial-month extension status. Surfaced here so it's visible alongside
@@ -8141,12 +8155,14 @@ def main():
     _ac_rets = locals().get("returns_dict") or {}
     _ac_order = (sorted(_ac_rets, key=lambda k: -_ac_rets[k]) if _ac_rets
                  else list(ASSET_CLASS_TICKERS))
+    _ac_tickers = [ASSET_CLASS_TICKERS[l] for l in _ac_order if l in ASSET_CLASS_TICKERS]
+    _ac_notes = [note for t, note in (("EMXC", "EMXC excludes China"),
+                                      ("DXJ", "DXJ hedges out the yen")) if t in _ac_tickers]
     newsletter_caption(
-        f"{selected_asset_period} total returns from {_cap_date(af_start)} through "
-        f"{_cap_date(af_end)}, using adjusted close prices (dividends reinvested) from Yahoo "
-        "Finance. Tickers: "
-        + ", ".join(f"{ASSET_CLASS_TICKERS[l]} ({l})" for l in _ac_order if l in ASSET_CLASS_TICKERS)
-        + ". Past performance does not guarantee future results."
+        f"Total returns, {_cap_date(af_start)} through {_cap_date(af_end)}, from Yahoo Finance "
+        "adjusted closes. Tickers, top to bottom: " + ", ".join(_ac_tickers) + "."
+        + (" " + ", and ".join(_ac_notes) + "." if _ac_notes else "")
+        + " Past performance does not guarantee future results."
     )
 
     st.divider()
