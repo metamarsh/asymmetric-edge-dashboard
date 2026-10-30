@@ -3894,6 +3894,10 @@ def render_hger_lookthrough_section():
         f"tracked by HGER, grouped by sector. Weights change daily."
     )
     st.markdown(f'<p class="footer-text">{footnote}</p>', unsafe_allow_html=True)
+    newsletter_caption(
+        f"Sector weights of the Quantix Commodity Index, which active commodities (HGER) tracks, "
+        f"as of {_cap_date(as_of_dt)}. Source: Harbor Capital. Weights change daily."
+    )
 
     if st.button("Refresh from Harbor", key="qci_refresh"):
         fetch_qci_weights.clear()
@@ -4639,10 +4643,12 @@ def _footnote(text):
     st.markdown(f'<p class="footer-text">{text}</p>', unsafe_allow_html=True)
 
 
-def _render_guarded(title, fn, *args, **kwargs):
+def _render_guarded(title, fn, *args, heading=True, **kwargs):
     """Render one analytics section under its header. Any exception becomes a
-    notice in place of the section; the rest of the dashboard keeps going."""
-    st.markdown(f"## {title}")
+    notice in place of the section; the rest of the dashboard keeps going.
+    heading=False lets a section write its own (changing) heading."""
+    if heading:
+        st.markdown(f"## {title}")
     try:
         fn(*args, **kwargs)
     except Exception as exc:  # noqa: BLE001 - a section must never take the page down
@@ -4655,6 +4661,64 @@ def _render_guarded(title, fn, *args, **kwargs):
 def _long_date(d):
     d = pd.Timestamp(d)
     return f"{d:%B} {d.day}, {d.year}"
+
+
+# ---------------------------------------------------------------------------
+# Newsletter captions (added October 29, 2026). Each newsletter chart gets a
+# collapsed "Newsletter caption" box under its long footnote, with the short,
+# email-ready caption already dated for the current view and a copy button.
+# The wording follows the asymmetric-edge-newsletter skill
+# (references/dashboard-charts.md); change them together.
+# ---------------------------------------------------------------------------
+# "Before taxes and fees" (Tyler, October 29, 2026): the live returns come from
+# actual fills, so trading costs are already in them. Backtest captions, which
+# the dashboard does not produce, still say "and transaction costs."
+NEWSLETTER_RETURNS_SENTENCES = (
+    "Asymmetric Edge returns are anchored to Fidelity's time-weighted returns for personal "
+    "account. Benchmark data from Yahoo Finance (adjusted close, dividends reinvested). All "
+    "figures are shown before taxes and fees, which would reduce returns. "
+    "Past performance does not guarantee future results."
+)
+CAPTION_SERIES = {"80/20": "80/20 (AOA)", "60/40": "60/40 (AOR)", "S&P 500": "S&P 500 (SPY)"}
+
+
+_NUMBER_WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven",
+                 8: "eight", 9: "nine"}
+
+
+def _cap_date(d):
+    d = pd.Timestamp(d)
+    return f"{d.month}/{d.day}/{d.year}"
+
+
+def _cap_join(items):
+    items = list(items)
+    if len(items) <= 1:
+        return "".join(items)
+    if len(items) == 2:
+        return f"{items[0]} and {items[1]}"
+    return ", ".join(items[:-1]) + f", and {items[-1]}"
+
+
+def _cap_vs(keys):
+    bench = [CAPTION_SERIES[k] for k in SERIES_ORDER if k in keys and k in CAPTION_SERIES]
+    return "Asymmetric Edge vs. " + _cap_join(bench) if bench else "Asymmetric Edge"
+
+
+def newsletter_caption(text):
+    """A collapsed, copy-ready caption for pasting under the chart in Ghost."""
+    with st.expander("Newsletter caption", expanded=False):
+        st.code(text, language=None, wrap_lines=True)
+
+
+def attribution_title(month_return, period):
+    """Section heading and newsletter heading for What Drove the Month, e.g.
+    "Where October's Loss Came From". Tyler, October 29, 2026: one name for
+    both, saying gain or loss to match the month."""
+    word = "Return"
+    if month_return is not None and round(month_return * 100.0, 2) != 0:
+        word = "Gain" if month_return > 0 else "Loss"
+    return f"Where {period.strftime('%B')}'s {word} Came From"
 
 
 def _asset_label(ticker):
@@ -4894,6 +4958,133 @@ def build_monthly_returns_figure(ae_monthly, spx_monthly, open_period, last_date
                            line=dict(color=BRAND_PURPLE, width=2)))
         _px_text(ann, mx + 19, ly, "MTD", anchor="center", size=10, color=BRAND_PURPLE, bold=True)
         _px_text(ann, mx + 46, ly, "Month to date", size=11, color=TEXT_SECONDARY)
+
+    fig = go.Figure()
+    if hx:
+        fig.add_trace(go.Scatter(
+            x=hx, y=hy, mode="markers",
+            marker=dict(size=int(min(cell_w, ROW_H)), color="rgba(0,0,0,0)", symbol="square"),
+            hovertext=htext, hovertemplate="%{hovertext}<extra></extra>",
+            showlegend=False,
+        ))
+    return _pixel_layout(fig, W, H, shapes, ann)
+
+
+MONTHLY_LAYOUTS = ["Dashboard", "Newsletter (tall)"]
+
+
+def build_monthly_returns_tall_figure(ae_monthly, spx_monthly, open_period, last_date,
+                                      bench_label=PRIMARY_BENCHMARK):
+    """Phone-friendly Monthly Returns for the newsletter (added October 29,
+    2026): months run down the side and years across the top, so a few wide
+    columns replace the 15-column grid, which shrinks to unreadable on a
+    phone. Same data, colors, totals and MTD outline as the wide grid."""
+    years = sorted({p.year for p in ae_monthly.index})
+    n = max(len(years), 1)
+    W = 520
+    LABEL_W, GAP = 74, 6
+    cell_w = (W - LABEL_W - n * GAP) / n
+    HEAD_H, ROW_H, ROW_GAP = 36, 38, 4
+    TOT_H, VS_H = 44, 40
+    top0 = HEAD_H + 8
+    y_tot = top0 + 12 * (ROW_H + ROW_GAP) + 4
+    y_vs = y_tot + TOT_H + ROW_GAP
+    chip_w, chip_h, chip_gap = 104, 26, 8
+    leg_top = y_vs + VS_H + 22
+    H = int(leg_top + 22 + 2 * (chip_h + chip_gap) + (36 if open_period is not None else 0) + 6)
+
+    def x_year(i):
+        return LABEL_W + GAP + i * (cell_w + GAP)
+
+    shapes, ann = [], []
+    hx, hy, htext = [], [], []
+    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+              "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    _px_text(ann, 0, HEAD_H / 2, "Month", size=14, color=TEXT_SECONDARY, bold=True)
+    for i, year in enumerate(years):
+        _px_text(ann, x_year(i) + cell_w / 2, HEAD_H / 2, str(year), anchor="center",
+                 size=15, bold=True)
+    shapes.append(dict(type="line", x0=0, x1=W, y0=HEAD_H, y1=HEAD_H,
+                       line=dict(color=BRAND_PURPLE, width=2)))
+    for m, name in enumerate(months, start=1):
+        mid = top0 + (m - 1) * (ROW_H + ROW_GAP) + ROW_H / 2
+        _px_text(ann, 0, mid, name, size=14, color=TEXT_SECONDARY, bold=True)
+
+    _px_text(ann, 0, y_tot + TOT_H / 2, "Year", size=15, color=BRAND_PURPLE, bold=True)
+    _px_text(ann, 0, y_vs + VS_H / 2, f"vs {bench_label}", size=13, color=TEXT_SECONDARY,
+             bold=True)
+    for i, year in enumerate(years):
+        x0 = x_year(i)
+        x1 = x0 + cell_w
+        ae_growth, spx_growth, spx_ok = 1.0, 1.0, True
+        for m in range(1, 13):
+            y0 = top0 + (m - 1) * (ROW_H + ROW_GAP)
+            y1 = y0 + ROW_H
+            mid = (y0 + y1) / 2
+            period = pd.Period(year=year, month=m, freq="M")
+            r = ae_monthly.get(period)
+            pct = None if r is None or not np.isfinite(r) else float(r) * 100.0
+            is_open = open_period is not None and period == open_period and pct is not None
+            shapes.append(dict(
+                type="path", path=_round_rect_path(x0, y0, x1, y1, 5),
+                fillcolor=_heat_fill(pct),
+                line=dict(color=BRAND_PURPLE, width=2) if is_open else dict(width=0),
+                layer="below",
+            ))
+            if pct is None:
+                continue
+            ae_growth *= 1.0 + pct / 100.0
+            s_r = spx_monthly.get(period) if spx_monthly is not None else None
+            if s_r is None or not np.isfinite(s_r):
+                spx_ok = False
+            else:
+                spx_growth *= 1.0 + float(s_r)
+            text = _fmt_pct(pct)
+            if is_open:
+                text += "  MTD"
+            _px_text(ann, (x0 + x1) / 2, mid, text, anchor="center", size=15,
+                     color=ANALYTICS_CELL_TEXT, bold=True)
+            label = period.strftime("%B %Y")
+            if is_open:
+                label += f" (month to date through {pd.Timestamp(last_date):%b} {pd.Timestamp(last_date).day})"
+            spx_txt = _fmt_pct(float(s_r) * 100.0, 2) if s_r is not None and np.isfinite(s_r) else "n/a"
+            hx.append((x0 + x1) / 2)
+            hy.append(mid)
+            htext.append(f"<b>{label}</b><br>Asymmetric Edge {_fmt_pct(pct, 2)}"
+                         f"<br>{bench_label} {spx_txt}")
+        year_pct = (ae_growth - 1.0) * 100.0
+        shapes.append(dict(type="path", path=_round_rect_path(x0, y_tot, x1, y_tot + TOT_H, 5),
+                           fillcolor=ANALYTICS_TINT, line=dict(width=0), layer="below"))
+        _px_text(ann, (x0 + x1) / 2, y_tot + TOT_H / 2, _fmt_pct(year_pct), anchor="center",
+                 size=16, color=BRAND_PURPLE, bold=True)
+        if spx_ok:
+            diff = year_pct - (spx_growth - 1.0) * 100.0
+            _px_text(ann, (x0 + x1) / 2, y_vs + VS_H / 2, _fmt_pct(diff, suffix=" pts"),
+                     anchor="center", size=14, color=GAIN_GREEN if diff >= 0 else LOSS_RED,
+                     bold=True)
+        else:
+            _px_text(ann, (x0 + x1) / 2, y_vs + VS_H / 2, "n/a", anchor="center", size=14,
+                     color=TEXT_MUTED)
+
+    # Scale legend, three chips a row
+    _px_text(ann, 0, leg_top, "Scale", size=12, color=TEXT_SECONDARY, bold=True)
+    tiers = list(reversed(HEAT_TIERS))
+    for k, (lower, fill, label) in enumerate(tiers):
+        row, col = divmod(k, 3)
+        cx = col * (chip_w + chip_gap)
+        cy = leg_top + 22 + row * (chip_h + chip_gap)
+        shapes.append(dict(type="path",
+                           path=_round_rect_path(cx, cy - chip_h / 2, cx + chip_w, cy + chip_h / 2, 5),
+                           fillcolor=fill, line=dict(width=0), layer="below"))
+        _px_text(ann, cx + chip_w / 2, cy, label, anchor="center", size=12,
+                 color=ANALYTICS_CELL_TEXT)
+    if open_period is not None:
+        my = leg_top + 22 + 2 * (chip_h + chip_gap) + 4
+        shapes.append(dict(type="path",
+                           path=_round_rect_path(0, my - chip_h / 2, 44, my + chip_h / 2, 5),
+                           fillcolor="#ffffff", line=dict(color=BRAND_PURPLE, width=2)))
+        _px_text(ann, 22, my, "MTD", anchor="center", size=11, color=BRAND_PURPLE, bold=True)
+        _px_text(ann, 54, my, "Month to date", size=12, color=TEXT_SECONDARY)
 
     fig = go.Figure()
     if hx:
@@ -5286,9 +5477,18 @@ def render_monthly_returns_section(combined, latest_date):
     spx_m = (_monthly_returns(combined[PRIMARY_BENCHMARK], inception)
              if PRIMARY_BENCHMARK in combined.columns else None)
     open_p = _open_period(latest_date)
-    fig = build_monthly_returns_figure(ae_m, spx_m, open_p, latest_date)
-    st.plotly_chart(fig, use_container_width=False,
-                    config=chart_config("Monthly Returns", static=True))
+    layout = st.pills("Layout", MONTHLY_LAYOUTS, default=MONTHLY_LAYOUTS[0],
+                      selection_mode="single", key="monthly_layout") or MONTHLY_LAYOUTS[0]
+    if layout == MONTHLY_LAYOUTS[1]:
+        fig = build_monthly_returns_tall_figure(ae_m, spx_m, open_p, latest_date)
+        st.plotly_chart(fig, use_container_width=False,
+                        config=chart_config("Monthly Returns (newsletter)", static=True),
+                        key="monthly_fig_tall")
+    else:
+        fig = build_monthly_returns_figure(ae_m, spx_m, open_p, latest_date)
+        st.plotly_chart(fig, use_container_width=False,
+                        config=chart_config("Monthly Returns", static=True),
+                        key="monthly_fig_wide")
     open_note = ""
     if open_p is not None:
         through = f"{pd.Timestamp(latest_date):%B} {pd.Timestamp(latest_date).day}"
@@ -5309,7 +5509,13 @@ def render_monthly_returns_section(combined, latest_date):
         "vs 80/20 is the difference in percentage points from the 80/20 portfolio (AOA, total "
         "return with dividends reinvested, Yahoo Finance) over the same months. January 2024 is "
         "measured from the January 2, 2024 inception close. Hover a cell for both returns to two "
-        "decimals. All figures are before taxes, advisory fees, and transaction costs."
+        "decimals. All figures are before taxes and advisory fees."
+    )
+    newsletter_caption(
+        f"Asymmetric Edge monthly returns from {_cap_date(inception)} through "
+        f"{_cap_date(latest_date)}, with each year compared to the 80/20 portfolio (AOA)."
+        + (f" {open_p.strftime('%B %Y')} is month to date." if open_p is not None else "")
+        + " " + NEWSLETTER_RETURNS_SENTENCES
     )
 
 
@@ -5465,6 +5671,10 @@ def compute_month_attribution(period, ae_series, holdings_values, totals, prices
 
 
 def render_attribution_section(portfolio_series, holdings_values, totals, prices, latest_date):
+    # The heading names the selected month and says gain or loss, so it is
+    # written once the month's result is known (Tyler, October 29, 2026).
+    head = st.empty()
+    head.markdown("## Where the Month's Return Came From")
     if holdings_values is None or holdings_values.empty:
         st.info("Attribution needs holdings_daily_values.csv from the pipeline.")
         return
@@ -5503,8 +5713,10 @@ def render_attribution_section(portfolio_series, holdings_values, totals, prices
         st.info("Not enough data to attribute that month.")
         return
     is_open = period == open_p
+    title = attribution_title(result["month_return"], period)
+    head.markdown(f"## {title}")
     st.plotly_chart(build_attribution_figure(result, is_open), use_container_width=False,
-                    config=chart_config(f"What Drove the Month {period.strftime('%b-%y')}", static=True),
+                    config=chart_config(f"{title} {period.strftime('%Y')}", static=True),
                     key=f"attr_fig_{period}")
     if not is_open:
         total_src = "Fidelity's reported return for the month"
@@ -5543,6 +5755,14 @@ def render_attribution_section(portfolio_series, holdings_values, totals, prices
         "can differ in sign from its return when its weight changed during the month, because "
         f"its gains and losses then landed on different amounts of money. The total is {total_src}. "
         + recon + unpriced
+    )
+    how_short = ("based on actual position gains in my account, including trades and dividends"
+                 if result.get("method") == "ledger" else
+                 "based on each holding's weight and return")
+    newsletter_caption(
+        f"Each holding's contribution to the Asymmetric Edge return from "
+        f"{_cap_date(result['start'])} through {_cap_date(result['end'])}, {how_short}. "
+        + NEWSLETTER_RETURNS_SENTENCES.replace("Benchmark data from", "Fund returns from")
     )
 
 
@@ -6103,6 +6323,10 @@ def render_underwater_section(combined, latest_date):
         "monthly time-weighted returns, so within-month depths are approximations. 80/20 (AOA), "
         "60/40 (AOR) and S&amp;P 500 (SPY) are total returns from Yahoo Finance, dividends reinvested."
     )
+    newsletter_caption(
+        f"Decline from each portfolio's previous high, {_cap_vs(shown)}, "
+        f"{_cap_date(w_start)} through {_cap_date(w_end)}. " + NEWSLETTER_RETURNS_SENTENCES
+    )
 
 
 # ===========================================================================
@@ -6227,6 +6451,19 @@ def render_capture_section(combined, latest_date):
         "upside divided by downside. " + default_note +
         "The sample is still small, so these figures will move as months accumulate. Asymmetric "
         "Edge months are anchored to Fidelity's reported returns; " + sources
+    )
+    bench_cap = custom if custom else CAPTION_SERIES.get(bench_name, bench_name)
+    bench_own = (f"{custom}'s" if custom else
+                 {"S&P 500": "the S&P 500's", "80/20": "the 80/20 portfolio's",
+                  "60/40": "the 60/40 portfolio's"}.get(bench_name, f"{bench_name}'s"))
+    last_closed = monthly["AsymEdge"].index[-1] if len(monthly["AsymEdge"]) else None
+    through = (f", through {_cap_date(last_closed.to_timestamp(how='end'))}"
+               if last_closed is not None else "")
+    newsletter_caption(
+        f"Asymmetric Edge vs. {bench_cap} in {bench_own} "
+        f"{_NUMBER_WORDS.get(len(worst), str(len(worst)))} worst months since the "
+        f"strategy went live on {_cap_date(inception)}{through}. Upside and downside capture use "
+        f"all {n} closed months. " + NEWSLETTER_RETURNS_SENTENCES
     )
 
 
@@ -6418,7 +6655,21 @@ def render_rolling_section(combined, latest_date):
         f"{view_text} Only closed months are used. The first full window ends {first_full:%B %Y}, "
         "measured from the January 2, 2024 inception close. Asymmetric Edge months are anchored to "
         "Fidelity's reported returns; 80/20 (AOA), 60/40 (AOR), and S&amp;P 500 (SPY) are total returns "
-        "from Yahoo Finance with dividends reinvested. Before taxes, advisory fees, and transaction costs."
+        "from Yahoo Finance with dividends reinvested. Before taxes and advisory fees."
+    )
+    roll_desc = {
+        "12-month return": "Trailing 12-month total return at each month-end",
+        "Excess return": ("Asymmetric Edge's trailing 12-month return minus each benchmark's, in "
+                          "percentage points, at each month-end"),
+        "12-month volatility": ("Annualized volatility of the trailing 12 monthly returns at each "
+                                "month-end"),
+        ROLLING_SORTINO_VIEW: ("Trailing 12-month Sortino ratio (return above T-bills per unit of "
+                               "downside risk) at each month-end"),
+    }[view]
+    newsletter_caption(
+        f"{roll_desc}, {_cap_vs(list(frame.columns))}, "
+        f"{_cap_date(frame.index[0])} through {_cap_date(frame.index[-1])}. "
+        + NEWSLETTER_RETURNS_SENTENCES
     )
 
 
@@ -6945,6 +7196,15 @@ def render_risk_return_section(combined, latest_date):
         " Asymmetric Edge is anchored to Fidelity's reported returns; everything else uses Yahoo Finance "
         "adjusted closes with distributions reinvested."
     )
+    fam_shown = [opts[l][1] for l in labels if l in shown and opts[l][0] == "family"]
+    assets_shown = any(opts[l][0] == "asset" for l in labels if l in shown)
+    newsletter_caption(
+        f"Annualized return vs. "
+        f"{'downside risk (annualized downside deviation)' if downside else 'annualized volatility'}, "
+        f"{_cap_vs(fam_shown)}"
+        + (", plus the funds in the strategy's universe" if assets_shown else "")
+        + f", {_cap_date(start)} through {_cap_date(end)}. " + NEWSLETTER_RETURNS_SENTENCES
+    )
 
 
 def main():
@@ -7150,7 +7410,7 @@ def main():
             f"daily and weekly values (including Max DD Daily and Worst/Best Single Day and Week) are approximations "
             f"derived from a close-only reconstruction. The most recent month may be partial when the end date falls mid-month. "
             f"S&P 500 (SPY), 60/40 (AOR), and 80/20 (AOA) total return data sourced from Yahoo Finance (adjusted close, dividends reinvested). "
-            f"All figures are pre-tax, pre-fee, and pre-transaction-cost."
+            f"All figures are pre-tax and pre-fee."
         )
         st.markdown(f'<p class="footer-text">{footnote_summary}</p>', unsafe_allow_html=True)
 
@@ -7478,6 +7738,12 @@ def main():
                 "weights are subject to change based on regime signals and market conditions."
             )
             st.markdown(f'<p class="footer-text">{footnote_alloc_history}</p>', unsafe_allow_html=True)
+            newsletter_caption(
+                f"Asymmetric Edge allocation by asset class at the start of each month, "
+                f"{pd.Timestamp(inception_date):%B %Y} through {pd.Timestamp(latest_date):%B %Y}, "
+                "from actual end-of-day holdings in my account. T-bills & Cash includes BIL and "
+                "money market funds."
+            )
 
     st.divider()
 
@@ -7541,9 +7807,13 @@ def main():
         f"Asymmetric Edge monthly and trailing-period returns are anchored to Fidelity's reported "
         f"time-weighted returns for a personal portfolio. "
         f"S&P 500 (SPY), 60/40 (AOR), and 80/20 (AOA) total return data sourced from Yahoo Finance (adjusted close, dividends reinvested). "
-        f"All performance figures are shown before taxes, advisory fees, and transaction costs, which would reduce returns."
+        f"All performance figures are shown before taxes and advisory fees, which would reduce returns."
     )
     st.markdown(f'<p class="footer-text">{footnote}</p>', unsafe_allow_html=True)
+    newsletter_caption(
+        f"{_cap_vs(SERIES_ORDER)}, data through {_cap_date(latest_date)}. Strategy live since "
+        f"{_cap_date(inception_date)}. " + NEWSLETTER_RETURNS_SENTENCES
+    )
 
     st.divider()
 
@@ -7599,9 +7869,13 @@ def main():
         f"{selected_growth} period, through {end_g.strftime('%m/%d/%Y')} (total return, dividends reinvested). "
         f"Asymmetric Edge data anchored to Fidelity's reported monthly time-weighted returns for a personal portfolio. "
         f"S&P 500 (SPY), 60/40 (AOR), and 80/20 (AOA) total return data sourced from Yahoo Finance (adjusted close). "
-        f"All performance figures are shown before taxes, advisory fees, and transaction costs, which would reduce returns."
+        f"All performance figures are shown before taxes and advisory fees, which would reduce returns."
     )
     st.markdown(f'<p class="footer-text">{footnote_growth}</p>', unsafe_allow_html=True)
+    newsletter_caption(
+        f"Growth of $10,000, {_cap_vs(enabled_series)}, {_cap_date(start_g)} through "
+        f"{_cap_date(end_g)}. " + NEWSLETTER_RETURNS_SENTENCES
+    )
 
     # Partial-month extension status. Surfaced here so it's visible alongside
     # the chart whose shape it controls, not just in the collapsed Update
@@ -7676,9 +7950,9 @@ def main():
 
     st.divider()
 
-    _render_guarded("What Drove the Month", render_attribution_section,
+    _render_guarded("Where the Month's Return Came From", render_attribution_section,
                     portfolio_series, holdings_values_df, _analytics_totals,
-                    holding_prices, latest_date)
+                    holding_prices, latest_date, heading=False)
 
     st.divider()
 
@@ -7724,9 +7998,14 @@ def main():
         f"Asymmetric Edge drawdowns are computed from daily values derived from a close-only reconstruction "
         f"anchored to Fidelity's monthly time-weighted returns and are therefore approximations. "
         f"S&P 500 (SPY), 60/40 (AOR), and 80/20 (AOA) total return data sourced from Yahoo Finance (adjusted close). "
-        f"All performance figures are shown before taxes, advisory fees, and transaction costs, which would reduce returns."
+        f"All performance figures are shown before taxes and advisory fees, which would reduce returns."
     )
     st.markdown(f'<p class="footer-text">{footnote_dd}</p>', unsafe_allow_html=True)
+    newsletter_caption(
+        f"Maximum decline from a previous high within each period shown, {_cap_vs(SERIES_ORDER)}, "
+        f"data through {_cap_date(latest_date)}. Strategy live since {_cap_date(inception_date)}. "
+        + NEWSLETTER_RETURNS_SENTENCES
+    )
 
     st.divider()
 
@@ -7805,6 +8084,16 @@ def main():
         f"include reinvested distributions.{asset_notes} Tickers: {asset_ticker_list}."
     )
     st.markdown(f'<p class="footer-text">{footnote_asset}</p>', unsafe_allow_html=True)
+    _ac_rets = locals().get("returns_dict") or {}
+    _ac_order = (sorted(_ac_rets, key=lambda k: -_ac_rets[k]) if _ac_rets
+                 else list(ASSET_CLASS_TICKERS))
+    newsletter_caption(
+        f"{selected_asset_period} total returns from {_cap_date(af_start)} through "
+        f"{_cap_date(af_end)}, using adjusted close prices (dividends reinvested) from Yahoo "
+        "Finance. Tickers: "
+        + ", ".join(f"{ASSET_CLASS_TICKERS[l]} ({l})" for l in _ac_order if l in ASSET_CLASS_TICKERS)
+        + ". Past performance does not guarantee future results."
+    )
 
     st.divider()
 
@@ -7899,7 +8188,7 @@ def main():
         f"the selected {selected_tr_period} period, through {tr_end.strftime('%m/%d/%Y')}. "
         f"Ticker data sourced from Yahoo Finance (adjusted close, dividends reinvested). "
         f"Asymmetric Edge returns are anchored to Fidelity's reported time-weighted returns for a personal portfolio. "
-        f"All performance figures are shown before taxes, advisory fees, and transaction costs."
+        f"All performance figures are shown before taxes and advisory fees."
     )
     st.markdown(f'<p class="footer-text">{footnote_tr}</p>', unsafe_allow_html=True)
 
