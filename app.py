@@ -1736,7 +1736,7 @@ ASSET_CATALOG = {
     "DXJ":  {"asset": "Japan",                   "emoji": "\u26E9\uFE0F", "purpose": "Developed-market growth, no yen risk"},
     # Commodities
     "GLD":  {"asset": "Gold",                    "emoji": "\U0001F7E8", "purpose": "Crisis hedge, store of value"},
-    "HGER": {"asset": "Active Commodities",      "emoji": "\U0001F3ED", "purpose": "Hedge against inflation and price spikes"},
+    "HGER": {"asset": "Broad Commodities",      "emoji": "\U0001F3ED", "purpose": "Hedge against inflation and price spikes"},
     # Crypto
     "IBIT": {"asset": "Bitcoin",                 "emoji": "\U0001F7E0", "purpose": "High-upside, fixed-supply digital asset"},
     # Defensive
@@ -3895,7 +3895,7 @@ def render_hger_lookthrough_section():
     )
     st.markdown(f'<p class="footer-text">{footnote}</p>', unsafe_allow_html=True)
     newsletter_caption(
-        f"Sector weights of the Quantix Commodity Index, which active commodities (HGER) tracks, "
+        f"Sector weights of the Quantix Commodity Index, which broad commodities (HGER) tracks, "
         f"as of {_cap_date(as_of_dt)}. Source: Harbor Capital. Weights change daily."
     )
 
@@ -5126,7 +5126,7 @@ def build_monthly_returns_tall_figure(ae_monthly, spx_monthly, open_period, last
 
 
 def _asset_row_label(ticker):
-    """Emoji, asset name and ticker for row labels, e.g. '🏭  Active Commodities (HGER)'."""
+    """Emoji, asset name and ticker for row labels, e.g. '🏭  Broad Commodities (HGER)'."""
     info = ASSET_CATALOG.get(ticker)
     if not info:
         return ticker
@@ -5589,7 +5589,7 @@ def compute_month_attribution(period, ae_series, holdings_values, totals, prices
     month, both of which the price-only method below missed. September 2026
     showed the gap: two rebalance days (September 8 and 30) left 0.21 points
     unexplained, and spreading that across the holdings flipped the sign of
-    Japan's and active commodities' contributions. Without the ledger, the
+    Japan's and broad commodities' contributions. Without the ledger, the
     price-only method below is the fallback.
 
     Contribution is built day by day: a holding's weight at the prior close
