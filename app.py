@@ -3755,8 +3755,9 @@ def build_qci_sector_table(sector_rows, n_commodities):
     """Plotly figure of the HGER look-through table, drawn in pixel coordinates
     (like the Asset Universe grid) so the PNG export matches the screen.
 
-    Columns: Sector (emoji + name), What it holds, a weight bar scaled to the
-    largest sector, and the weight. A Total row closes the table.
+    Columns: Sector (emoji + name), What it holds, a weight bar showing the
+    sector's share of the whole fund (a full track is 100%), and the weight.
+    A Total row closes the table.
     """
     WIDTH = 860
     HEADER_H = 46
@@ -3794,7 +3795,6 @@ def build_qci_sector_table(sector_rows, n_commodities):
     text(HOLDS_X, header_y, "What it holds", size=17, bold=True)
     text(WEIGHT_X, header_y, "Weight", anchor="right", size=17, bold=True)
 
-    max_weight = max((s["weight"] for s in sector_rows), default=1.0) or 1.0
     for i, s in enumerate(sector_rows):
         top = HEADER_H + i * ROW_H
         mid = top + ROW_H / 2
@@ -3805,7 +3805,8 @@ def build_qci_sector_table(sector_rows, n_commodities):
         text(HOLDS_X, mid, s["holds"], color=TEXT_SECONDARY)
         shapes.append(dict(type="path", path=_rounded_bar_path(BAR_X0, BAR_X1, mid, BAR_H),
                            fillcolor=BAR_TRACK, line_width=0, layer="below"))
-        fill_x1 = BAR_X0 + (BAR_X1 - BAR_X0) * (s["weight"] / max_weight)
+        # Share of the whole fund: a full track is 100%, not the largest sector.
+        fill_x1 = BAR_X0 + (BAR_X1 - BAR_X0) * min(max(s["weight"], 0.0), 100.0) / 100.0
         shapes.append(dict(type="path", path=_rounded_bar_path(BAR_X0, fill_x1, mid, BAR_H),
                            fillcolor=BAR_FILL, line_width=0))
         text(WEIGHT_X, mid, _pct1(s["weight"]), anchor="right")
@@ -7356,6 +7357,7 @@ BETS_GOOD = "#1E7A50"        # the month delivered more bets than it went in wit
 BETS_TRACK = "#F4F4F6"
 BETS_TBILL_FILL = "#F3F4F6"
 BETS_STRIPE_EDGE = "#D9DAE0"
+BETS_STRIP_PALE = 0.62       # strip bars that did not cross the floor, mixed this far toward white
 BETS_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
@@ -8241,7 +8243,8 @@ def build_bets_tiles_figure(rows, floor):
 def build_bets_floor_figure(rows, floor):
     """Over time: bets going in each month as bars on a light track up to 4,
     purple at or above the floor and red below it, with the dashed floor; a
-    strip underneath shows delivered minus going in. 780 px wide."""
+    strip underneath shows delivered minus going in, in full color only for
+    closed months that crossed the floor. 780 px wide."""
     W = ANALYTICS_WIDTH
     shapes, ann = [], []
     hx, hy, htext = [], [], []
@@ -8267,6 +8270,11 @@ def build_bets_floor_figure(rows, floor):
         _cx_rect(shapes, cx - bw / 2, yb(v), cx + bw / 2, base, BETS_LOW if low else BETS_PURPLE, r=3)
         status = ("below the floor" if low else "at or above the floor") + f" of {floor:.1f}"
         dl_txt = _bets_dlv_text(r)
+        if r["closed"] and np.isfinite(r["dlv"]):
+            if not low and bets_is_low(r["dlv"], floor):
+                dl_txt += " (slipped below the floor)"
+            elif low and not bets_is_low(r["dlv"], floor):
+                dl_txt += " (climbed back above the floor)"
         hx.append(cx)
         hy.append((yb(BETS_CAP) + base) / 2)
         htext.append(f"<b>{_corr_month(r['period'])}</b><br>Going in {_bets_fmt(r['pre'])} ({status})"
@@ -8299,29 +8307,44 @@ def build_bets_floor_figure(rows, floor):
             continue
         hh = abs(d) * SC
         y0, y1 = (sy - hh, sy) if d > 0 else (sy, sy + hh)
-        _cx_rect(shapes, cx - bw / 2, y0, cx + bw / 2, y1, BETS_GOOD if d > 0 else BETS_LOW, r=2)
+        # Full color only where a closed month crossed the floor, so the red bars
+        # always match the "Slipped below during the month" tile.
+        pre_low, dlv_low = bets_is_low(r["pre"], floor), bets_is_low(r["dlv"], floor)
+        crossed = r["closed"] and ((pre_low and not dlv_low) if d > 0 else (dlv_low and not pre_low))
+        full = BETS_GOOD if d > 0 else BETS_LOW
+        _cx_rect(shapes, cx - bw / 2, y0, cx + bw / 2, y1,
+                 full if crossed else _cx_mix(full, "#FFFFFF", BETS_STRIP_PALE), r=2)
     _cx_text(ann, X0 - 8, sy - 12, "Better", anchor="right", size=12, color=BETS_GOOD, weight=700)
     _cx_text(ann, X0 - 8, sy + 12, "Worse", anchor="right", size=12, color=BETS_LOW, weight=700)
     for i, r in enumerate(rows):
         if r["period"].month == 1 or i == 0:
             _cx_text(ann, X0 + i * step + 2, sy + 50, str(r["period"].year), size=13,
                      color=TEXT_PRIMARY, weight=700)
-    # Legend row
+    # Legend: one row for the bars, one for the strip
     ly = sy + 84
-    lx = 0.0
-    items = [("box", BETS_PURPLE, "Bets going in"), ("box", BETS_LOW, "Below the floor"),
-             ("dash", ANALYTICS_CELL_TEXT, f"Floor of {floor:.1f} bets"),
-             ("box", BETS_GOOD, "Month delivered more"), ("box", BETS_LOW, "Month delivered fewer")]
-    for kind, color, text in items:
-        if kind == "box":
-            _cx_rect(shapes, lx, ly - 6, lx + 14, ly + 6, color, r=2)
-            lx += 21
-        else:
-            _cx_line(shapes, lx, ly, lx + 22, ly, color, 1.5, dash="4px,3px")
-            lx += 29
-        _cx_text(ann, lx, ly, text, size=13, color=TEXT_SECONDARY)
-        lx += _dd_text_width(text, 13) + 18
-    H = int(ly + 14)
+    legend = [
+        [("box", BETS_PURPLE, "Bets going in"), ("box", BETS_LOW, "Below the floor"),
+         ("dash", ANALYTICS_CELL_TEXT, f"Floor of {floor:.1f} bets")],
+        [("box", BETS_LOW, "Slipped below the floor during the month"),
+         ("box", BETS_GOOD, "Climbed back above it"), ("pair", None, "Changes that didn't cross the floor")],
+    ]
+    for items in legend:
+        lx = 0.0
+        for kind, color, text in items:
+            if kind == "box":
+                _cx_rect(shapes, lx, ly - 6, lx + 14, ly + 6, color, r=2)
+                lx += 21
+            elif kind == "pair":
+                _cx_rect(shapes, lx, ly - 6, lx + 7, ly + 6, _cx_mix(BETS_GOOD, "#FFFFFF", BETS_STRIP_PALE), r=1)
+                _cx_rect(shapes, lx + 7, ly - 6, lx + 14, ly + 6, _cx_mix(BETS_LOW, "#FFFFFF", BETS_STRIP_PALE), r=1)
+                lx += 21
+            else:
+                _cx_line(shapes, lx, ly, lx + 22, ly, color, 1.5, dash="4px,3px")
+                lx += 29
+            _cx_text(ann, lx, ly, text, size=13, color=TEXT_SECONDARY)
+            lx += _dd_text_width(text, 13) + 18
+        ly += 24
+    H = int(ly - 24 + 14)
     fig = go.Figure()
     _cx_hover(fig, hx, hy, htext, bw)
     return _pixel_layout(fig, W, H, shapes, ann)
@@ -8526,7 +8549,8 @@ def render_bets_view(ctx):
     _bets_minor_head(
         "Over time",
         "Bars are bets going in, against the floor. The strip underneath shows how each month did: "
-        "green up when it delivered more bets than it went in with, red down when it delivered fewer."
+        "up when it delivered more bets than it went in with, down when it delivered fewer. Full color "
+        "marks the months that crossed the floor: red slipped below it, green climbed back above it."
     )
     st.plotly_chart(build_bets_floor_figure(rows, floor), use_container_width=False,
                     config=chart_config("Independent Bets Over Time", static=True),
@@ -9509,8 +9533,8 @@ def build_lt_table_figure(exp, cmp_exp, cmp_period, tiles):
     for _gname, keys in groups:
         deltas.append(sum(th.get(k, 0.0) for k in keys) - sum(tp.get(k, 0.0) for k in keys))
         deltas.extend(th.get(k, 0.0) - tp.get(k, 0.0) for k in keys)
-    amt_w = max([_lt_tw(f"{abs(d):.1f}", 13, 700) for d in deltas if abs(d) >= LT_MIN_PCT]
-                or [_lt_tw("0.0", 13, 700)])
+    amt_w = max([_lt_tw(f"{abs(d):.1f} pts", 13, 700) for d in deltas if abs(d) >= LT_MIN_PCT]
+                or [_lt_tw("0.0 pts", 13, 700)])
     x_amt = xd - amt_w
     x_tri = x_amt - 10.0
 
@@ -9519,14 +9543,14 @@ def build_lt_table_figure(exp, cmp_exp, cmp_period, tiles):
             return
         if abs(d) >= LT_MIN_PCT:
             big = group or abs(d) >= big_cut
-            amount = f"{abs(d):.1f}"
+            amount = f"{abs(d):.1f} pts"   # percentage points of the portfolio
             weight = 700 if big else 400
             color = TEXT_PRIMARY if group else (ANALYTICS_CELL_TEXT if big else TEXT_SECONDARY)
             _lt_text(ann, x_amt, yc, amount, size=13, color=color, weight=weight)
             tri = _cx_mix(LT_DELTA_LOW, LT_BAR, abs(d) / LT_DELTA_FULL)
             _cx_triangle(shapes, x_tri, yc, d > 0, 4.2, tri)
         else:
-            _lt_text(ann, x_amt, yc, "0.0", size=13, color=TEXT_MUTED)
+            _lt_text(ann, x_amt, yc, "0.0 pts", size=13, color=TEXT_MUTED)
 
     for gname, keys in groups:
         gt = sum(th.get(k, 0.0) for k in keys)
@@ -9548,7 +9572,7 @@ def build_lt_table_figure(exp, cmp_exp, cmp_period, tiles):
                     t = min(1.0, v / maxc)
                     _cx_rect(shapes, cx[f] - cw / 2.0 + 6, y + 3, cx[f] + cw / 2.0 - 6, y + rh - 3,
                              _cx_mix("#FFFFFF", LT_SHADE, 0.15 + 0.85 * t), r=5)
-                    _lt_text(ann, cx[f], yc, f"{v:.1f}", anchor="center", size=13,
+                    _lt_text(ann, cx[f], yc, f"{v:.1f}%", anchor="center", size=13,
                              color=ANALYTICS_CELL_TEXT, weight=500)
                     hx.append(cx[f])
                     hy.append(yc)
@@ -9563,7 +9587,7 @@ def build_lt_table_figure(exp, cmp_exp, cmp_period, tiles):
     yc = y + 18
     _lt_text(ann, 12, yc, "Total", size=13.5, color=TEXT_PRIMARY, weight=700)
     for f in funds:
-        _lt_text(ann, cx[f], yc, f"{wts[f]:.1f}", anchor="center", size=13.5, color=TEXT_PRIMARY, weight=700)
+        _lt_text(ann, cx[f], yc, f"{wts[f]:.1f}%", anchor="center", size=13.5, color=TEXT_PRIMARY, weight=700)
     _lt_text(ann, xv, yc, _lt_pct(sum(th.values())), anchor="right", size=13.5, color=TEXT_PRIMARY, weight=700)
     y += 36
 
