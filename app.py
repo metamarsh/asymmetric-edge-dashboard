@@ -3497,18 +3497,40 @@ HGER_PAGE_URL = "https://www.harborcapital.com/etf/hger/"
 HGER_PAGE_DATA_URL = "https://www.harborcapital.com/page-data/etf/hger/page-data.json"
 QCI_SNAPSHOT_DIR_NAME = "qci_snapshots"
 
+# Emojis for the Look-Through Exposure map (option B, October 31, 2026). Every
+# theme label carries its theme's emoji, and a commodity holding carries its own
+# when its box has room (LT_EMOJI_MIN_W x LT_EMOJI_MIN_H). Keys are LT_THEMES
+# keys and the commodity names the Map shows (LT_QCI_NAMES values). What HGER
+# Holds takes its sector emojis from the same two maps, so a commodity looks the
+# same in both.
+LT_THEME_EMOJI = {
+    "semis": "\U0001F9E0", "other_tech": "\U0001F4BB", "internet": "\U0001F310",
+    "consumer": "\U0001F6CD\uFE0F", "health": "\U0001FA7A", "financials": "\U0001F3E6",
+    "industrials": "\U0001F3ED", "energy_mat": "\u26CF\uFE0F", "re_util": "\U0001F3E2",
+    "oil": "\U0001F6E2\uFE0F", "gold": "\U0001F947", "agri": "\U0001F33E",
+    "livestock": "\U0001F404", "ind_metals": "\U0001F529", "bitcoin": "\U0001FA99",
+}
+LT_COMMODITY_EMOJI = {
+    "Brent crude": "\U0001F6E2\uFE0F", "WTI crude": "\U0001F6E2\uFE0F", "Heating oil": "\U0001F525",
+    "Gasoil": "\u26FD", "Gasoline": "\u26FD", "Natural gas": "\U0001F525",
+    "Cocoa": "\U0001F36B", "Sugar": "\U0001F36C", "Coffee": "\u2615",
+    "Wheat": "\U0001F33E", "Corn": "\U0001F33D", "Soybeans": "\U0001FAD8", "Cotton": "\U0001F9F6",
+    "Lean hogs": "\U0001F416", "Live cattle": "\U0001F404", "Feeder cattle": "\U0001F402",
+    "Silver": "\U0001F948",
+}
+
 # Harbor sector name -> (display name, emoji). An unknown sector still shows,
 # under a cleaned-up version of Harbor's name, and is flagged on the page so
 # the map can be extended.
 QCI_SECTOR_DISPLAY = {
-    "Petroleum": ("Petroleum", "\U0001F6E2️"),
-    "Precious": ("Precious Metals", "\U0001F7E8"),  # shown as "Gold" when gold is the only holding
-    "Grains And Soybean Products": ("Grains", "\U0001F33E"),
-    "Softs": ("Softs", "☕"),
-    "Industrial": ("Industrial Metals", "\U0001F529"),
-    "LivestockAndDairy": ("Livestock", "\U0001F416"),
-    "Natural Gas": ("Natural Gas", "\U0001F525"),
-    "Energy": ("Energy", "⚡"),
+    "Petroleum": ("Petroleum", LT_THEME_EMOJI["oil"]),
+    "Precious": ("Precious Metals", LT_THEME_EMOJI["gold"]),  # shown as "Gold" when gold is the only holding
+    "Grains And Soybean Products": ("Grains", LT_THEME_EMOJI["agri"]),
+    "Softs": ("Softs", LT_COMMODITY_EMOJI["Coffee"]),
+    "Industrial": ("Industrial Metals", LT_THEME_EMOJI["ind_metals"]),
+    "LivestockAndDairy": ("Livestock", LT_THEME_EMOJI["livestock"]),
+    "Natural Gas": ("Natural Gas", LT_COMMODITY_EMOJI["Natural gas"]),
+    "Energy": ("Energy", "\u26A1"),
 }
 QCI_UNMAPPED_EMOJI = "◻️"
 
@@ -8679,6 +8701,8 @@ LT_MIN_PCT = 0.05            # themes, funds and flows below this share of the p
 LT_HELD_PCT = 0.5            # a fund counts as held at 0.5% of the basket, as in the Rebalance Log
 LT_SAME_BASKET_PTS = 1.0     # baskets within a point on every fund are the same basket (fills vs. targets)
 LT_MAP_NAME_PCT = 0.5        # Map names a single holding at 0.5% of the portfolio or more
+LT_EMOJI_MIN_W = 74.0        # Map: a commodity holding shows its emoji (LT_COMMODITY_EMOJI) in a box
+LT_EMOJI_MIN_H = 42.0        # ...at least this many px wide and this many px tall
 LT_PILL_KEYS = ("lt_view", "lt_basket", "lt_risk_basket", "lt_risk_window")
 LT_SNAPSHOT_FUNDS = ("QQQ", "IWM", "EMXC", "HGER")   # the funds make_holdings_snapshot.py fetches
 
@@ -8787,8 +8811,9 @@ LT_DM700 = (
 # ---------- small helpers ----------
 
 def _lt_tw(text, size, weight=400):
-    """Rendered DM Sans width in px (2% margin for kerning). Characters
-    outside printable ASCII count 0.6 em."""
+    """Rendered DM Sans width in px (2% margin for kerning). An emoji counts
+    1.3 em and its variation selector nothing; other characters outside
+    printable ASCII count 0.6 em."""
     t = (min(max(float(weight), 400.0), 700.0) - 400.0) / 300.0
     total = 0.0
     for ch in str(text):
@@ -8796,6 +8821,10 @@ def _lt_tw(text, size, weight=400):
         if 32 <= o <= 126:
             a, b = LT_DM400[o - 32], LT_DM700[o - 32]
             total += a + (b - a) * t
+        elif o == 0xFE0F:
+            continue
+        elif o >= 0x1F000 or 0x2600 <= o <= 0x27BF:
+            total += 1300.0
         else:
             total += 600.0
     return total * float(size) / 1000.0 * 1.02
@@ -8841,6 +8870,12 @@ def _lt_rgba(color, alpha):
 
 def _lt_label(key):
     return LT_THEMES.get(key, (key, "#A9ADB7", "other"))[0]
+
+
+def _lt_map_label(key):
+    """A theme's label with its emoji in front, as the Map shows it."""
+    emoji = LT_THEME_EMOJI.get(key)
+    return f"{emoji} {_lt_label(key)}" if emoji else _lt_label(key)
 
 
 def _lt_color(key):
@@ -9637,6 +9672,9 @@ def build_lt_table_figure(exp, cmp_exp, cmp_period, tiles):
 
 def _lt_wrap2(label):
     words = label.split(" ")
+    if len(words) > 1 and words[0] and not any(c.isalnum() for c in words[0]):
+        lines = _lt_wrap2(" ".join(words[1:]))      # a leading emoji stays on the first line
+        return [f"{words[0]} {lines[0]}"] + lines[1:]
     if len(words) < 2:
         return [label]
     best = None
@@ -9648,12 +9686,16 @@ def _lt_wrap2(label):
     return best[1]
 
 
-def _lt_label_plan(w, h, name, val, size=12, bold=600):
+def _lt_label_plan(w, h, name, val, size=12, bold=600, emoji=None):
     """The first label layout that fits a w x h box, as (layout, label), or
     None. Tries the full name with its value, then shorter names
-    (LT_ALT_LABELS) with the value, then names alone at 11 and 10 px."""
+    (LT_ALT_LABELS) with the value, then names alone at 11 and 10 px. With
+    an emoji, the names are tried with it in front first and then without
+    it, so a box too tight for the emoji still gets its label."""
     pad = 7
     names = (name,) + LT_ALT_LABELS.get(name, ()) + (("Other",) if name.startswith("Other ") else ())
+    if emoji:
+        names = tuple(f"{emoji} {nm}" for nm in names) + names
     vw = _lt_tw(val, size)
     for nm in names:
         nw_ = _lt_tw(nm, size, bold)
@@ -9675,9 +9717,9 @@ def _lt_label_plan(w, h, name, val, size=12, bold=600):
     return None
 
 
-def _lt_box_label(ann, x, y, w, h, name, val, fill, size=12, bold=600):
+def _lt_box_label(ann, x, y, w, h, name, val, fill, size=12, bold=600, emoji=None):
     """Draw the label _lt_label_plan picks; returns False when none fits."""
-    plan = _lt_label_plan(w, h, name, val, size, bold)
+    plan = _lt_label_plan(w, h, name, val, size, bold, emoji)
     if plan is None:
         return False
     layout, nm = plan
@@ -9769,7 +9811,8 @@ def build_lt_map_figure(exp):
     """Treemap of themes sized by share of the portfolio, grouped into
     stocks, commodities and crypto side by side, with each theme's largest
     holdings inside it; the largest single positions follow underneath.
-    Pixel figure, 780 px wide."""
+    Theme labels carry their LT_THEME_EMOJI, and a commodity holding carries
+    its LT_COMMODITY_EMOJI where its box has room. Pixel figure, 780 px wide."""
     W = ANALYTICS_WIDTH
     shapes, ann = [], []
     hx, hy, ht, hs = [], [], [], []
@@ -9793,7 +9836,10 @@ def build_lt_map_figure(exp):
             if bw <= 0.5 or bh <= 0.5:
                 continue
             col, lab, tv = _lt_color(k), _lt_label(k), th[k]
+            elab = _lt_map_label(k)
             leaves = _lt_map_leaves(exp, k)
+            # Whether a theme gets a header is decided on its plain name, so the
+            # emoji never costs a theme its breakdown.
             header_ok = (_lt_tw(lab, 12.5, 700) + _lt_tw(_lt_pct(tv), 12.5) + 20 <= bw
                          and bh >= 70 and len(leaves) > 1)
             placed = []
@@ -9803,31 +9849,40 @@ def build_lt_map_figure(exp):
                             if _lt_label_plan(qw, qh, lf[0], _lt_pct(lf[1])) is not None]
                 header_ok = len(placed) > 1 and bool(labelled)
             if header_ok:
+                # The emoji joins the header when it fits, with a shorter name if need be.
+                hlab = lab
+                for nm in ((lab,) + LT_ALT_LABELS.get(lab, ())) if k in LT_THEME_EMOJI else ():
+                    cand = f"{LT_THEME_EMOJI[k]} {nm}"
+                    if _lt_tw(cand, 12.5, 700) + _lt_tw(_lt_pct(tv), 12.5) + 20 <= bw:
+                        hlab = cand
+                        break
                 _cx_rect(shapes, bx, by, bx + bw, by + bh, col, r=4)
                 tc = _cx_text_on(col)
-                _lt_text(ann, bx + 8, by + 12, lab, size=12.5, color=tc, weight=700)
-                _lt_text(ann, bx + 8 + _lt_tw(lab, 12.5, 700) + 6, by + 12, _lt_pct(tv), size=12.5, color=tc)
+                _lt_text(ann, bx + 8, by + 12, hlab, size=12.5, color=tc, weight=700)
+                _lt_text(ann, bx + 8 + _lt_tw(hlab, 12.5, 700) + 6, by + 12, _lt_pct(tv), size=12.5, color=tc)
                 for (name, v, is_rest, funds), (qx, qy, qw, qh) in placed:
                     if qw <= 0.5 or qh <= 0.5:
                         continue
                     fill = _lt_legible(_cx_mix(col, "#FFFFFF", 0.28) if is_rest else col)
                     _cx_rect(shapes, qx, qy, qx + qw, qy + qh, fill, r=3, line_color="#FFFFFF", line_width=1.5)
-                    _lt_box_label(ann, qx, qy, qw, qh, name, _lt_pct(v), fill)
+                    roomy = qw >= LT_EMOJI_MIN_W and qh >= LT_EMOJI_MIN_H and not is_rest
+                    emoji = LT_COMMODITY_EMOJI.get(name) if roomy and _lt_family(k) == "commod" else None
+                    _lt_box_label(ann, qx, qy, qw, qh, name, _lt_pct(v), fill, emoji=emoji)
                     hx.append(qx + qw / 2.0)
                     hy.append(qy + qh / 2.0)
-                    ht.append(f"<b>{_lt_esc(name)}</b> ({_lt_esc(lab)})<br>{_lt_pct(v, 2)} of the portfolio, "
+                    ht.append(f"<b>{_lt_esc(name)}</b> ({_lt_esc(elab)})<br>{_lt_pct(v, 2)} of the portfolio, "
                               f"through {_cap_join(['Cash' if f == 'CASH' else f for f in funds])}")
                     hs.append(max(min(qw, qh) - 4, 6))
             else:
                 fill = _lt_legible(col)
                 _cx_rect(shapes, bx, by, bx + bw, by + bh, fill, r=4,
                          line_color=LT_GOLD_EDGE if k == "gold" else None, line_width=1 if k == "gold" else 0)
-                _lt_box_label(ann, bx, by, bw, bh, lab, _lt_pct(tv), fill, 12.5, 700)
+                _lt_box_label(ann, bx, by, bw, bh, lab, _lt_pct(tv), fill, 12.5, 700, emoji=LT_THEME_EMOJI.get(k))
                 contrib = [f"{('Cash' if f == 'CASH' else f)} {exp['flows'].get(f, {}).get(k, 0.0):.1f}"
                            for f in exp["weights"] if exp["flows"].get(f, {}).get(k, 0.0) > 0.02]
                 hx.append(bx + bw / 2.0)
                 hy.append(by + bh / 2.0)
-                ht.append(f"<b>{_lt_esc(lab)}</b> {_lt_pct(tv)} of the portfolio<br>" + ", ".join(contrib))
+                ht.append(f"<b>{_lt_esc(elab)}</b> {_lt_pct(tv)} of the portfolio<br>" + ", ".join(contrib))
                 hs.append(max(min(bw, bh) - 4, 6))
         x += fw + gapF
 
@@ -9856,7 +9911,7 @@ def build_lt_map_figure(exp):
             _lt_text(ann, tx, yy + chip_h / 2.0, val, size=13, color=ANALYTICS_CELL_TEXT)
             hx.append(cx0 + wchip / 2.0)
             hy.append(yy + chip_h / 2.0)
-            ht.append(f"<b>{_lt_esc(name)}</b> ({_lt_esc(_lt_label(theme))})<br>{_lt_pct(v, 2)} of the portfolio, "
+            ht.append(f"<b>{_lt_esc(name)}</b> ({_lt_esc(_lt_map_label(theme))})<br>{_lt_pct(v, 2)} of the portfolio, "
                       f"through {_cap_join(['Cash' if f == 'CASH' else f for f in funds])}")
             hs.append(chip_h - 4)
             cx0 += wchip + 8
