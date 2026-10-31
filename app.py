@@ -8710,6 +8710,8 @@ LT_GOLD_EDGE = "#C9B87A"     # outline that keeps the pale gold swatch visible o
 LT_SHADE = "#CBBFEB"         # Table cell shading at the largest single contribution
 LT_BAR = BAR_SERIES_COLORS["AsymEdge"]   # #4F2DB8, the bar-variant Asymmetric Edge purple
 LT_TRACK = "#ECECF1"
+LT_DELTA_LOW = "#8F92A1"     # Table change triangles: small moves in gray, shading to LT_BAR purple
+LT_DELTA_FULL = 3.0          # ...at a move of this many points or more
 LT_DOT = "#B9BBC4"           # Table placeholder for a fund that holds none of a theme
 LT_CASH_COLOR = "#8C867C"    # the cash pseudo-fund, in BIL's warm gray
 
@@ -9458,8 +9460,8 @@ def _lt_other_stocks_note(exp, max_w):
 # ---------- Option B: Table ----------
 
 def build_lt_table_figure(exp, cmp_exp, cmp_period, tiles):
-    """Each theme's share of the portfolio with what every fund contributes,
-    its bar, and the change from the comparison basket; then the largest
+    """Each theme's share of the portfolio with what every fund contributes
+    and the change from the comparison basket; then the largest
     single holdings across funds. Pixel figure, 780 px wide."""
     W = ANALYTICS_WIDTH
     shapes, ann = [], []
@@ -9474,7 +9476,7 @@ def build_lt_table_figure(exp, cmp_exp, cmp_period, tiles):
     X_FUNDS, X_FUNDS_END = 214.0, 548.0
     cw = min(78.0, (X_FUNDS_END - X_FUNDS) / max(len(funds), 1))
     cx = {f: X_FUNDS + cw / 2.0 + i * cw for i, f in enumerate(funds)}
-    xv, xb0, xb1, xd = 586.0, 598.0, 690.0, 774.0
+    xv, xd = 662.0, 774.0
     hdr, rh, gh = 54.0, 28.0, 32.0
     th = exp["themes"]
     tp = cmp_exp["themes"] if cmp_exp is not None else {}
@@ -9499,8 +9501,18 @@ def build_lt_table_figure(exp, cmp_exp, cmp_period, tiles):
     if vs_label:
         _lt_text(ann, xd, y0 + hdr / 2.0, vs_label, anchor="right", size=13.5, color=TEXT_PRIMARY, weight=700)
     maxc = max([v for f in funds for v in flows.get(f, {}).values()] or [1.0])
-    maxp = max(th.values()) if th else 1.0
     y = y0 + hdr
+
+    # Change column: triangles sit in one fixed column and the amounts start one
+    # fixed gap to their right, sized to the widest amount, so nothing zigzags.
+    deltas = []
+    for _gname, keys in groups:
+        deltas.append(sum(th.get(k, 0.0) for k in keys) - sum(tp.get(k, 0.0) for k in keys))
+        deltas.extend(th.get(k, 0.0) - tp.get(k, 0.0) for k in keys)
+    amt_w = max([_lt_tw(f"{abs(d):.1f}", 13, 700) for d in deltas if abs(d) >= LT_MIN_PCT]
+                or [_lt_tw("0.0", 13, 700)])
+    x_amt = xd - amt_w
+    x_tri = x_amt - 10.0
 
     def change(yc, d, big_cut=3.0, group=False):
         if cmp_exp is None:
@@ -9510,10 +9522,11 @@ def build_lt_table_figure(exp, cmp_exp, cmp_period, tiles):
             amount = f"{abs(d):.1f}"
             weight = 700 if big else 400
             color = TEXT_PRIMARY if group else (ANALYTICS_CELL_TEXT if big else TEXT_SECONDARY)
-            _lt_text(ann, xd, yc, amount, anchor="right", size=13, color=color, weight=weight)
-            _cx_triangle(shapes, xd - _lt_tw(amount, 13, weight) - 8, yc, d > 0, 4.2, color)
+            _lt_text(ann, x_amt, yc, amount, size=13, color=color, weight=weight)
+            tri = _cx_mix(LT_DELTA_LOW, LT_BAR, abs(d) / LT_DELTA_FULL)
+            _cx_triangle(shapes, x_tri, yc, d > 0, 4.2, tri)
         else:
-            _lt_text(ann, xd, yc, "0.0", anchor="right", size=13, color=TEXT_MUTED)
+            _lt_text(ann, x_amt, yc, "0.0", size=13, color=TEXT_MUTED)
 
     for gname, keys in groups:
         gt = sum(th.get(k, 0.0) for k in keys)
@@ -9543,12 +9556,6 @@ def build_lt_table_figure(exp, cmp_exp, cmp_period, tiles):
                     hs.append(min(cw - 12, rh - 6))
             pv = th.get(k, 0.0)
             _lt_text(ann, xv, yc, _lt_pct(pv), anchor="right", size=13, color=ANALYTICS_CELL_TEXT, weight=600)
-            shapes.append(dict(type="path", path=_rounded_bar_path(xb0, xb1, yc, 10), fillcolor=LT_TRACK,
-                               line=dict(width=0), layer="below"))
-            if pv >= LT_MIN_PCT:
-                shapes.append(dict(type="path",
-                                   path=_rounded_bar_path(xb0, xb0 + max(10.0, (xb1 - xb0) * pv / maxp), yc, 10),
-                                   fillcolor=LT_BAR, line=dict(width=0), layer="below"))
             change(yc, pv - tp.get(k, 0.0))
             y += rh
     _cx_rect(shapes, 0, y, W, y + 36, ANALYTICS_HEADER_BG)
