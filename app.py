@@ -9541,8 +9541,6 @@ def build_lt_table_figure(exp, cmp_exp, cmp_period, tiles):
                     hy.append(yc)
                     ht.append(f"<b>{_lt_esc(_lt_label(k))}</b> through {f}<br>{_lt_pct(v)} of the portfolio")
                     hs.append(min(cw - 12, rh - 6))
-                else:
-                    _lt_text(ann, cx[f], yc, "\u00b7", anchor="center", size=14, color=LT_DOT)
             pv = th.get(k, 0.0)
             _lt_text(ann, xv, yc, _lt_pct(pv), anchor="right", size=13, color=ANALYTICS_CELL_TEXT, weight=600)
             shapes.append(dict(type="path", path=_rounded_bar_path(xb0, xb1, yc, 10), fillcolor=LT_TRACK,
