@@ -7275,6 +7275,1337 @@ def render_risk_return_section(combined, latest_date):
     )
 
 
+# ===========================================================================
+# 8. CORRELATION AND DIVERSIFICATION (added October 31, 2026)
+#
+# Three views of how the basket's funds move together, built from the
+# mockups Tyler approved on October 31, 2026 (Correlation Over Time Mockups
+# canvas, boards Main, Matrix and Bets):
+#
+#   Correlation Over Time          fund pairs by month (Idea 1)
+#   Correlation Matrix             current readings below the diagonal and
+#                                  twelve monthly trend bars above it (Idea 2)
+#   Did the Diversification Hold?  independent bets going in versus delivered,
+#                                  against a floor set with a slider (Idea 4)
+#
+# Everything is computed here from data the dashboard already reads: each
+# month's going-in basket comes from holdings_daily_values.csv by the same
+# rules as Asset Allocation Over Time (corr_going_in_baskets), and daily
+# prices come through load_holding_prices / _fetch_closes, so the committed
+# price_snapshot.csv covers Yahoo outages on the cloud. No pipeline step and
+# no new data file. Nothing here touches the return series.
+# ===========================================================================
+
+CORR_SECTION_TITLE = "Correlation and Diversification"
+
+# Correlation windows in trading days: 63 counts as three months, 252 as twelve.
+CORR_WINDOWS = {"3 months": 63, "6 months": 126, "12 months": 252}
+CORR_CAL_WINDOWS = ["3 months", "6 months", "12 months"]
+CORR_MATRIX_WINDOWS = ["3 months", "6 months"]
+CORR_COMPARE = {"1 month ago": 1, "3 months ago": 3, "1 year ago": 12}
+CORR_WINDOW_WORDS = {63: "63 trading days (about three months)",
+                     126: "126 trading days (about six months)",
+                     252: "252 trading days (about a year)"}
+CORR_PRICE_LEAD_DAYS = 420   # calendar days of prices before inception, enough for a 12-month window in January 2024
+CORR_HELD_MIN_PCT = 0.5      # a fund counts as held at 0.5% of the account, as in the Rebalance Log
+CORR_FADED = 0.22            # opacity of a calendar cell when the basket did not hold both funds
+CORR_STEADY = 0.05           # changes smaller than this read "steady"
+CORR_RISE = "#B4482A"        # correlation rose (toward lockstep): the warm end of the heat scale
+CORR_FALL = "#3A6A9E"        # correlation fell: the cool end
+CORR_HIGH = 0.8              # "Held together above 0.8" tile
+CORR_MATRIX_MAX = 8          # most funds the matrix shows (the most recently held win)
+CORR_MATRIX_MONTHS = 12      # trend bars per pair above the diagonal
+CORR_RULE_GRAY = "#9CA3AF"
+CORR_PILL_BORDER = "#D5D6DD"
+
+# Diverging correlation scale, interpolated linearly between these stops,
+# with hard steps at -0.7 and +0.7 so strong readings jump out.
+CORR_SCALE = [
+    (-1.0, "#1E4A75"), (-0.701, "#3A6A9E"), (-0.7, "#7EA6CF"), (-0.3, "#B4CDE6"),
+    (0.0, "#F4F4F6"), (0.3, "#F6D6C1"), (0.55, "#EDAE8B"), (0.699, "#E89A73"),
+    (0.7, "#B4482A"), (0.85, "#99381F"), (1.0, "#7A2514"),
+]
+
+# Display order for funds: U.S. equities, international, commodities, gold,
+# crypto, defensive (the mockup's matrix order). Unknown tickers go last.
+CORR_FUND_ORDER = ["SPY", "QQQ", "IWM", "EZU", "EMXC", "DXJ", "HGER", "COPX", "GLD",
+                   "IBIT", "GBTC", "BITO", "BTAL", "TLT"]
+# Names for earlier holdings that are not in ASSET_CATALOG.
+CORR_EXTRA_NAMES = {"SPY": "S&P 500", "EZU": "Eurozone", "COPX": "Copper Miners",
+                    "GBTC": "Bitcoin (GBTC)", "BITO": "Bitcoin Futures"}
+# Dot colors for tickers missing from ASSET_POINT_COLORS, by allocation category.
+CORR_CATEGORY_DOT = {"us": "#1F4D87", "intl": "#14543E", "comm": "#7E4A0A", "gold": "#A57A08",
+                     "crypto": "#C8650A", "def": "#4A463D", "cash": "#8C867C"}
+
+# Independent bets (Idea 4).
+BETS_FLOOR_DEFAULT = 2.0
+BETS_FLOOR_MIN = 1.0
+BETS_FLOOR_MAX = 3.0
+BETS_FLOOR_STEP = 0.1
+BETS_CAP = 4.0               # readings above 4 show as "4+"
+BETS_WINDOW = 63             # going in: the 63 trading days before the month
+BETS_MIN_PRE = 20            # fewest sessions a going-in reading may rest on
+BETS_MIN_SESSIONS = 10       # an open month shows what it delivered once it has this many sessions
+BETS_TBILL_SHARE = 0.5       # a basket more than half T-bills and cash reads "T-bills" and is left out
+BETS_PURPLE = BAR_SERIES_COLORS["AsymEdge"]   # bets going in, at or above the floor
+BETS_LOW = "#B4482A"         # below the floor, just under it
+BETS_LOW_DEEP = "#7A2514"    # below the floor, at 1 bet
+BETS_FAINT = "#F7E2D8"       # just above the floor
+BETS_NEUTRAL = "#F3F3F5"     # half a bet or more above the floor
+BETS_GOOD = "#1E7A50"        # the month delivered more bets than it went in with
+BETS_TRACK = "#F4F4F6"
+BETS_TBILL_FILL = "#F3F4F6"
+BETS_STRIPE_EDGE = "#D9DAE0"
+BETS_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+# ---------- small helpers ----------
+
+def _cx_rgb(h):
+    h = h.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _cx_hex(rgb):
+    return "#%02X%02X%02X" % tuple(max(0, min(255, int(round(v)))) for v in rgb)
+
+
+def _cx_mix(a, b, t):
+    t = max(0.0, min(1.0, float(t)))
+    ra, rb = _cx_rgb(a), _cx_rgb(b)
+    return _cx_hex([ra[i] + (rb[i] - ra[i]) * t for i in range(3)])
+
+
+def _cx_text_on(bg):
+    """White text where it passes 4.5:1 contrast on bg, otherwise the cell ink."""
+    def channel(v):
+        v /= 255.0
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+    r, g, b = _cx_rgb(bg)
+    lum = 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+    return "#FFFFFF" if 1.05 / (lum + 0.05) >= 4.5 else ANALYTICS_CELL_TEXT
+
+
+def _cx_text(ann, x, y, text, anchor="left", size=13, color=TEXT_PRIMARY, weight=400,
+             valign="middle"):
+    """Pixel-coordinate text with an explicit DM Sans weight (400 to 700)."""
+    ann.append(dict(
+        x=x, y=y, xref="x", yref="y", xanchor=anchor, yanchor=valign, text=text,
+        showarrow=False, align=anchor if anchor in ("left", "right") else "center",
+        font=dict(family=ANALYTICS_FONT, size=size, color=color, weight=weight),
+    ))
+
+
+def _cx_rect(shapes, x0, y0, x1, y1, fill, r=0.0, line_color=None, line_width=0.0,
+             opacity=None, layer="below"):
+    shape = dict(type="path", path=_round_rect_path(x0, y0, x1, y1, r), fillcolor=fill,
+                 line=dict(color=line_color, width=line_width) if line_color else dict(width=0),
+                 layer=layer)
+    if opacity is not None:
+        shape["opacity"] = opacity
+    shapes.append(shape)
+
+
+def _cx_line(shapes, x0, y0, x1, y1, color, width=1.0, dash=None):
+    line = dict(color=color, width=width)
+    if dash:
+        line["dash"] = dash
+    shapes.append(dict(type="line", x0=x0, y0=y0, x1=x1, y1=y1, line=line, layer="above"))
+
+
+def _cx_dot(shapes, cx, cy, r, color):
+    shapes.append(dict(type="circle", x0=cx - r, y0=cy - r, x1=cx + r, y1=cy + r,
+                       fillcolor=color, line=dict(width=0), layer="above"))
+
+
+def _cx_triangle(shapes, x, y, up, s, color):
+    """Small up or down triangle centered near (x, y), as in the mockups."""
+    if up:
+        path = f"M {x - s},{y + s * 0.45} L {x + s},{y + s * 0.45} L {x},{y - s * 0.75} Z"
+    else:
+        path = f"M {x - s},{y - s * 0.45} L {x + s},{y - s * 0.45} L {x},{y + s * 0.75} Z"
+    shapes.append(dict(type="path", path=path, fillcolor=color, line=dict(width=0), layer="above"))
+
+
+def _cx_wrap(text, size, max_w):
+    """Greedy word wrap by estimated DM Sans width (px)."""
+    lines, cur = [], ""
+    for word in str(text).split():
+        trial = f"{cur} {word}".strip()
+        if cur and _dd_text_width(trial, size) > max_w:
+            lines.append(cur)
+            cur = word
+        else:
+            cur = trial
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def _cx_tiles(shapes, ann, tiles, y0=0.0):
+    """Lavender summary tiles across the full width: label, big value, and a
+    one- or two-line note. Returns the tile height."""
+    W = ANALYTICS_WIDTH
+    gap = 12
+    tile_w = (W - gap * (len(tiles) - 1)) / max(len(tiles), 1)
+    wrapped = [_cx_wrap(sub, 12, tile_w - 30)[:2] for _label, _value, sub in tiles]
+    tile_h = 98 if any(len(w) > 1 for w in wrapped) else 84
+    for i, ((label, value, _sub), lines) in enumerate(zip(tiles, wrapped)):
+        x0 = i * (tile_w + gap)
+        _cx_rect(shapes, x0, y0, x0 + tile_w, y0 + tile_h, ANALYTICS_TINT, r=10)
+        _cx_text(ann, x0 + 16, y0 + 20, label.replace("&", "&amp;"), size=13, color=TEXT_SECONDARY)
+        _cx_text(ann, x0 + 16, y0 + 46, value.replace("&", "&amp;"), size=24,
+                 color=BRAND_PURPLE, weight=700)
+        for j, line in enumerate(lines):
+            _cx_text(ann, x0 + 16, y0 + 70 + 15 * j, line.replace("&", "&amp;"), size=12,
+                     color=TEXT_SECONDARY)
+    return tile_h
+
+
+def _cx_hover(fig, xs, ys, texts, size):
+    """Invisible square markers that carry hover text for pixel figures."""
+    if xs:
+        fig.add_trace(go.Scatter(
+            x=xs, y=ys, mode="markers",
+            marker=dict(size=max(int(size), 4), color="rgba(0,0,0,0)", symbol="square"),
+            hovertext=texts, hovertemplate="%{hovertext}<extra></extra>", showlegend=False,
+        ))
+
+
+def corr_color(v):
+    """Heat color for a correlation on the diverging scale."""
+    if v is None or not np.isfinite(v):
+        return HEAT_EMPTY
+    v = max(-1.0, min(1.0, float(v)))
+    for (a, ca), (b, cb) in zip(CORR_SCALE, CORR_SCALE[1:]):
+        if v <= b:
+            return _cx_mix(ca, cb, (v - a) / (b - a))
+    return CORR_SCALE[-1][1]
+
+
+def _corr_str(v, digits=2):
+    """Correlation with a true minus sign, e.g. 0.82 or −0.22; n/a when missing."""
+    if v is None or not np.isfinite(v):
+        return "n/a"
+    text = f"{abs(v):.{digits}f}"
+    return (MINUS + text) if v < -0.5 * 10 ** -digits else text
+
+
+def _corr_fund_name(ticker):
+    info = ASSET_CATALOG.get(ticker)
+    return info["asset"] if info else CORR_EXTRA_NAMES.get(ticker, ticker)
+
+
+def _corr_fund_color(ticker):
+    if ticker in ASSET_POINT_COLORS:
+        return ASSET_POINT_COLORS[ticker]
+    return CORR_CATEGORY_DOT.get(ALLOC_HISTORY_TICKER_CATEGORY.get(ticker, ""), "#8a8f9c")
+
+
+def _corr_order(tickers):
+    pos = {t: i for i, t in enumerate(CORR_FUND_ORDER)}
+    return sorted(set(tickers), key=lambda t: (pos.get(t, len(pos)), t))
+
+
+def _corr_month(period):
+    return pd.Period(period, freq="M").strftime("%B %Y")
+
+
+def _bets_shown(v):
+    """The one-decimal value a cell displays (capped to 1..4). Floor tests use
+    this, so a cell that reads 2.2 is never below a 2.2 floor."""
+    return float(f"{max(1.0, min(BETS_CAP, float(v))):.1f}")
+
+
+def _bets_fmt(v):
+    if v is None or not np.isfinite(v):
+        return "n/a"
+    return "4+" if v > BETS_CAP else f"{max(1.0, float(v)):.1f}"
+
+
+def bets_is_low(v, floor):
+    return v is not None and np.isfinite(v) and _bets_shown(v) < floor - 1e-9
+
+
+def bets_color(v, floor):
+    """Reds only: deep red below the floor (darker the further below), a faint
+    tint just above it fading to neutral over the next half bet."""
+    v = max(1.0, min(BETS_CAP, float(v)))
+    if bets_is_low(v, floor):
+        return _cx_mix(BETS_LOW, BETS_LOW_DEEP, (floor - v) / max(floor - 1.0, 1e-9))
+    return _cx_mix(BETS_FAINT, BETS_NEUTRAL, (v - floor) / 0.5)
+
+
+# ---------- data ----------
+
+def corr_going_in_baskets(holdings_values, totals):
+    """Each month's going-in basket since inception, oldest first, by the same
+    rules as Asset Allocation Over Time: the holdings at the close of the prior
+    month's final trading day (the inception month uses the January 2, 2024
+    close), with ALLOC_HISTORY_EXECUTION_CORRECTIONS and an active month-start
+    override applied, and the month after a registered month-end rebalance
+    included. Returns dicts with period, date (the going-in close), weights
+    (ticker -> share of the account, securities only) and tbill (the share in
+    BIL, money market and uninvested cash)."""
+    if holdings_values is None or holdings_values.empty:
+        return []
+    hv = holdings_values.fillna(0.0).sort_index()
+    inception = pd.Timestamp(ALLOC_HISTORY_START)
+    in_range = hv.index[hv.index >= inception]
+    if len(in_range) == 0:
+        return []
+    idx = hv.index
+    month_ends = idx.to_series().groupby([idx.year, idx.month]).max()
+    last_period = idx[-1].to_period("M")
+    rebalances = find_rebalance_dates(hv)
+    if rebalances and rebalances[0] == idx[-1]:
+        last_period = last_period + 1
+    override = load_month_start_override()
+    override_date = override["period_start_date"] if override else ""
+
+    baskets = []
+    for period in pd.period_range(in_range[0].to_period("M"), last_period, freq="M"):
+        prev = period - 1
+        going_in = month_ends.get((prev.year, prev.month))
+        if going_in is None or going_in < inception:
+            in_month = in_range[(in_range.year == period.year) & (in_range.month == period.month)]
+            if len(in_month) == 0:
+                continue
+            going_in = in_month[0]
+        key = going_in.strftime("%Y-%m-%d")
+        correction = ALLOC_HISTORY_EXECUTION_CORRECTIONS.get(key)
+        if correction is None and override and key == override_date:
+            correction = override["weights"]
+        if correction:
+            csum = sum(float(v) for v in correction.values())
+            if csum <= 0:
+                continue
+            weights = {str(t): float(v) / csum for t, v in correction.items() if float(v) > 0}
+            tbill = sum(w for t, w in weights.items() if t == "BIL" or t in CASH_LIKE_TICKERS)
+            weights = {t: w for t, w in weights.items() if t not in CASH_LIKE_TICKERS}
+        else:
+            row = hv.loc[going_in]
+            total = float(row[row > 0].sum())
+            cash = 0.0
+            if totals is not None and going_in in totals.index:
+                account_value = float(totals.at[going_in, "account_value"])
+                if account_value > 0:
+                    total = account_value
+                    cash = max(float(totals.at[going_in, "cash"]), 0.0)
+            if total <= 0:
+                continue
+            weights = {str(t): float(v) / total for t, v in row.items()
+                       if float(v) > 1.0 and t not in CASH_LIKE_TICKERS}
+            money_market = sum(float(row[t]) for t in CASH_LIKE_TICKERS if t in row.index)
+            tbill = weights.get("BIL", 0.0) + (max(money_market, 0.0) + cash) / total
+        baskets.append({"period": period, "date": going_in, "weights": weights, "tbill": tbill})
+    return baskets
+
+
+def corr_price_tickers(baskets, next_rows):
+    """Every fund any monthly basket held since inception, plus next month's
+    basket and SPY, which marks the equity sessions."""
+    tickers = {"SPY"}
+    for b in baskets:
+        tickers.update(t for t, w in b["weights"].items() if w > 0)
+    for r in next_rows or []:
+        t = str(r.get("ticker", "")).strip().upper()
+        if t and _sort_weight(r.get("weight")) > 0:
+            tickers.add(t)
+    return sorted(t for t in tickers if t and t not in CASH_LIKE_TICKERS)
+
+
+def corr_equity_returns(prices):
+    """Daily returns on completed equity sessions. Rows where SPY has no close
+    are dropped first, because a weekend row (BTC-USD style) would otherwise
+    turn every Monday return into NaN, and a final session that has not closed
+    yet is dropped so a partial trading day is never used."""
+    if prices is None or prices.empty:
+        return pd.DataFrame()
+    px = prices.sort_index()
+    px = px[~px.index.duplicated(keep="last")]
+    if "SPY" in px.columns and px["SPY"].notna().any():
+        px = px[px["SPY"].notna()]
+    else:
+        px = px[px.index.dayofweek < 5]
+    if len(px) and not _session_has_closed(px.index[-1]):
+        px = px.iloc[:-1]
+    if len(px) < 2:
+        return pd.DataFrame()
+    return px.pct_change(fill_method=None).iloc[1:]
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def compute_pair_correlations(returns, funds, dates, window):
+    """{(a, b): [reading at each date]} for every pair of funds: the correlation
+    of daily returns over the last `window` sessions both funds traded, ending
+    on each date. NaN where fewer than a third of the window exists (a fund
+    that had only just launched)."""
+    min_obs = max(20, int(window) // 3)
+    dates = [pd.Timestamp(d) for d in dates]
+    out = {}
+    funds = list(funds)
+    for i, a in enumerate(funds):
+        for b in funds[i + 1:]:
+            vals = [np.nan] * len(dates)
+            if a in returns.columns and b in returns.columns:
+                pair = returns[[a, b]].dropna()
+                if len(pair) >= min_obs:
+                    roll = pair[a].rolling(int(window), min_periods=min_obs).corr(pair[b])
+                    for k, d in enumerate(dates):
+                        upto = roll.loc[:d]
+                        if len(upto):
+                            v = float(upto.iloc[-1])
+                            vals[k] = v if np.isfinite(v) else np.nan
+            out[(a, b)] = vals
+    return out
+
+
+def _dr_squared(block, weights):
+    """Independent bets: the diversification ratio squared, ((w·σ) / σp)²
+    (Choueifaty and Coignard, 2008). 1 means the funds behaved as one bet."""
+    cov = block.cov().values
+    if not np.all(np.isfinite(cov)):
+        return np.nan
+    vol = np.sqrt(np.clip(np.diag(cov), 0.0, None))
+    port_var = float(weights @ cov @ weights)
+    if port_var <= 0:
+        return np.nan
+    return float((weights @ vol) ** 2 / port_var)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def compute_bets_rows(returns, months_spec):
+    """Bets going in and delivered for each month. months_spec holds one tuple
+    per month: (period string, going-in date, reading date, ((ticker, weight),
+    ...), T-bill share, closed flag). Going in uses the BETS_WINDOW sessions up
+    to the going-in close; delivered uses the month's own sessions after it."""
+    rows = []
+    for period_s, going_in, reading, items, tbill, closed in months_spec:
+        going_in, reading = pd.Timestamp(going_in), pd.Timestamp(reading)
+        row = {"period": pd.Period(period_s, freq="M"), "going_in_date": going_in,
+               "reading_date": reading, "tbill": tbill >= BETS_TBILL_SHARE, "closed": bool(closed),
+               "pre": np.nan, "dlv": np.nan, "n_dlv": 0, "missing": []}
+        if not row["tbill"]:
+            weights = {t: w for t, w in items if w > 0}
+            priced = [t for t in weights if t in returns.columns]
+            row["missing"] = [t for t in weights
+                              if t not in priced and weights[t] * 100.0 >= CORR_HELD_MIN_PCT]
+            if priced and not row["missing"]:
+                w = np.array([weights[t] for t in priced])
+                pre = returns.loc[:going_in, priced].dropna().tail(BETS_WINDOW)
+                if len(pre) >= BETS_MIN_PRE:
+                    row["pre"] = _dr_squared(pre, w)
+                inside = returns.loc[(returns.index > going_in) & (returns.index <= reading), priced].dropna()
+                row["n_dlv"] = int(len(inside))
+                if len(inside) >= BETS_MIN_SESSIONS:
+                    row["dlv"] = _dr_squared(inside, w)
+        rows.append(row)
+    return rows
+
+
+def corr_section_context(baskets, prices, next_rows):
+    """Everything the three views share: the months shown (inception through
+    the latest month that has both a basket and a completed session), each
+    month's reading date and basket, the daily returns, and the fund sets."""
+    returns = corr_equity_returns(prices)
+    if returns.empty or not baskets:
+        return None
+    last_session = returns.index[-1]
+    last_period = min(baskets[-1]["period"], last_session.to_period("M"))
+    sess_periods = returns.index.to_period("M")
+    months = []
+    for b in baskets:
+        if b["period"] > last_period:
+            break
+        in_month = returns.index[(sess_periods == b["period"]) & (returns.index >= b["date"])]
+        if len(in_month) == 0:
+            continue
+        months.append({**b, "reading": in_month[-1]})
+    if not months:
+        return None
+    months[-1]["closed"] = months[-1]["period"] < last_session.to_period("M") or \
+        _last_month_closed(months[-1]["reading"])
+    for m in months[:-1]:
+        m["closed"] = True
+
+    def held(basket):
+        return {t for t, w in basket["weights"].items()
+                if w * 100.0 >= CORR_HELD_MIN_PCT and t != "BIL" and t not in CASH_LIKE_TICKERS}
+
+    for m in months:
+        m["held"] = held(m)
+    nxt = set()
+    for r in next_rows or []:
+        t = str(r.get("ticker", "")).strip().upper()
+        if t and t != "BIL" and t not in CASH_LIKE_TICKERS and _sort_weight(r.get("weight")) >= CORR_HELD_MIN_PCT:
+            nxt.add(t)
+    latest = months[-1]["held"]
+    if nxt and nxt != latest:
+        # next_allocation.json already holds the basket for the coming month.
+        current, prior = nxt, latest
+        current_period = months[-1]["period"] + 1
+    else:
+        current = latest
+        prior = months[-2]["held"] if len(months) > 1 else set()
+        current_period = months[-1]["period"]
+    replaced = _corr_order(prior - current)
+    cal_funds = _corr_order(current | prior)
+
+    # Matrix: every fund held in the last twelve monthly baskets, plus next
+    # month's. Past CORR_MATRIX_MAX, the most recently held win.
+    last_held = {}
+    for k, m in enumerate(months[-CORR_MATRIX_MONTHS:]):
+        for t in m["held"]:
+            last_held[t] = k
+    for t in nxt:
+        last_held[t] = CORR_MATRIX_MONTHS
+    recent = sorted(last_held, key=lambda t: -last_held[t])[:CORR_MATRIX_MAX]
+    matrix_funds = _corr_order(recent)
+    return {
+        "months": months, "returns": returns, "last_session": last_session,
+        "cal_funds": cal_funds, "matrix_funds": matrix_funds,
+        "current": _corr_order(current), "replaced": replaced, "current_period": current_period,
+    }
+
+
+def corr_readings(ctx, funds, window):
+    """Month-end readings for every pair of funds at the given window."""
+    funds = tuple(f for f in funds if f in ctx["returns"].columns)
+    dates = tuple(m["reading"] for m in ctx["months"])
+    sub = ctx["returns"][list(funds)] if funds else ctx["returns"].iloc[:, :0]
+    return funds, compute_pair_correlations(sub, funds, dates, int(window))
+
+
+def corr_missing_note(ctx, prices):
+    """A short note naming any fund whose prices did not load, or only load
+    through an earlier date, so gaps read as data gaps rather than zeros."""
+    if ctx is None:
+        return ""
+    needed = set(ctx["cal_funds"]) | set(ctx["matrix_funds"]) | {"SPY"}
+    for m in ctx["months"]:
+        needed.update(t for t, w in m["weights"].items() if w * 100.0 >= CORR_HELD_MIN_PCT)
+    needed -= set(CASH_LIKE_TICKERS)
+    missing, stale = [], []
+    for t in sorted(needed):
+        if prices is None or t not in prices.columns or prices[t].dropna().empty:
+            missing.append(t)
+        elif prices[t].dropna().index[-1] < ctx["last_session"] - pd.Timedelta(days=6):
+            stale.append(f"{t} (through {_cap_date(prices[t].dropna().index[-1])})")
+    parts = []
+    if missing:
+        parts.append("Prices did not load for " + _cap_join(missing)
+                     + "; readings that need them show n/a.")
+    if stale:
+        parts.append("Prices stop early for " + _cap_join(stale) + ".")
+    return " ".join(parts)
+
+
+# ---------- Idea 1: correlation calendar ----------
+
+def _corr_change(shapes, ann, x_right, cy, d, size=13):
+    """Right-aligned change: a red up or blue down triangle and the amount, or
+    "steady" under CORR_STEADY."""
+    if d is not None and np.isfinite(d) and abs(d) >= CORR_STEADY:
+        color = CORR_RISE if d > 0 else CORR_FALL
+        amount = f"{abs(d):.2f}"
+        _cx_text(ann, x_right, cy, amount, anchor="right", size=size, color=color, weight=600)
+        _cx_triangle(shapes, x_right - _dd_text_width(amount, size, True) - 8, cy, d > 0, 4.4, color)
+    elif d is not None and np.isfinite(d):
+        _cx_text(ann, x_right, cy, "steady", anchor="right", size=size - 0.5, color=TEXT_MUTED)
+    else:
+        _cx_text(ann, x_right, cy, "n/a", anchor="right", size=size - 0.5, color=TEXT_MUTED)
+
+
+def _corr_scale_legend(shapes, ann, x, y, w=250):
+    """The heat scale labeled Move opposite / Unrelated / Move together."""
+    x += 10
+    n = 60
+    for i in range(n):
+        v = -1 + 2 * (i + 0.5) / n
+        _cx_rect(shapes, x + w * i / n, y, x + w * (i + 1) / n + 0.6, y + 12, corr_color(v))
+    shapes.append(dict(type="rect", x0=x, y0=y, x1=x + w, y1=y + 12,
+                       line=dict(color=CORR_PILL_BORDER, width=1), fillcolor="rgba(0,0,0,0)",
+                       layer="above"))
+    for v, label in [(-1, MINUS + "1"), (-0.5, MINUS + "0.5"), (0, "0"), (0.5, "0.5"),
+                     (0.7, "0.7"), (1, "1")]:
+        xx = x + w * (v + 1) / 2
+        _cx_line(shapes, xx, y + 12, xx, y + 16, CORR_RULE_GRAY, 1)
+        _cx_text(ann, xx, y + 25, label, anchor="center", size=11, color=TEXT_MUTED)
+    _cx_text(ann, x, y - 10, "Move opposite", size=12, color=TEXT_SECONDARY, weight=600)
+    _cx_text(ann, x + w / 2, y - 10, "Unrelated", anchor="center", size=12, color=TEXT_SECONDARY,
+             weight=600)
+    _cx_text(ann, x + w, y - 10, "Move together", anchor="right", size=12, color=TEXT_SECONDARY,
+             weight=600)
+
+
+def corr_calendar_tiles(months, pairs, values, lag=3):
+    """Most linked pair now, biggest shift over `lag` months, and the most
+    months any pair spent above CORR_HIGH while the basket held both funds."""
+    tiles = []
+    first = _corr_month(months[0]["period"])
+    now = {p: values[p][-1] for p in pairs if np.isfinite(values[p][-1])}
+    if now:
+        top = max(now, key=lambda p: now[p])
+        hist = [(v, m["period"]) for v, m in zip(values[top], months) if np.isfinite(v)]
+        high_v, high_p = max(hist, key=lambda x: x[0])
+        if now[top] >= high_v - 0.005:
+            sub = f"{_corr_str(now[top])}, its highest since {first}"
+        else:
+            sub = f"{_corr_str(now[top])}; its high was {_corr_str(high_v)} in {_corr_month(high_p)}"
+        tiles.append(("Most linked now", f"{top[0]} & {top[1]}", sub))
+    else:
+        tiles.append(("Most linked now", "n/a", "No current readings"))
+    shifts = {}
+    if len(months) > lag:
+        for p in pairs:
+            a, b = values[p][-1], values[p][-1 - lag]
+            if np.isfinite(a) and np.isfinite(b):
+                shifts[p] = (b, a)
+    word = {1: "1 month", 3: "3 months", 12: "a year"}.get(lag, f"{lag} months")
+    if shifts:
+        top = max(shifts, key=lambda p: abs(shifts[p][1] - shifts[p][0]))
+        then, cur = shifts[top]
+        if then >= 0 > cur:
+            phrase = "now moving opposite"
+        elif then < 0 <= cur:
+            phrase = "no longer moving opposite"
+        elif cur > then:
+            phrase = "moving more together"
+        else:
+            phrase = "moving less together"
+        tiles.append((f"Biggest shift in {word}", f"{top[0]} & {top[1]}",
+                      f"{_corr_str(then)} to {_corr_str(cur)}: {phrase}"))
+    else:
+        tiles.append((f"Biggest shift in {word}", "n/a", "Not enough history yet"))
+    best, best_months = None, []
+    for p in pairs:
+        hits = [m["period"] for v, m in zip(values[p], months)
+                if np.isfinite(v) and v > CORR_HIGH and p[0] in m["held"] and p[1] in m["held"]]
+        if len(hits) > len(best_months):
+            best, best_months = p, hits
+    label = f"Held together above {CORR_HIGH:.1f}"
+    if best is None:
+        tiles.append((label, "None", f"No pair the basket held topped {CORR_HIGH:.1f}"))
+    else:
+        n = len(best_months)
+        years = sorted({p.year for p in best_months})
+        if len(years) == 1:
+            where = f"all in {years[0]}" if n > 1 else f"in {_corr_month(best_months[0])}"
+        else:
+            where = f"most recently {_corr_month(best_months[-1])}"
+        tiles.append((label, f"{n} month" + ("s" if n != 1 else ""), f"{best[0]} and {best[1]}, {where}"))
+    return tiles
+
+
+def build_corr_calendar_figure(months, pairs, values, tiles, lag=3):
+    """Idea 1: one row per fund pair, one cell per month since inception on the
+    correlation scale, faded where the basket did not hold both funds; Now and
+    change columns at the right; the latest column outlined. 780 px wide."""
+    W = ANALYTICS_WIDTH
+    shapes, ann = [], []
+    hx, hy, htext = [], [], []
+    tile_h = _cx_tiles(shapes, ann, tiles, 0)
+    n = len(months)
+    X0, CELLS_RIGHT, XNOW, XCHG = 168.0, 684.0, 728.0, float(W)
+    step = min(15.4, (CELLS_RIGHT - X0 + 1.9) / max(n, 1))
+    cw = step - 1.9
+    head = tile_h + 22
+    top = head + 40
+    rh, ch = 27, 22
+    for i, m in enumerate(months):
+        p = m["period"]
+        x = X0 + i * step
+        if p.month == 1 or i == 0:
+            _cx_text(ann, x, head + 9, str(p.year), size=13, color=TEXT_PRIMARY, weight=700)
+        if step >= 11 or p.month in (1, 4, 7, 10):
+            _cx_text(ann, x + cw / 2, head + 27, p.strftime("%b")[0], anchor="center", size=11,
+                     color=TEXT_MUTED, weight=500)
+    _cx_text(ann, XNOW, head + 27, "Now", anchor="right", size=12, color=TEXT_PRIMARY, weight=700)
+    _cx_text(ann, XCHG, head + 27, f"vs {lag} mo", anchor="right", size=12, color=TEXT_PRIMARY,
+             weight=700)
+    for r, (a, b) in enumerate(pairs):
+        y = top + r * rh
+        cy = y + ch / 2
+        _cx_dot(shapes, 10, cy, 4.5, _corr_fund_color(a))
+        _cx_text(ann, 20, cy, a, size=13, color=ANALYTICS_CELL_TEXT, weight=700)
+        xb = 20 + _dd_text_width(a, 13, True) + 8
+        _cx_text(ann, xb, cy, "&amp;", size=12, color=TEXT_MUTED)
+        xb += 14
+        _cx_dot(shapes, xb + 5, cy, 4.5, _corr_fund_color(b))
+        _cx_text(ann, xb + 15, cy, b, size=13, color=ANALYTICS_CELL_TEXT, weight=700)
+        vals = values[(a, b)]
+        for i, (v, m) in enumerate(zip(vals, months)):
+            x = X0 + i * step
+            both = a in m["held"] and b in m["held"]
+            if np.isfinite(v):
+                _cx_rect(shapes, x, y, x + cw, y + ch, corr_color(v), r=2.5,
+                         opacity=None if both else CORR_FADED)
+            else:
+                _cx_rect(shapes, x, y, x + cw, y + ch, HEAT_EMPTY, r=2.5)
+            hx.append(x + cw / 2)
+            hy.append(cy)
+            status = "held both" if both else "not both held"
+            htext.append(f"<b>{a} &amp; {b}</b>, {m['period'].strftime('%b %Y')}<br>"
+                         f"{_corr_str(v)} ({status})")
+        now = vals[-1] if vals else np.nan
+        _cx_text(ann, XNOW, cy, _corr_str(now), anchor="right", size=13.5,
+                 color=ANALYTICS_CELL_TEXT, weight=700)
+        d = now - vals[-1 - lag] if len(vals) > lag else np.nan
+        _corr_change(shapes, ann, XCHG, cy, d)
+    last_x = X0 + (n - 1) * step
+    _cx_rect(shapes, last_x - 2.5, top - 4, last_x + cw + 2.5, top + rh * len(pairs) - 1, "rgba(0,0,0,0)",
+             r=4, line_color=BRAND_PURPLE, line_width=1.5, layer="above")
+    ly = top + rh * len(pairs) + 34
+    _corr_scale_legend(shapes, ann, 0, ly)
+    sw = corr_color(0.8)
+    _cx_rect(shapes, 322, ly - 0.5, 332, ly + 12.5, sw, r=2)
+    _cx_rect(shapes, 334, ly - 0.5, 344, ly + 12.5, sw, r=2, opacity=CORR_FADED)
+    _cx_text(ann, 352, ly + 6, "Full color: held both that month", size=12, color=TEXT_SECONDARY)
+    _cx_rect(shapes, 326, ly + 22, 340, ly + 36, "rgba(0,0,0,0)", r=3, line_color=BRAND_PURPLE,
+             line_width=1.5, layer="above")
+    _cx_text(ann, 352, ly + 29, f"Latest reading ({_long_date(months[-1]['reading'])})", size=12,
+             color=TEXT_SECONDARY)
+    _cx_triangle(shapes, 584, ly + 6, True, 4.6, CORR_RISE)
+    _cx_text(ann, 596, ly + 6, "More correlated", size=12, color=TEXT_SECONDARY)
+    _cx_triangle(shapes, 584, ly + 29, False, 4.6, CORR_FALL)
+    _cx_text(ann, 596, ly + 29, "Less correlated", size=12, color=TEXT_SECONDARY)
+    H = int(ly + 46)
+    fig = go.Figure()
+    _cx_hover(fig, hx, hy, htext, min(cw, ch))
+    return _pixel_layout(fig, W, H, shapes, ann)
+
+
+def corr_calendar_view(ctx, window, lag=3):
+    """Pairs (highest current reading first), their readings, and the tiles
+    for Correlation Over Time at the given window."""
+    funds, values = corr_readings(ctx, ctx["cal_funds"], window)
+    pairs = [(a, b) for i, a in enumerate(funds) for b in funds[i + 1:]]
+    # Pairs without a current reading sink to the bottom.
+    pairs.sort(key=lambda p: -(values[p][-1] if np.isfinite(values[p][-1]) else -9.0))
+    tiles = corr_calendar_tiles(ctx["months"], pairs, values, lag) if pairs else []
+    return pairs, values, tiles
+
+
+def render_corr_calendar(ctx):
+    window_label = st.pills("Window", CORR_CAL_WINDOWS, default=CORR_CAL_WINDOWS[0],
+                            selection_mode="single", key="corr_cal_window") or CORR_CAL_WINDOWS[0]
+    window = CORR_WINDOWS[window_label]
+    lag = 3
+    pairs, values, tiles = corr_calendar_view(ctx, window, lag)
+    if not pairs:
+        st.info("Correlation Over Time needs at least two current or recent funds with prices.")
+        return
+    months = ctx["months"]
+    fig = build_corr_calendar_figure(months, pairs, values, tiles, lag)
+    st.plotly_chart(fig, use_container_width=False,
+                    config=chart_config("Correlation Over Time", static=True),
+                    key=f"corr_cal_fig_{window}")
+    current_name = _corr_month(ctx["current_period"])
+    who = f"Pairs among the {current_name} basket ({_cap_join(ctx['current'])})"
+    if ctx["replaced"]:
+        who += f" plus {_cap_join(ctx['replaced'])}, which it replaced"
+    _footnote(
+        f"Each cell is the correlation of daily returns over the {CORR_WINDOW_WORDS[window]} ending "
+        f"that month; the latest column runs through {_long_date(months[-1]['reading'])}. 1 means two "
+        f"funds move in lockstep, 0 means unrelated, {MINUS}1 means opposite. Shades turn dark at 0.7 "
+        "and above. Months when the basket held both funds are in full color; other months are faded. "
+        f"vs {lag} mo is the change from the reading three months earlier; changes under 0.05 read "
+        f"steady. {who}. Daily returns come from adjusted closes on U.S. equity trading days."
+    )
+
+
+# ---------- Idea 2: correlation matrix ----------
+
+def build_corr_matrix_figure(funds, values, months, lag, compare_label):
+    """Idea 2: current readings below the diagonal with the change since the
+    comparison month, fund names on the diagonal, and each pair's monthly
+    readings over the past year as bars above it; then the color key and the
+    biggest moves. 780 px wide."""
+    W = ANALYTICS_WIDTH
+    shapes, ann = [], []
+    hx, hy, htext = [], [], []
+    n = len(funds)
+    LW, TH, CH = 66.0, 30.0, 66.0
+    cw = (W - LW) / n
+    spark_n = min(CORR_MATRIX_MONTHS, len(months))
+    spark_months = months[-spark_n:]
+
+    def val(a, b, k):
+        key = (a, b) if (a, b) in values else (b, a)
+        series = values.get(key)
+        if not series or k >= len(series) or k < -len(series):
+            return np.nan
+        return series[k]
+
+    for j, t in enumerate(funds):
+        _cx_text(ann, LW + j * cw + cw / 2, 15, t, anchor="center", size=13.5,
+                 color=TEXT_PRIMARY, weight=700)
+    for i, a in enumerate(funds):
+        y = TH + i * CH
+        mid = y + CH / 2
+        _cx_dot(shapes, 10, mid, 4.5, _corr_fund_color(a))
+        _cx_text(ann, 20, mid, a, size=13.5, color=TEXT_PRIMARY, weight=700)
+        for j, b in enumerate(funds):
+            x = LW + j * cw
+            if i == j:
+                _cx_rect(shapes, x + 2, y + 2, x + cw - 2, y + CH - 2, ANALYTICS_HEADER_BG, r=6)
+                name = _corr_fund_name(a)
+                words = name.split(" ")
+                if _dd_text_width(name, 11.5) > cw - 14 and len(words) > 1:
+                    _cx_text(ann, x + cw / 2, mid - 7, words[0], anchor="center", size=11.5,
+                             color=TEXT_MUTED, weight=500)
+                    _cx_text(ann, x + cw / 2, mid + 8, " ".join(words[1:]), anchor="center",
+                             size=11.5, color=TEXT_MUTED, weight=500)
+                else:
+                    _cx_text(ann, x + cw / 2, mid, name, anchor="center", size=11.5,
+                             color=TEXT_MUTED, weight=500)
+            elif i > j:
+                v = val(a, b, -1)
+                then = val(a, b, -1 - lag) if len(months) > lag else np.nan
+                fill = corr_color(v)
+                ink = _cx_text_on(fill)
+                _cx_rect(shapes, x + 2, y + 2, x + cw - 2, y + CH - 2, fill, r=6)
+                _cx_text(ann, x + cw / 2, mid - 6, _corr_str(v), anchor="center", size=17,
+                         color=ink, weight=700)
+                d = v - then if np.isfinite(v) and np.isfinite(then) else np.nan
+                if np.isfinite(d) and abs(d) >= CORR_STEADY:
+                    amount = f"{abs(d):.2f}"
+                    wd = _dd_text_width(amount, 11.5) + 12
+                    _cx_triangle(shapes, x + cw / 2 - wd / 2 + 4, mid + 15, d > 0, 3.6, ink)
+                    _cx_text(ann, x + cw / 2 - wd / 2 + 11, mid + 15, amount, size=11.5,
+                             color=ink, weight=500)
+                elif np.isfinite(d):
+                    _cx_text(ann, x + cw / 2, mid + 15, "steady", anchor="center", size=11.5,
+                             color=ink)
+                hx.append(x + cw / 2)
+                hy.append(mid)
+                then_m = months[-1 - lag] if len(months) > lag else None
+                htext.append(
+                    f"<b>{b} &amp; {a}</b><br>Now {_corr_str(v)} ({months[-1]['period'].strftime('%b %Y')})"
+                    + (f"<br>{compare_label.capitalize()}: {_corr_str(then)} "
+                       f"({then_m['period'].strftime('%b %Y')})" if then_m else "")
+                )
+            else:
+                _cx_rect(shapes, x + 2, y + 2, x + cw - 2, y + CH - 2, "#FFFFFF", r=6,
+                         line_color=ANALYTICS_RULE, line_width=1)
+                px0, px1 = x + 10, x + cw - 14
+                py0, py1 = y + 9, y + CH - 9
+
+                def yy(v):
+                    return py1 - (max(v, -0.6) + 0.6) / 1.6 * (py1 - py0)
+
+                slot = (px1 - px0) / CORR_MATRIX_MONTHS
+                bw = slot - 1.8
+                _cx_line(shapes, px0 - 1, yy(0), px1 + 1, yy(0), CORR_RULE_GRAY, 1)
+                parts = []
+                for k, m in enumerate(spark_months):
+                    v = val(a, b, len(months) - spark_n + k)
+                    parts.append(f"{m['period'].strftime('%b-%y')} {_corr_str(v)}")
+                    if not np.isfinite(v):
+                        continue
+                    bx = px0 + (CORR_MATRIX_MONTHS - spark_n + k) * slot + 0.9
+                    ya, yb = sorted([yy(min(v, 1.0)), yy(0)])
+                    _cx_rect(shapes, bx, ya, bx + bw, max(yb, ya + 1.5), corr_color(v), r=1.2)
+                hx.append(x + cw / 2)
+                hy.append(mid)
+                rows = [", ".join(parts[k:k + 4]) for k in range(0, len(parts), 4)]
+                htext.append(f"<b>{a} &amp; {b}</b>, month-end readings<br>" + "<br>".join(rows))
+    y = TH + n * CH + 28
+    _corr_scale_legend(shapes, ann, 0, y)
+    for k, v in enumerate([0.55, 0.62, 0.7, 0.78, 0.84, 0.82]):
+        hh = 4 + 16 * (v - 0.4) / 0.6
+        _cx_rect(shapes, 330 + k * 6, y + 16 - hh, 334.4 + k * 6, y + 16, corr_color(v), r=1)
+    _cx_line(shapes, 328, y + 16, 368, y + 16, CORR_RULE_GRAY, 1)
+    _cx_text(ann, 378, y + 2, f"Upper half: one bar per month for the past {spark_n} months,", size=12,
+             color=TEXT_SECONDARY)
+    _cx_text(ann, 378, y + 18, "colored and sized by that month's reading", size=12,
+             color=TEXT_SECONDARY)
+
+    # Biggest moves since the comparison month, two columns of three.
+    moves = []
+    if len(months) > lag:
+        for i, a in enumerate(funds):
+            for b in funds[i + 1:]:
+                t0, t1 = val(a, b, -1 - lag), val(a, b, -1)
+                if np.isfinite(t0) and np.isfinite(t1):
+                    moves.append((a, b, t0, t1, t1 - t0))
+    moves.sort(key=lambda m: -abs(m[4]))
+    moves = moves[:6]
+    my = y + 52
+    if moves:
+        then_p = months[-1 - lag]["period"]
+        since = then_p.strftime("%B") if then_p.year == months[-1]["period"].year else _corr_month(then_p)
+        _cx_text(ann, 0, my + 10, f"Biggest moves since {since}", size=15, color=TEXT_PRIMARY, weight=600)
+        col_w = (W - 36) / 2
+        half = (len(moves) + 1) // 2
+        for k, (a, b, t0, t1, d) in enumerate(moves):
+            col, row = (0, k) if k < half else (1, k - half)
+            x0 = col * (col_w + 36)
+            ry = my + 26 + row * 32
+            _cx_line(shapes, x0, ry, x0 + col_w, ry, ANALYTICS_RULE, 1)
+            _cx_text(ann, x0, ry + 16, f"{a} &amp; {b}", size=13.5, color=ANALYTICS_CELL_TEXT, weight=700)
+            _cx_text(ann, x0 + 122, ry + 16, f"{_corr_str(t0)} to {_corr_str(t1)}", size=13.5,
+                     color=TEXT_SECONDARY)
+            word = "up" if d > 0 else ("down" if d < 0 else "flat")
+            _cx_text(ann, x0 + col_w, ry + 16, f"{word} {abs(d):.2f}", anchor="right", size=13.5,
+                     color=ANALYTICS_CELL_TEXT, weight=600)
+        H = int(my + 26 + half * 32 + 6)
+    else:
+        H = int(my)
+    fig = go.Figure()
+    _cx_hover(fig, hx, hy, htext, min(cw, CH) - 6)
+    return _pixel_layout(fig, W, H, shapes, ann)
+
+
+def render_corr_matrix(ctx):
+    c1, c2 = st.columns([3, 2])
+    with c1:
+        compare_label = st.pills("Compare with", list(CORR_COMPARE), default="3 months ago",
+                                 selection_mode="single", key="corr_mx_compare") or "3 months ago"
+    with c2:
+        window_label = st.pills("Window", CORR_MATRIX_WINDOWS, default=CORR_MATRIX_WINDOWS[0],
+                                selection_mode="single", key="corr_mx_window") or CORR_MATRIX_WINDOWS[0]
+    window = CORR_WINDOWS[window_label]
+    lag = CORR_COMPARE[compare_label]
+    funds, values = corr_readings(ctx, ctx["matrix_funds"], window)
+    if len(funds) < 2:
+        st.info("Correlation Matrix needs at least two current or recent funds with prices.")
+        return
+    months = ctx["months"]
+    lag = min(lag, len(months) - 1)
+    fig = build_corr_matrix_figure(list(funds), values, months, lag, compare_label)
+    st.plotly_chart(fig, use_container_width=False,
+                    config=chart_config("Correlation Matrix", static=True),
+                    key=f"corr_mx_fig_{window}_{lag}")
+    spark = months[-min(CORR_MATRIX_MONTHS, len(months)):]
+    then_txt = (f"the reading {compare_label} ({_long_date(months[-1 - lag]['reading'])})"
+                if lag >= 1 else "the prior reading")
+    _footnote(
+        f"Correlation of daily returns over the {CORR_WINDOW_WORDS[window]} ending "
+        f"{_long_date(months[-1]['reading'])}. The arrow under each value is the change from "
+        f"{then_txt}; changes under 0.05 read steady. The bars above the diagonal show the same pair's "
+        f"month-end readings from {_corr_month(spark[0]['period'])} to {_corr_month(spark[-1]['period'])}, "
+        "bars below the line meaning the pair moved opposite. Funds are those held at any point in the "
+        "last 12 months plus next month's basket. Hover a cell for the exact readings."
+    )
+
+
+# ---------- Idea 4: did the diversification hold? ----------
+
+def _bets_dlv_text(r):
+    """Hover wording for what a month delivered."""
+    if np.isfinite(r["dlv"]):
+        return f"Delivered {_bets_fmt(r['dlv'])}" + ("" if r["closed"] else " so far")
+    if r["closed"] or r["n_dlv"] >= BETS_MIN_SESSIONS:
+        return "Delivered: n/a (prices missing)"
+    return f"Delivered: shows after {BETS_MIN_SESSIONS} sessions"
+
+
+def bets_summary_tiles(rows, floor):
+    shown = [r for r in rows if not r["tbill"] and np.isfinite(r["pre"])]
+    tiles = []
+    latest = shown[-1] if shown else None
+    if latest is None:
+        tiles.append(("Latest month", "n/a", "No bets reading yet"))
+    else:
+        name = _corr_month(latest["period"])
+        if np.isfinite(latest["dlv"]):
+            label = name if latest["closed"] else f"{name} so far"
+            tiles.append((label, f"{_bets_fmt(latest['pre'])} to {_bets_fmt(latest['dlv'])}",
+                          "Bets going in versus delivered" + ("" if latest["closed"] else " so far")))
+        elif latest["closed"] or latest["n_dlv"] >= BETS_MIN_SESSIONS:
+            tiles.append((name, f"{_bets_fmt(latest['pre'])} going in",
+                          "What it delivered is n/a: prices missing"))
+        else:
+            tiles.append((name, f"{_bets_fmt(latest['pre'])} going in",
+                          f"What it delivered shows after {BETS_MIN_SESSIONS} sessions"))
+    below = [r for r in shown if bets_is_low(r["pre"], floor)]
+    year = latest["period"].year if latest else local_now().year
+    in_year = sum(1 for r in below if r["period"].year == year)
+    tiles.append(("Went in below the floor", f"{len(below)} of {len(shown)}",
+                  f"Below {floor:.1f}; {in_year} of them in {year}"))
+    slipped = sum(1 for r in shown if r["closed"] and np.isfinite(r["dlv"])
+                  and not bets_is_low(r["pre"], floor) and bets_is_low(r["dlv"], floor))
+    tiles.append(("Slipped below during the month", str(slipped),
+                  f"Went in at {floor:.1f} or more, delivered below it"))
+    return tiles
+
+
+def build_bets_tiles_figure(rows, floor):
+    shapes, ann = [], []
+    h = _cx_tiles(shapes, ann, bets_summary_tiles(rows, floor), 0)
+    return _pixel_layout(go.Figure(), ANALYTICS_WIDTH, int(h + 2), shapes, ann)
+
+
+def build_bets_floor_figure(rows, floor):
+    """Over time: bets going in each month as bars on a light track up to 4,
+    purple at or above the floor and red below it, with the dashed floor; a
+    strip underneath shows delivered minus going in. 780 px wide."""
+    W = ANALYTICS_WIDTH
+    shapes, ann = [], []
+    hx, hy, htext = [], [], []
+    n = len(rows)
+    X0, X1 = 56.0, float(W)
+    step = (X1 - X0) / max(n, 1)
+    bw = step * 0.62
+    TOP, H4 = 12.0, 150.0
+
+    def yb(v):
+        return TOP + H4 - v / BETS_CAP * H4
+
+    base = yb(0)
+    cap = lambda v: min(float(v), BETS_CAP)
+    tbill_idx = [i for i, r in enumerate(rows) if r["tbill"]]
+    for i, r in enumerate(rows):
+        if r["tbill"] or not np.isfinite(r["pre"]):
+            continue
+        cx = X0 + (i + 0.5) * step
+        v = cap(r["pre"])
+        low = bets_is_low(r["pre"], floor)
+        _cx_rect(shapes, cx - bw / 2, yb(BETS_CAP), cx + bw / 2, base, BETS_TRACK, r=3)
+        _cx_rect(shapes, cx - bw / 2, yb(v), cx + bw / 2, base, BETS_LOW if low else BETS_PURPLE, r=3)
+        status = ("below the floor" if low else "at or above the floor") + f" of {floor:.1f}"
+        dl_txt = _bets_dlv_text(r)
+        hx.append(cx)
+        hy.append((yb(BETS_CAP) + base) / 2)
+        htext.append(f"<b>{_corr_month(r['period'])}</b><br>Going in {_bets_fmt(r['pre'])} ({status})"
+                     f"<br>{dl_txt}")
+    fy = yb(floor)
+    _cx_line(shapes, X0, fy, X1, fy, ANALYTICS_CELL_TEXT, 1.5, dash="5px,4px")
+    label = f"Floor {floor:.1f}"
+    lw = _dd_text_width(label, 12, True) + 16
+    if tbill_idx:
+        gx = X0 + (tbill_idx[0] + tbill_idx[-1] + 1) / 2 * step
+        _cx_rect(shapes, gx - lw / 2, fy - 24, gx + lw / 2, fy - 5, "#FFFFFF", r=4, layer="above")
+        _cx_text(ann, gx, fy - 14.5, label, anchor="center", size=12, color=ANALYTICS_CELL_TEXT, weight=700)
+        _cx_text(ann, gx, fy + 24, "T-bills", anchor="center", size=12, color=TEXT_SECONDARY, weight=600)
+    else:
+        _cx_rect(shapes, X1 - lw, fy - 24, X1, fy - 5, "#FFFFFF", r=4, layer="above")
+        _cx_text(ann, X1 - lw / 2, fy - 14.5, label, anchor="center", size=12,
+                 color=ANALYTICS_CELL_TEXT, weight=700)
+    for v in range(0, int(BETS_CAP) + 1):
+        _cx_text(ann, X0 - 8, yb(v), str(v), anchor="right", size=12, color=TEXT_MUTED, weight=500)
+    sy = base + 50
+    SC = 14.0
+    _cx_line(shapes, X0, sy, X1, sy, CORR_PILL_BORDER, 1)
+    for i, r in enumerate(rows):
+        if r["tbill"] or not (np.isfinite(r["pre"]) and np.isfinite(r["dlv"])):
+            continue
+        cx = X0 + (i + 0.5) * step
+        d = cap(r["dlv"]) - cap(r["pre"])
+        if abs(d) < CORR_STEADY:
+            _cx_rect(shapes, cx - bw / 2, sy - 1, cx + bw / 2, sy + 1, CORR_RULE_GRAY, r=1)
+            continue
+        hh = abs(d) * SC
+        y0, y1 = (sy - hh, sy) if d > 0 else (sy, sy + hh)
+        _cx_rect(shapes, cx - bw / 2, y0, cx + bw / 2, y1, BETS_GOOD if d > 0 else BETS_LOW, r=2)
+    _cx_text(ann, X0 - 8, sy - 12, "Better", anchor="right", size=12, color=BETS_GOOD, weight=700)
+    _cx_text(ann, X0 - 8, sy + 12, "Worse", anchor="right", size=12, color=BETS_LOW, weight=700)
+    for i, r in enumerate(rows):
+        if r["period"].month == 1 or i == 0:
+            _cx_text(ann, X0 + i * step + 2, sy + 50, str(r["period"].year), size=13,
+                     color=TEXT_PRIMARY, weight=700)
+    # Legend row
+    ly = sy + 84
+    lx = 0.0
+    items = [("box", BETS_PURPLE, "Bets going in"), ("box", BETS_LOW, "Below the floor"),
+             ("dash", ANALYTICS_CELL_TEXT, f"Floor of {floor:.1f} bets"),
+             ("box", BETS_GOOD, "Month delivered more"), ("box", BETS_LOW, "Month delivered fewer")]
+    for kind, color, text in items:
+        if kind == "box":
+            _cx_rect(shapes, lx, ly - 6, lx + 14, ly + 6, color, r=2)
+            lx += 21
+        else:
+            _cx_line(shapes, lx, ly, lx + 22, ly, color, 1.5, dash="4px,3px")
+            lx += 29
+        _cx_text(ann, lx, ly, text, size=13, color=TEXT_SECONDARY)
+        lx += _dd_text_width(text, 13) + 18
+    H = int(ly + 14)
+    fig = go.Figure()
+    _cx_hover(fig, hx, hy, htext, bw)
+    return _pixel_layout(fig, W, H, shapes, ann)
+
+
+def build_bets_grid_figure(rows, floor):
+    """Month by month: rows for each year, Jan to Dec plus an Average column.
+    The big number and the cell color are bets going in; the stripe along the
+    bottom is what the month delivered, on the same scale. Reds only, so months
+    above the floor never read as a sea of red. A key sits above the grid."""
+    W = ANALYTICS_WIDTH
+    shapes, ann = [], []
+    hx, hy, htext = [], [], []
+    by = {r["period"]: r for r in rows}
+    latest_p = rows[-1]["period"]
+    shown = [r for r in rows if not r["tbill"] and np.isfinite(r["pre"])]
+    sample = next((r for r in reversed(shown) if np.isfinite(r["dlv"])), shown[-1] if shown else None)
+
+    # Key: the 1-to-4 scale with the floor marked, and a sample cell.
+    kx, ky, kw = 10.0, 26.0, 312.0
+    segs = 60
+    for i in range(segs):
+        b = 1 + 3 * (i + 0.5) / segs
+        _cx_rect(shapes, kx + i * kw / segs, ky, kx + (i + 1) * kw / segs + 0.4, ky + 12, bets_color(b, floor))
+    shapes.append(dict(type="rect", x0=kx, y0=ky, x1=kx + kw, y1=ky + 12, fillcolor="rgba(0,0,0,0)",
+                       line=dict(color=CORR_PILL_BORDER, width=1), layer="above"))
+    for b in (1, 2, 3, 4):
+        xx = kx + (b - 1) / 3 * kw
+        _cx_line(shapes, xx, ky + 12, xx, ky + 16, CORR_RULE_GRAY, 1)
+        _cx_text(ann, xx, ky + 25, str(b), anchor="center", size=11, color=TEXT_MUTED, weight=500)
+    xc = kx + (floor - 1) / 3 * kw
+    _cx_line(shapes, xc, ky - 5, xc, ky + 17, ANALYTICS_CELL_TEXT, 2)
+    _cx_text(ann, xc, ky - 14, f"Floor {floor:.1f}", anchor="center", size=12,
+             color=ANALYTICS_CELL_TEXT, weight=700)
+    _cx_text(ann, kx, ky + 41, "Too few bets", size=12, color=BETS_LOW, weight=600)
+    _cx_text(ann, kx + kw, ky + 41, "At or above the floor", anchor="right", size=12,
+             color=TEXT_SECONDARY, weight=600)
+    CW_S, CH_S, SH = 52.0, 52.0, 17.0
+
+    def stripe(x, y, w, v):
+        """Delivered stripe: deep red with a white edge below the floor, else white."""
+        if v is not None and np.isfinite(v) and bets_is_low(v, floor):
+            fill = bets_color(v, floor)
+            _cx_rect(shapes, x, y, x + w, y + SH, fill, r=4, line_color="#FFFFFF", line_width=1.5)
+            return fill
+        _cx_rect(shapes, x, y, x + w, y + SH, "#FFFFFF", r=4, line_color=BETS_STRIPE_EDGE, line_width=1)
+        return "#FFFFFF"
+
+    if sample is not None:
+        sx, sy0 = 392.0, 14.0
+        fill = bets_color(sample["pre"], floor)
+        _cx_rect(shapes, sx, sy0, sx + CW_S, sy0 + CH_S, fill, r=6)
+        _cx_text(ann, sx + CW_S / 2, sy0 + 17, _bets_fmt(sample["pre"]), anchor="center", size=15,
+                 color=_cx_text_on(fill), weight=700)
+        sfill = stripe(sx + 3, sy0 + CH_S - SH - 3, CW_S - 6, sample["dlv"])
+        _cx_text(ann, sx + CW_S / 2, sy0 + CH_S - 3 - SH / 2, _bets_fmt(sample["dlv"]), anchor="center",
+                 size=11, color=_cx_text_on(sfill), weight=700)
+        lx = sx + CW_S + 8
+        _cx_line(shapes, lx, sy0 + 17, lx + 16, sy0 + 17, CORR_RULE_GRAY, 1)
+        _cx_text(ann, lx + 22, sy0 + 17, "Bets going in, which sets the cell color", size=13,
+                 color=TEXT_PRIMARY, weight=600)
+        _cx_line(shapes, lx, sy0 + CH_S - 11.5, lx + 16, sy0 + CH_S - 11.5, CORR_RULE_GRAY, 1)
+        _cx_text(ann, lx + 22, sy0 + CH_S - 11.5, "What the month delivered, on the same scale", size=13,
+                 color=TEXT_PRIMARY, weight=600)
+
+    # Grid
+    top = 92.0
+    LW, GX, CH = 56.0, 4.0, 52.0
+    AVG_W = 60.0
+    cw = (W - LW - 12 * GX - AVG_W - 2) / 12
+    x_avg = LW + 12 * (cw + GX) + 2
+    for j, name in enumerate(BETS_MONTHS):
+        _cx_text(ann, LW + j * (cw + GX) + cw / 2, top + 9, name, anchor="center", size=12,
+                 color=TEXT_MUTED, weight=600)
+    _cx_text(ann, x_avg + AVG_W / 2, top + 9, "Average", anchor="center", size=12,
+             color=TEXT_PRIMARY, weight=700)
+    years = list(range(rows[0]["period"].year, latest_p.year + 1))
+    for k, year in enumerate(years):
+        y = top + 22 + k * (CH + GX)
+        _cx_text(ann, 0, y + CH / 2, str(year), size=14, color=TEXT_PRIMARY, weight=700)
+        vals = []
+        for j in range(12):
+            p = pd.Period(year=year, month=j + 1, freq="M")
+            x = LW + j * (cw + GX)
+            r = by.get(p)
+            if r is None:
+                _cx_rect(shapes, x, y, x + cw, y + CH, HEAT_EMPTY, r=6)
+                continue
+            if r["tbill"]:
+                _cx_rect(shapes, x, y, x + cw, y + CH, BETS_TBILL_FILL, r=6)
+                _cx_text(ann, x + cw / 2, y + CH / 2, "T-bills", anchor="center", size=11,
+                         color=TEXT_SECONDARY, weight=600)
+                hx.append(x + cw / 2)
+                hy.append(y + CH / 2)
+                htext.append(f"<b>{_corr_month(p)}</b><br>Mostly T-bills; left out")
+            elif not np.isfinite(r["pre"]):
+                _cx_rect(shapes, x, y, x + cw, y + CH, BETS_TBILL_FILL, r=6)
+                _cx_text(ann, x + cw / 2, y + CH / 2, "n/a", anchor="center", size=11, color=TEXT_MUTED)
+            else:
+                a, d = r["pre"], r["dlv"]
+                vals.append(min(a, BETS_CAP))
+                fill = bets_color(a, floor)
+                _cx_rect(shapes, x, y, x + cw, y + CH, fill, r=6)
+                _cx_text(ann, x + cw / 2, y + 17, _bets_fmt(a), anchor="center", size=15,
+                         color=_cx_text_on(fill), weight=700)
+                sfill = stripe(x + 3, y + CH - SH - 3, cw - 6, d)
+                stripe_txt = _bets_fmt(d) if np.isfinite(d) else "–"
+                _cx_text(ann, x + cw / 2, y + CH - 3 - SH / 2, stripe_txt, anchor="center", size=11,
+                         color=_cx_text_on(sfill) if np.isfinite(d) else TEXT_MUTED, weight=700)
+                status = "below the floor" if bets_is_low(a, floor) else "at or above the floor"
+                dl_txt = _bets_dlv_text(r)
+                hx.append(x + cw / 2)
+                hy.append(y + CH / 2)
+                htext.append(f"<b>{_corr_month(p)}</b><br>Going in {_bets_fmt(a)} ({status})<br>{dl_txt}")
+            if p == latest_p:
+                _cx_rect(shapes, x - 2.5, y - 2.5, x + cw + 2.5, y + CH + 2.5, "rgba(0,0,0,0)", r=7,
+                         line_color=BRAND_PURPLE, line_width=2, layer="above")
+        if vals:
+            av = float(np.mean(vals))
+            fill = bets_color(av, floor)
+            _cx_rect(shapes, x_avg, y, x_avg + AVG_W, y + CH, fill, r=6)
+            _cx_text(ann, x_avg + AVG_W / 2, y + CH / 2, f"{av:.1f}", anchor="center", size=15,
+                     color=_cx_text_on(fill), weight=700)
+    H = int(top + 22 + len(years) * (CH + GX) + 2)
+    fig = go.Figure()
+    _cx_hover(fig, hx, hy, htext, min(cw, CH))
+    return _pixel_layout(fig, W, H, shapes, ann)
+
+
+def _corr_subhead(title, sub):
+    st.markdown(
+        f'<div style="margin:1.6rem 0 0.4rem 0;">'
+        f'<div style="font-size:1.12rem; font-weight:700; color:{TEXT_PRIMARY}; '
+        f'letter-spacing:-0.01em;">{title}</div>'
+        f'<div style="font-size:0.9rem; color:{TEXT_SECONDARY}; margin-top:0.15rem;">{sub}</div></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _bets_minor_head(title, sub):
+    st.markdown(
+        f'<div style="margin:0.9rem 0 0.3rem 0;">'
+        f'<div style="font-size:1rem; font-weight:700; color:{TEXT_PRIMARY};">{title}</div>'
+        f'<div style="font-size:0.85rem; line-height:1.45; color:{TEXT_SECONDARY}; margin-top:0.1rem;">'
+        f'{sub}</div></div>',
+        unsafe_allow_html=True,
+    )
+
+
+# Streamlit draws sliders in its default red when no theme is set; this keeps
+# the floor slider in brand purple without changing any other widget.
+BETS_SLIDER_CSS = """
+<style>
+.st-key-div_floor [data-testid="stSliderThumbValue"],
+.st-key-div_floor [data-testid="stSliderThumbValue"] p { color: #3A0CA3 !important; }
+.st-key-div_floor [role="slider"],
+.st-key-div_floor div:has(> div > input[type="range"]) {
+    background-color: #3A0CA3 !important; border-color: #3A0CA3 !important; }
+.st-key-div_floor [role="slider"]:focus,
+.st-key-div_floor div:has(> div > input[type="range"]:focus) {
+    box-shadow: 0 0 0 3.2px rgba(58, 12, 163, 0.3) !important; }
+.st-key-div_floor div:has(+ div > div > input[type="range"]),
+.st-key-div_floor div:has(> [role="slider"]) + div {
+    background-image: none !important; background-color: rgba(151, 166, 195, 0.35) !important; }
+</style>
+"""
+
+
+def bets_rows(ctx):
+    """Bets going in and delivered for every month shown (cached)."""
+    months = ctx["months"]
+    spec = tuple(
+        (str(m["period"]), m["date"], m["reading"],
+         tuple(sorted((t, round(float(w), 10)) for t, w in m["weights"].items())),
+         round(float(m["tbill"]), 10), bool(m["closed"]))
+        for m in months
+    )
+    tickers = sorted({t for m in months for t in m["weights"] if t in ctx["returns"].columns})
+    return compute_bets_rows(ctx["returns"][tickers], spec)
+
+
+def render_bets_view(ctx):
+    rows = bets_rows(ctx)
+    if not any(np.isfinite(r["pre"]) for r in rows if not r["tbill"]):
+        st.info("Did the Diversification Hold? needs daily prices for the funds each month held.")
+        return
+    st.markdown(BETS_SLIDER_CSS, unsafe_allow_html=True)
+    col, note = st.columns([2, 3], vertical_alignment="bottom")
+    with col:
+        floor = st.slider("Floor", min_value=BETS_FLOOR_MIN, max_value=BETS_FLOOR_MAX,
+                          value=BETS_FLOOR_DEFAULT, step=BETS_FLOOR_STEP, format="%.1f",
+                          key="div_floor",
+                          help="The fewest independent bets a month should go in with.")
+    with note:
+        st.markdown(f'<p style="font-size:0.85rem; color:{TEXT_SECONDARY}; margin:0 0 1.1rem 0;">'
+                    'Minimum bets going in; both charts and the tiles follow it.</p>',
+                    unsafe_allow_html=True)
+    floor = round(float(floor), 1)
+    st.plotly_chart(build_bets_tiles_figure(rows, floor), use_container_width=False,
+                    config=chart_config("Did the Diversification Hold", static=True),
+                    key=f"bets_tiles_fig_{floor:.1f}")
+    _bets_minor_head(
+        "Over time",
+        "Bars are bets going in, against the floor. The strip underneath shows how each month did: "
+        "green up when it delivered more bets than it went in with, red down when it delivered fewer."
+    )
+    st.plotly_chart(build_bets_floor_figure(rows, floor), use_container_width=False,
+                    config=chart_config("Independent Bets Over Time", static=True),
+                    key=f"bets_floor_fig_{floor:.1f}")
+    _bets_minor_head(
+        "Month by month",
+        "Cell color and the big number are bets going in; the stripe is what the month delivered. "
+        "Months below the floor turn deep red."
+    )
+    st.plotly_chart(build_bets_grid_figure(rows, floor), use_container_width=False,
+                    config=chart_config("Independent Bets Month by Month", static=True),
+                    key=f"bets_grid_fig_{floor:.1f}")
+    tbill = [r["period"] for r in rows if r["tbill"]]
+    tbill_txt = ""
+    if tbill:
+        span = (_corr_month(tbill[0]) if len(tbill) == 1 else
+                f"{tbill[0].strftime('%B')} to {_corr_month(tbill[-1])}" if tbill[0].year == tbill[-1].year
+                else f"{_corr_month(tbill[0])} to {_corr_month(tbill[-1])}")
+        tbill_txt = f" {span} held mostly T-bills and {'is' if len(tbill) == 1 else 'are'} left out."
+    last = rows[-1]
+    open_txt = ""
+    if not last["closed"]:
+        open_txt = (f" {_corr_month(last['period'])} is month to date through "
+                    f"{_long_date(last['reading_date'])}; what it delivered appears once it has "
+                    f"{BETS_MIN_SESSIONS} sessions and settles when the month closes.")
+    _footnote(
+        "Independent bets is the diversification ratio squared (Choueifaty and Coignard, 2008) for each "
+        "month's starting weights: 1 means the funds behaved as one bet; four unrelated, equally volatile "
+        f"funds score 4. Going in uses the {BETS_WINDOW} trading days before the month; delivered uses the "
+        "month's own daily returns. Starting weights are the holdings at the close of the prior month's "
+        "final trading day, the same weights as Asset Allocation Over Time. 4+ marks readings above 4, "
+        "when the funds moved against each other, mostly while holding the anti-beta fund BTAL."
+        f"{tbill_txt} Floor tests use the one-decimal value shown, so a cell that reads 2.2 is never below "
+        f"a 2.2 floor. The outlined cell is the latest month.{open_txt}"
+    )
+
+
+def corr_load_context(baskets):
+    """Load prices for every fund the baskets held (plus next month's basket
+    and SPY) through load_holding_prices, then build the shared context.
+    Returns (context or None, prices)."""
+    next_rows = load_next_allocation()
+    tickers = corr_price_tickers(baskets, next_rows)
+    start = (pd.Timestamp(ALLOC_HISTORY_START) - timedelta(days=CORR_PRICE_LEAD_DAYS)).strftime("%Y-%m-%d")
+    end = local_now().strftime("%Y-%m-%d")
+    prices = load_holding_prices(tuple(tickers), start, end)
+    return corr_section_context(baskets, prices, next_rows), prices
+
+
+def render_correlation_section(holdings_values, totals):
+    """Correlation and Diversification: Ideas 1, 2 and 4, each guarded so a
+    data problem in one view leaves the others standing."""
+    st.markdown(
+        f'<p style="font-size:0.92rem; color:{TEXT_SECONDARY}; margin:0 0 0.4rem 0;">How the basket\'s '
+        'funds have moved together, and whether each month kept the diversification it went in with.</p>',
+        unsafe_allow_html=True,
+    )
+    baskets = corr_going_in_baskets(holdings_values, totals)
+    if not baskets:
+        st.info("Correlation and diversification need holdings_daily_values.csv, which did not load.")
+        return
+    ctx, prices = corr_load_context(baskets)
+    if ctx is None:
+        st.info("Correlation and diversification need daily fund prices, which did not load right now. "
+                "Reloading in a few minutes usually restores them.")
+        return
+    note = corr_missing_note(ctx, prices)
+    if note:
+        st.caption(note)
+    _corr_subhead("Correlation Over Time", "How closely each pair of funds has moved together, month by month.")
+    _render_guarded("Correlation Over Time", render_corr_calendar, ctx, heading=False)
+    _corr_subhead("Correlation Matrix", "Today's readings below the diagonal, each pair's past year above it.")
+    _render_guarded("Correlation Matrix", render_corr_matrix, ctx, heading=False)
+    _corr_subhead("Did the Diversification Hold?",
+                  "How many independent bets each month's basket went in with, and how many the month "
+                  "delivered, against a floor you set.")
+    _render_guarded("Did the Diversification Hold?", render_bets_view, ctx, heading=False)
+
+
 def main():
     # Branded header
     st.markdown("""
@@ -7830,6 +9161,17 @@ def main():
     )
     _render_guarded("Rebalance Log", render_rebalance_log_section,
                     holdings_values_df, _analytics_totals, holding_prices)
+
+    st.divider()
+
+    # ================================================================
+    # CORRELATION AND DIVERSIFICATION (added October 31, 2026)
+    # Correlation Over Time, Correlation Matrix, and Did the
+    # Diversification Hold?, from the same holdings and prices as the
+    # allocation sections above.
+    # ================================================================
+    _render_guarded(CORR_SECTION_TITLE, render_correlation_section,
+                    holdings_values_df, _analytics_totals)
 
     st.divider()
 
