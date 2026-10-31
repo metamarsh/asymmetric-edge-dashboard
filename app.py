@@ -8606,6 +8606,1584 @@ def render_correlation_section(holdings_values, totals):
     _render_guarded("Did the Diversification Hold?", render_bets_view, ctx, heading=False)
 
 
+# ===========================================================================
+# 9. LOOK-THROUGH EXPOSURE (added October 31, 2026)
+#
+# Everything the basket's funds hold, combined, so overlap between funds is
+# visible (chips held through both QQQ and EMXC, for example). Built from the
+# mockups Tyler approved on October 31, 2026 (Look-Through Exposure Mockups
+# canvas, boards Main, Table, Treemap and Risk):
+#
+#   Flow    funds on the left flowing into themes on the right (Option A)
+#   Table   each theme for the selected basket against the basket before it,
+#           with each fund's contribution and the largest single holdings
+#           across funds (Option B)
+#   Map     treemap of themes grouped into stocks, commodities and crypto,
+#           with the largest single positions underneath (Option C)
+#   Where the Risk Comes From   each fund's share of the money next to its
+#           share of the basket's variance (the companion)
+#
+# Baskets. "Current" is the going-in basket from corr_going_in_baskets, the
+# same rules as Current Allocation and Asset Allocation Over Time (month-start
+# override and ALLOC_HISTORY_EXECUTION_CORRECTIONS included). "Next" is
+# next_allocation.json when it differs from Current. While the holdings data
+# ends on a month's final session without that rebalance's fills, the pending
+# month is the month that just closed, drifted; Current then stays on the
+# month that closed and next_allocation.json is Next (lt_baskets).
+#
+# Fund holdings. holdings_snapshot.json, written on the PC by
+# make_holdings_snapshot.py in ae-dashboard-deploy from free issuer files
+# (Invesco for QQQ, iShares for IWM and EMXC) and committed with the other
+# data files, so the cloud app never calls the issuers. HGER uses the live
+# Harbor fetch that What HGER Holds already makes (cached six hours), then
+# the saved QCI snapshots, then the holdings snapshot. GLD, BIL and IBIT have
+# fixed look-throughs; any other fund shows as one "Not broken down" block.
+# Daily prices for the companion come through load_holding_prices with the
+# same arguments as the correlation section, so the two share one fetch.
+#
+# Nothing here touches the return series.
+# ===========================================================================
+
+LT_SECTION_TITLE = "Look-Through Exposure"
+LT_SNAPSHOT_NAME = "holdings_snapshot.json"
+# The deploy working copy under the home folder. The local app on the PC
+# reads the snapshot from there, so it needs no copy beside app.py.
+LT_DEPLOY_DIR_PARTS = ("Claude", "Projects", "Asymmetric Edge Chart Dashboard", "ae-dashboard-deploy")
+LT_VIEWS = ["Flow", "Table", "Map"]
+LT_RISK_WINDOWS = {"3 months": 63, "12 months": 252}
+LT_MIN_PCT = 0.05            # themes, funds and flows below this share of the portfolio are not drawn
+LT_HELD_PCT = 0.5            # a fund counts as held at 0.5% of the basket, as in the Rebalance Log
+LT_SAME_BASKET_PTS = 1.0     # baskets within a point on every fund are the same basket (fills vs. targets)
+LT_MAP_NAME_PCT = 0.5        # Map names a single holding at 0.5% of the portfolio or more
+LT_PILL_KEYS = ("lt_view", "lt_basket", "lt_risk_basket", "lt_risk_window")
+LT_SNAPSHOT_FUNDS = ("QQQ", "IWM", "EMXC", "HGER")   # the funds make_holdings_snapshot.py fetches
+
+# Theme key -> (label, color, family). Stocks are blues, commodities browns
+# and crypto orange (mockup palette; gold, crops and bitcoin are the Asset
+# Allocation Over Time category colors). Cash and "not broken down" are
+# neutral grays that appear only when a basket holds them.
+LT_THEMES = {
+    "semis": ("Chips", "#1B365D", "stocks"),
+    "other_tech": ("Software & other tech", "#35608F", "stocks"),
+    "internet": ("Internet & media", "#5F87B8", "stocks"),
+    "consumer": ("Consumer", "#8EABCF", "stocks"),
+    "health": ("Health care", "#A9BFDA", "stocks"),
+    "financials": ("Financials", "#B9CAE0", "stocks"),
+    "industrials": ("Industrials", "#C6D4E6", "stocks"),
+    "energy_mat": ("Energy & materials stocks", "#D2DDEC", "stocks"),
+    "re_util": ("Real estate & utilities", "#DDE5F0", "stocks"),
+    "oil": ("Oil & fuels", "#6E4318", "commod"),
+    "gold": ("Gold", "#E4D294", "commod"),
+    "agri": ("Crops", "#B07D45", "commod"),
+    "livestock": ("Livestock", "#CDA67C", "commod"),
+    "ind_metals": ("Industrial metals", "#8F7B66", "commod"),
+    "commod_other": ("Other commodities", "#A8927A", "commod"),
+    "bitcoin": ("Bitcoin", "#F59A3C", "crypto"),
+    "cash": ("T-bills & cash", "#D3D6DD", "cash"),
+    "not_broken": ("Not broken down", "#A9ADB7", "other"),
+}
+LT_FAMILIES = [("stocks", "Stocks"), ("commod", "Commodities"), ("crypto", "Crypto"),
+               ("cash", "Cash"), ("other", "Other")]
+LT_OTHER_STOCKS = ["consumer", "health", "financials", "industrials", "energy_mat", "re_util"]
+LT_SHORT = {"semis": "chips", "other_tech": "tech", "internet": "internet", "consumer": "consumer",
+            "health": "health care", "financials": "financials", "industrials": "industrials",
+            "energy_mat": "energy and materials", "re_util": "real estate", "oil": "fuels",
+            "gold": "gold", "agri": "crops", "livestock": "livestock", "ind_metals": "metals",
+            "commod_other": "commodities", "bitcoin": "bitcoin", "cash": "cash", "not_broken": "holdings"}
+# Shorter labels tried, in order, when a label does not fit its box or tile.
+LT_ALT_LABELS = {
+    "Software & other tech": ("Software & tech", "Software"),
+    "Internet & media": ("Internet",),
+    "Energy & materials stocks": ("Energy & materials", "Energy"),
+    "Real estate & utilities": ("Real estate",),
+    "Industrial metals": ("Metals",),
+    "Health care": ("Health",),
+    "Samsung Electronics": ("Samsung",),
+    "Not broken down": ("Other",),
+    "T-bills & cash": ("Cash",),
+    "Emerging mkts": ("EM",),
+    "Other commodities": ("Other",),
+}
+# Residual blocks on the Map: what a fund holds in a theme beyond its named holdings.
+LT_RESIDUAL_LABEL = {"IWM": "Small caps", "EMXC": "Emerging mkts"}
+LT_GOLD_EDGE = "#C9B87A"     # outline that keeps the pale gold swatch visible on white
+LT_SHADE = "#CBBFEB"         # Table cell shading at the largest single contribution
+LT_BAR = BAR_SERIES_COLORS["AsymEdge"]   # #4F2DB8, the bar-variant Asymmetric Edge purple
+LT_TRACK = "#ECECF1"
+LT_DOT = "#B9BBC4"           # Table placeholder for a fund that holds none of a theme
+LT_CASH_COLOR = "#8C867C"    # the cash pseudo-fund, in BIL's warm gray
+
+# Funds with a fixed look-through, so they need no holdings file. CASH is the
+# account's money market and uninvested cash.
+LT_FIXED = {"GLD": ("gold", "Gold"), "BIL": ("cash", "T-bills"), "IBIT": ("bitcoin", "Bitcoin"),
+            "GBTC": ("bitcoin", "Bitcoin"), "BITO": ("bitcoin", "Bitcoin"), "CASH": ("cash", "Cash")}
+
+# Harbor (Quantix Commodity Index) sector -> theme, as make_holdings_snapshot.py maps it.
+LT_QCI_THEME = {
+    "Petroleum": "oil", "Natural Gas": "oil", "Energy": "oil",
+    "Precious": "gold",
+    "Grains And Soybean Products": "agri", "Softs": "agri",
+    "LivestockAndDairy": "livestock",
+    "Industrial": "ind_metals",
+}
+LT_QCI_NAMES = {
+    "Brent Crude Oil": "Brent crude", "WTI Crude Oil": "WTI crude", "Crude Oil": "WTI crude",
+    "Gasoil": "Gasoil", "RBOB Gasoline": "Gasoline", "Heating Oil": "Heating oil",
+    "Natural Gas": "Natural gas", "Gold": "Gold", "Silver": "Silver", "Platinum": "Platinum",
+    "Palladium": "Palladium", "Corn": "Corn", "Wheat": "Wheat", "Kansas Wheat": "Wheat",
+    "Soybeans": "Soybeans", "Soymeal": "Soymeal", "Bean Oil": "Soybean oil", "Cocoa": "Cocoa",
+    "Sugar": "Sugar", "Coffee": "Coffee", "Cotton": "Cotton", "Comex Copper": "Copper",
+    "Copper": "Copper", "Zinc": "Zinc", "Aluminum": "Aluminum", "Nickel": "Nickel", "Lead": "Lead",
+    "Tin": "Tin", "Lean Hogs": "Lean hogs", "Live Cattle": "Live cattle", "Feeder Cattle": "Feeder cattle",
+}
+
+# DM Sans advance widths (thousandths of an em) for printable ASCII at
+# weights 400 and 700, read from the font files, so labels are fitted to
+# their boxes exactly. Other weights are interpolated.
+LT_DM400 = (
+    266, 250, 291, 804, 580, 786, 734, 159, 373, 373, 480, 550, 182, 541, 198, 392, 684, 312,
+    576, 591, 607, 610, 628, 534, 608, 628, 202, 227, 550, 550, 550, 524, 1005, 664, 603, 717,
+    688, 565, 535, 758, 681, 234, 501, 584, 527, 841, 691, 774, 580, 774, 594, 580, 561, 655,
+    669, 968, 603, 580, 541, 314, 392, 314, 622, 660, 213, 544, 626, 572, 627, 568, 340, 558,
+    575, 240, 243, 504, 223, 891, 574, 593, 626, 627, 370, 502, 392, 573, 527, 763, 496, 556,
+    458, 427, 234, 427, 550
+)
+LT_DM700 = (
+    235, 309, 367, 857, 604, 902, 781, 197, 405, 405, 513, 579, 246, 576, 252, 427, 704, 364,
+    577, 603, 650, 622, 634, 537, 633, 635, 254, 278, 579, 579, 579, 538, 1046, 709, 638, 738,
+    707, 583, 556, 778, 714, 272, 541, 653, 558, 886, 729, 784, 614, 784, 631, 604, 597, 685,
+    706, 1018, 670, 635, 577, 377, 427, 377, 677, 725, 235, 586, 655, 607, 655, 602, 371, 596,
+    618, 274, 274, 578, 267, 941, 617, 610, 655, 655, 409, 532, 433, 616, 565, 820, 571, 604,
+    490, 470, 272, 470, 579
+)
+
+
+# ---------- small helpers ----------
+
+def _lt_tw(text, size, weight=400):
+    """Rendered DM Sans width in px (2% margin for kerning). Characters
+    outside printable ASCII count 0.6 em."""
+    t = (min(max(float(weight), 400.0), 700.0) - 400.0) / 300.0
+    total = 0.0
+    for ch in str(text):
+        o = ord(ch)
+        if 32 <= o <= 126:
+            a, b = LT_DM400[o - 32], LT_DM700[o - 32]
+            total += a + (b - a) * t
+        else:
+            total += 600.0
+    return total * float(size) / 1000.0 * 1.02
+
+
+def _lt_esc(text):
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _lt_text(ann, x, y, text, anchor="left", size=13, color=TEXT_PRIMARY, weight=400):
+    _cx_text(ann, x, y, _lt_esc(text), anchor=anchor, size=size, color=color, weight=weight)
+
+
+def _lt_pct(v, digits=1):
+    return f"{float(v):.{digits}f}%"
+
+
+def _lt_contrast(a, b):
+    def lum(h):
+        def ch(v):
+            v /= 255.0
+            return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+        r, g, bl = _cx_rgb(h)
+        return 0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(bl)
+    la, lb = sorted([lum(a), lum(b)], reverse=True)
+    return (la + 0.05) / (lb + 0.05)
+
+
+def _lt_legible(color):
+    """Keep the hue but lighten until white or dark text passes 4.5:1."""
+    fill = color
+    for i in range(20):
+        fill = _cx_mix(color, "#FFFFFF", i / 20.0)
+        if _lt_contrast(fill, "#FFFFFF") >= 4.5 or _lt_contrast(fill, ANALYTICS_CELL_TEXT) >= 4.5:
+            return fill
+    return fill
+
+
+def _lt_rgba(color, alpha):
+    r, g, b = _cx_rgb(color)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+def _lt_label(key):
+    return LT_THEMES.get(key, (key, "#A9ADB7", "other"))[0]
+
+
+def _lt_color(key):
+    return LT_THEMES.get(key, (key, "#A9ADB7", "other"))[1]
+
+
+def _lt_family(key):
+    return LT_THEMES.get(key, (key, "#A9ADB7", "other"))[2]
+
+
+def _lt_fund_color(ticker):
+    return LT_CASH_COLOR if ticker == "CASH" else _corr_fund_color(ticker)
+
+
+def _lt_fund_name(ticker):
+    return "Cash" if ticker == "CASH" else _corr_fund_name(ticker)
+
+
+def _lt_month(period):
+    return pd.Period(period, freq="M").strftime("%B %Y")
+
+
+def _lt_short_month(period):
+    return pd.Period(period, freq="M").strftime("%b %Y")
+
+
+def _lt_hover(fig, xs, ys, texts, sizes):
+    """Invisible markers carrying hover text; sizes may differ per point."""
+    if xs:
+        fig.add_trace(go.Scatter(
+            x=xs, y=ys, mode="markers",
+            marker=dict(size=[max(int(s), 4) for s in sizes], color="rgba(0,0,0,0)", symbol="square"),
+            hovertext=texts, hovertemplate="%{hovertext}<extra></extra>", showlegend=False,
+        ))
+
+
+def _lt_spread(centers, heights, lo, hi, gap=2.0):
+    """Nudge label centers apart so labels of the given heights never
+    overlap, keeping them inside lo..hi where possible."""
+    n = len(centers)
+    if n == 0:
+        return []
+    pos = list(centers)
+    for i in range(1, n):
+        need = pos[i - 1] + (heights[i - 1] + heights[i]) / 2.0 + gap
+        if pos[i] < need:
+            pos[i] = need
+    over = pos[-1] + heights[-1] / 2.0 - hi
+    if over > 0:
+        pos[-1] -= over
+        for i in range(n - 2, -1, -1):
+            need = pos[i + 1] - (heights[i + 1] + heights[i]) / 2.0 - gap
+            if pos[i] > need:
+                pos[i] = need
+    under = lo - (pos[0] - heights[0] / 2.0)
+    if under > 0:
+        pos = [p + under for p in pos]
+    return pos
+
+
+def _lt_squarify(values, x, y, w, h):
+    """Squarified treemap (Bruls, Huizing and van Wijk) of values sorted
+    largest first. Returns [(x, y, w, h)] in the same order."""
+    vals = [max(float(v), 0.0) for v in values]
+    total = sum(vals)
+    if total <= 0 or w <= 0 or h <= 0:
+        return [(x, y, 0.0, 0.0) for _ in vals]
+    sizes = [v * w * h / total for v in vals]
+
+    def layout(row, x0, y0, dx, dy):
+        covered = sum(row)
+        out = []
+        if dx >= dy:
+            width = covered / dy if dy > 0 else 0.0
+            for s in row:
+                hh = s / width if width > 0 else 0.0
+                out.append((x0, y0, width, hh))
+                y0 += hh
+        else:
+            height = covered / dx if dx > 0 else 0.0
+            for s in row:
+                ww = s / height if height > 0 else 0.0
+                out.append((x0, y0, ww, height))
+                x0 += ww
+        return out
+
+    def leftover(row, x0, y0, dx, dy):
+        covered = sum(row)
+        if dx >= dy:
+            width = covered / dy if dy > 0 else 0.0
+            return x0 + width, y0, dx - width, dy
+        height = covered / dx if dx > 0 else 0.0
+        return x0, y0 + height, dx, dy - height
+
+    def worst(row, x0, y0, dx, dy):
+        ratios = []
+        for (_x, _y, rw, rh) in layout(row, x0, y0, dx, dy):
+            if rw <= 0 or rh <= 0:
+                return float("inf")
+            ratios.append(max(rw / rh, rh / rw))
+        return max(ratios) if ratios else float("inf")
+
+    out = []
+    rest = sizes
+    while rest:
+        if len(rest) == 1:
+            out += layout(rest, x, y, w, h)
+            break
+        i = 1
+        while i < len(rest) and worst(rest[:i], x, y, w, h) >= worst(rest[:i + 1], x, y, w, h):
+            i += 1
+        row, rest = rest[:i], rest[i:]
+        out += layout(row, x, y, w, h)
+        x, y, w, h = leftover(row, x, y, w, h)
+    return out
+
+
+# ---------- data ----------
+
+def _lt_snapshot_paths():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    pipeline_dir = os.path.join(os.path.dirname(script_dir), "Portfolio Hist Val Reconstruction")
+    paths = [os.path.join(script_dir, LT_SNAPSHOT_NAME), os.path.join(pipeline_dir, LT_SNAPSHOT_NAME)]
+    home = os.path.expanduser("~")
+    if home and home != "~":
+        paths.append(os.path.join(home, *LT_DEPLOY_DIR_PARTS, LT_SNAPSHOT_NAME))
+    return paths
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_holdings_snapshot():
+    """The newest readable holdings_snapshot.json: beside app.py (the cloud
+    deploy), in the pipeline folder, or in the deploy working copy under the
+    home folder (how the local app on the PC finds it). Returns a dict with
+    funds, generated_at and path, or None."""
+    best = None
+    for path in _lt_snapshot_paths():
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8-sig") as f:
+                data = json.load(f)
+        except Exception:
+            continue
+        funds = data.get("funds") if isinstance(data, dict) else None
+        if not isinstance(funds, dict) or not funds:
+            continue
+        stamp = str(data.get("generated_at", ""))
+        if best is None or stamp > best["generated_at"]:
+            best = {"funds": funds, "generated_at": stamp, "path": path}
+    return best
+
+
+def _lt_unbroken():
+    return {"themes": {"not_broken": 100.0}, "top": [], "as_of": None, "source": "", "kind": "none"}
+
+
+def _lt_snapshot_entry(snapshot, ticker):
+    """One fund's entry from holdings_snapshot.json as a composition, or None
+    when missing or malformed. Unknown theme keys fold into Not broken down."""
+    if not snapshot:
+        return None
+    entry = snapshot["funds"].get(ticker)
+    if not isinstance(entry, dict):
+        return None
+    themes = {}
+    try:
+        for k, v in (entry.get("themes") or {}).items():
+            v = float(v)
+            if v > 0:
+                key = str(k) if str(k) in LT_THEMES else "not_broken"
+                themes[key] = themes.get(key, 0.0) + v
+        total = sum(themes.values())
+        if not 95.0 <= total <= 105.0:
+            return None
+        scale = 100.0 / total
+        top = []
+        for item in entry.get("top") or []:
+            name, _ticker, theme, w = item[0], item[1], item[2], float(item[3])
+            if w > 0:
+                top.append((str(name), str(theme) if str(theme) in LT_THEMES else "not_broken", w * scale))
+    except (TypeError, ValueError, IndexError):
+        return None
+    return {"themes": {k: v * scale for k, v in themes.items()}, "top": top,
+            "as_of": entry.get("as_of"), "source": str(entry.get("source", "")),
+            "kind": str(entry.get("method", "live"))}
+
+
+def _lt_from_qci(data):
+    """HGER's composition from Harbor's QCI rows (the What HGER Holds feed)."""
+    themes, names = {}, {}
+    for r in (data or {}).get("rows") or []:
+        try:
+            w = float(r.get("weight") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if w <= 0:
+            continue
+        theme = LT_QCI_THEME.get(str(r.get("sector", "")).strip(), "commod_other")
+        themes[theme] = themes.get(theme, 0.0) + w
+        commodity = str(r.get("commodity", "")).strip()
+        name = LT_QCI_NAMES.get(commodity, commodity[:1].upper() + commodity[1:].lower() or "Other")
+        cur = names.setdefault(name, [theme, 0.0])
+        cur[1] += w
+    total = sum(themes.values())
+    if not 95.0 <= total <= 105.0:
+        return None
+    scale = 100.0 / total
+    top = sorted(((n, th, w * scale) for n, (th, w) in names.items()), key=lambda x: -x[2])
+    return {"themes": {k: v * scale for k, v in themes.items()}, "top": top}
+
+
+def lt_hger_composition(snapshot, live_fetch=True):
+    """HGER: the live Harbor fetch (cached six hours, shared with What HGER
+    Holds), else the newer of the latest saved QCI snapshot and the holdings
+    snapshot. What HGER Holds saves every successful fetch to qci_snapshots,
+    so while that panel is on the page this is called with live_fetch=False
+    and reads the panel's saved result; a Harbor outage is then waited out
+    once per page instead of twice."""
+    live = None
+    if live_fetch:
+        try:
+            live = fetch_qci_weights()
+        except Exception:
+            live = None
+    if live:
+        comp = _lt_from_qci(live)
+        if comp:
+            comp.update(as_of=live.get("as_of"), source="Harbor", kind="live")
+            return comp
+    candidates = []
+    saved = list_qci_snapshots()
+    if saved:
+        as_of, path = next(iter(saved.items()))
+        comp = _lt_from_qci(load_qci_snapshot(path))
+        if comp:
+            comp.update(as_of=as_of, source="Harbor (saved snapshot)", kind="saved")
+            candidates.append(comp)
+    entry = _lt_snapshot_entry(snapshot, "HGER")
+    if entry:
+        candidates.append(entry)
+    if not candidates:
+        return None
+    return max(candidates, key=lambda c: str(c.get("as_of") or ""))
+
+
+def lt_compositions(tickers, snapshot, live_hger=True):
+    """{ticker: composition} where a composition holds themes (percent of the
+    fund), top [(name, theme, percent of the fund)], as_of, source and kind
+    (live, saved, previous, hand-entered, fixed or none)."""
+    comps = {}
+    for t in tickers:
+        if t in LT_FIXED:
+            theme, name = LT_FIXED[t]
+            comps[t] = {"themes": {theme: 100.0}, "top": [(name, theme, 100.0)],
+                        "as_of": None, "source": "fixed", "kind": "fixed"}
+        elif t == "HGER":
+            comps[t] = lt_hger_composition(snapshot, live_hger) or _lt_unbroken()
+        else:
+            comps[t] = _lt_snapshot_entry(snapshot, t) or _lt_unbroken()
+    return comps
+
+
+def lt_exposure(weights, comps):
+    """Look through a basket. weights: {ticker: percent of the portfolio}.
+    Theme exposure is the sum over funds of fund weight times the theme's
+    share of that fund; a single holding's exposure is fund weight times its
+    weight in the fund, summed across funds. Single holdings come from each
+    fund's stored top holdings."""
+    flows, themes, singles = {}, {}, {}
+    for t, w in weights.items():
+        comp = comps.get(t) or _lt_unbroken()
+        f = {}
+        for th, share in comp["themes"].items():
+            v = w * share / 100.0
+            if v > 0:
+                f[th] = f.get(th, 0.0) + v
+                themes[th] = themes.get(th, 0.0) + v
+        flows[t] = f
+        for name, th, share in comp["top"]:
+            v = w * share / 100.0
+            s = singles.setdefault(name, {"pct": 0.0, "funds": [], "theme": th, "by_fund": {}})
+            s["pct"] += v
+            s["by_fund"][t] = s["by_fund"].get(t, 0.0) + v
+            if t not in s["funds"]:
+                s["funds"].append(t)
+    single_list = sorted(((n, d["pct"], d["funds"], d["theme"], d["by_fund"]) for n, d in singles.items()),
+                         key=lambda x: -x[1])
+    return {"weights": dict(weights), "flows": flows, "themes": themes, "singles": single_list}
+
+
+def _lt_normalize(weights):
+    w = {t: float(v) for t, v in weights.items() if v is not None and float(v) > 0}
+    total = sum(w.values())
+    return {t: v * 100.0 / total for t, v in w.items()} if total > 0 else {}
+
+
+def _lt_basket_weights(basket):
+    """{ticker: percent} for a corr_going_in_baskets entry; money market and
+    uninvested cash become CASH."""
+    w = {t: v * 100.0 for t, v in basket["weights"].items() if v > 0}
+    cash = (float(basket.get("tbill", 0.0)) - float(basket["weights"].get("BIL", 0.0))) * 100.0
+    if cash >= LT_MIN_PCT:
+        w["CASH"] = cash
+    return _lt_normalize(w)
+
+
+def _lt_next_weights(rows):
+    w = {}
+    for r in rows or []:
+        t = str(r.get("ticker", "")).strip().upper()
+        v = _sort_weight(r.get("weight"))
+        if t and v > 0:
+            w[t] = w.get(t, 0.0) + v
+    return _lt_normalize(w)
+
+
+def _lt_same_basket(a, b):
+    if not a or not b:
+        return False
+    if {t for t, v in a.items() if v >= LT_HELD_PCT} != {t for t, v in b.items() if v >= LT_HELD_PCT}:
+        return False
+    return all(abs(a.get(t, 0.0) - b.get(t, 0.0)) < LT_SAME_BASKET_PTS for t in set(a) | set(b))
+
+
+def lt_baskets(baskets, last_data_date, next_rows):
+    """The baskets the section shows: {"current", "next", "prev"}, each None
+    or a dict with period, weights ({ticker: percent}), date (the going-in
+    close) and kind ("going-in" or "target").
+
+    A basket whose month starts after the holdings data ends exists only
+    when the data stops on a month's closed final session. If
+    next_allocation.json matches it, the rebalance fills are in the data and
+    it is Current. If next_allocation.json differs, the fills are not in the
+    data yet: that "basket" is the closing month's holdings, drifted, so
+    Current stays on the month that just closed and next_allocation.json is
+    Next."""
+    entries = [{"period": b["period"], "weights": _lt_basket_weights(b), "date": b["date"],
+                "kind": "going-in"} for b in baskets or []]
+    entries = [e for e in entries if e["weights"]]
+    if not entries:
+        return None
+    last_month = pd.Timestamp(last_data_date).to_period("M")
+    settled = [e for e in entries if e["period"] <= last_month]
+    pending = [e for e in entries if e["period"] > last_month]
+    nxt_w = _lt_next_weights(next_rows)
+    cur = settled[-1] if settled else pending[-1]
+    prev = settled[-2] if len(settled) > 1 else None
+    if pending and cur is not pending[-1]:
+        if not nxt_w or _lt_same_basket(pending[-1]["weights"], nxt_w):
+            prev, cur = cur, pending[-1]
+    nxt = None
+    if nxt_w and not _lt_same_basket(cur["weights"], nxt_w):
+        nxt = {"period": cur["period"] + 1, "weights": nxt_w, "date": None, "kind": "target"}
+    return {"current": cur, "next": nxt, "prev": prev}
+
+
+def lt_risk(returns, weights, window):
+    """Risk share of each fund over the last `window` sessions:
+    rc_i = w_i (S w)_i / (w' S w), S the annualized (x252) covariance of daily
+    returns. Also the annualized volatility and independent bets (the
+    diversification ratio squared). Cash counts as a fund that never moves;
+    a fund with no price history is left out and named in "missing"."""
+    if returns is None or returns.empty or not weights:
+        return None
+    order = canonical_order([t for t in weights if t != "CASH"])
+    funds = [t for t in order if t in returns.columns and weights[t] > 0]
+    missing = [t for t in order if t not in funds and weights[t] >= LT_HELD_PCT]
+    if not funds:
+        return None
+    block = returns[funds].dropna().tail(int(window))
+    if len(block) < max(20, int(window) // 3):
+        return None
+    cols = list(funds)
+    if weights.get("CASH", 0.0) > 0:
+        block = block.copy()
+        block["CASH"] = 0.0
+        cols.append("CASH")
+    w = np.array([weights[t] for t in cols], dtype=float)
+    w = w / w.sum()
+    cov = block[cols].cov().values * 252.0
+    if not np.all(np.isfinite(cov)):
+        return None
+    port_var = float(w @ cov @ w)
+    if not np.isfinite(port_var) or port_var <= 0:
+        return None
+    rc = w * (cov @ w) / port_var
+    vol = np.sqrt(np.clip(np.diag(cov), 0.0, None))
+    return {"funds": cols, "w": w * 100.0, "rc": rc * 100.0, "vol": vol * 100.0,
+            "port_vol": float(np.sqrt(port_var) * 100.0), "bets": float((w @ vol) ** 2 / port_var),
+            "start": block.index[0], "end": block.index[-1], "n": int(len(block)), "missing": missing}
+
+
+# ---------- tiles ----------
+
+def _lt_tile_fit(candidates, lines=2):
+    """The first candidate that wraps to `lines` lines in a four-across tile
+    (the same wrapping _cx_tiles uses)."""
+    tile_w = (ANALYTICS_WIDTH - 36) / 4.0
+    for text in candidates:
+        if len(_cx_wrap(text, 12, tile_w - 30)) <= lines:
+            return text
+    return candidates[-1]
+
+
+def _lt_chip_leaders(exp):
+    names = [n for n, v, _f, th, _b in exp["singles"] if th == "semis" and v >= LT_MIN_PCT][:4]
+    names = [LT_ALT_LABELS.get(n, (n,))[-1] if n in ("Samsung Electronics",) else n for n in names]
+    if not names:
+        return "Chip designers, makers and equipment"
+    cands = [_cap_join(names[:k]) + (" lead" if k > 1 else " leads") for k in range(len(names), 0, -1)]
+    return _lt_tile_fit(cands)
+
+
+def _lt_commod_note(exp, comps):
+    w = exp["weights"]
+    if w.get("HGER", 0.0) >= LT_MIN_PCT and "HGER" in comps:
+        shares = {k: v for k, v in comps["HGER"]["themes"].items() if _lt_family(k) == "commod"}
+        if shares:
+            k = max(shares, key=shares.get)
+            phrase = {"oil": "Oil and fuels are", "gold": "Gold is", "agri": "Crops are",
+                      "livestock": "Livestock is", "ind_metals": "Industrial metals are"}.get(
+                k, f"{_lt_label(k)} is")
+            return f"{phrase} {shares[k]:.0f}% of HGER"
+    if w.get("GLD", 0.0) >= LT_MIN_PCT:
+        return "All gold, through GLD"
+    return "None in this basket"
+
+
+def _lt_bitcoin_note(exp):
+    held = [t for t in ("IBIT", "GBTC", "BITO") if exp["weights"].get(t, 0.0) >= LT_MIN_PCT]
+    return f"All of {_cap_join(held)}" if held else "None in this basket"
+
+
+def _lt_family_total(themes, family):
+    return sum(v for k, v in themes.items() if _lt_family(k) == family)
+
+
+def lt_flow_tiles(exp, comps):
+    th = exp["themes"]
+    chips = th.get("semis", 0.0)
+    tech = chips + th.get("other_tech", 0.0) + th.get("internet", 0.0)
+    com = _lt_family_total(th, "commod")
+    btc = th.get("bitcoin", 0.0)
+    unbroken = [t for t in canonical_order(list(exp["weights"]))
+                if comps.get(t, {}).get("kind") == "none" and exp["weights"][t] >= LT_MIN_PCT]
+    gap = _lt_tile_fit([f"{_cap_join(unbroken)} not broken down", "Some funds not broken down"]) if unbroken else ""
+    # With a stock fund not broken down, a zero reading means unknown, not none.
+    chips_val = "n/a" if chips < LT_MIN_PCT and gap else _lt_pct(chips)
+    tech_val = "n/a" if tech < LT_MIN_PCT and gap else _lt_pct(tech)
+    return [
+        ("Chips", chips_val, _lt_chip_leaders(exp) if chips >= LT_MIN_PCT else (gap or "None in this basket")),
+        ("All technology", tech_val, "Chips, software and internet" if tech >= LT_MIN_PCT or not gap else gap),
+        ("Commodities", _lt_pct(com), _lt_commod_note(exp, comps)),
+        ("Bitcoin", _lt_pct(btc), _lt_bitcoin_note(exp)),
+    ]
+
+
+def lt_table_tiles(exp, cmp_exp, cmp_period):
+    th = exp["themes"]
+    items = [("Stocks", _lt_family_total(th, "stocks"), lambda t: _lt_family_total(t, "stocks")),
+             ("Chips", th.get("semis", 0.0), lambda t: t.get("semis", 0.0)),
+             ("Commodities", _lt_family_total(th, "commod"), lambda t: _lt_family_total(t, "commod")),
+             ("Bitcoin", th.get("bitcoin", 0.0), lambda t: t.get("bitcoin", 0.0))]
+    tiles = []
+    for i, (label, value, of) in enumerate(items):
+        if cmp_exp is None:
+            sub = "No earlier basket to compare"
+        else:
+            before = of(cmp_exp["themes"])
+            when = f" in {pd.Period(cmp_period, freq='M').strftime('%B')}" if i == 0 else ""
+            if abs(value - before) < LT_MIN_PCT:
+                sub = f"Unchanged from {_lt_pct(before)}{when}"
+            else:
+                sub = f"{'Up' if value > before else 'Down'} from {_lt_pct(before)}{when}"
+        tiles.append((label, _lt_pct(value), sub))
+    return tiles
+
+
+# ---------- Option A: Flow ----------
+
+def build_lt_flow_figure(exp, comps, tiles):
+    """Funds on the left flowing into themes on the right, ribbon width
+    proportional to share of the portfolio. Pixel figure, 780 px wide."""
+    W = ANALYTICS_WIDTH
+    shapes, ann = [], []
+    hx, hy, ht, hs = [], [], [], []
+    tile_h = _cx_tiles(shapes, ann, tiles, 0)
+    top = tile_h + 30.0
+    Hp = 440.0
+    nw = 14.0
+    xL, xR = 118.0, 556.0
+    gR = 8.0
+    wts = exp["weights"]
+    flows = exp["flows"]
+    funds = [t for t in canonical_order([t for t in wts if t != "CASH"]) if wts[t] >= LT_MIN_PCT]
+    if wts.get("CASH", 0.0) >= LT_MIN_PCT:
+        funds.append("CASH")
+    # "Not broken down" sits just below the stock nodes: the funds that land
+    # there (DXJ, EZU, BTAL, COPX) are mostly stock funds, so their ribbons
+    # cross the fewest others.
+    groups = [("semis", ["semis"]), ("other_tech", ["other_tech"]), ("internet", ["internet"]),
+              ("other_stocks", LT_OTHER_STOCKS), ("not_broken", ["not_broken"]), ("oil", ["oil"]),
+              ("gold", ["gold"]), ("agri", ["agri"]), ("livestock", ["livestock"]),
+              ("ind_metals", ["ind_metals"]), ("commod_other", ["commod_other"]), ("bitcoin", ["bitcoin"]),
+              ("cash", ["cash"])]
+    rv = {k: sum(exp["themes"].get(x, 0.0) for x in ks) for k, ks in groups}
+    right = [(k, ks) for k, ks in groups if rv[k] >= LT_MIN_PCT]
+    total = sum(rv[k] for k, _ in right) or 100.0
+    s = (Hp - gR * max(len(right) - 1, 0)) / total
+    left_total = sum(wts[f] for f in funds) or 100.0
+    sL = s * total / left_total
+    gL = (Hp - left_total * sL) / (len(funds) - 1) if len(funds) > 1 else 0.0
+
+    ly, y = {}, top
+    for f in funds:
+        h = wts[f] * sL
+        ly[f] = (y, y + h)
+        y += h + gL
+    ry, y = {}, top
+    for k, _ks in right:
+        h = rv[k] * s
+        ry[k] = (y, y + h)
+        y += h + gR
+
+    links = []
+    for f in funds:
+        for k, ks in right:
+            v = sum(flows.get(f, {}).get(x, 0.0) for x in ks)
+            if v > 0.02:
+                links.append((f, k, v))
+    tgt = {}
+    for k, _ks in right:
+        yy = ry[k][0]
+        for f in funds:
+            for ff, kk, v in links:
+                if ff == f and kk == k:
+                    tgt[(f, k)] = yy
+                    yy += v * s
+    x0, x1 = xL + nw, xR
+    xm = (x0 + x1) / 2.0
+    for f in funds:
+        yy = ly[f][0]
+        for k, _ks in right:
+            for ff, kk, v in links:
+                if ff != f or kk != k:
+                    continue
+                h_src, h_tgt = v * sL, v * s
+                t0 = tgt[(f, k)]
+                path = (f"M {x0:.1f},{yy:.1f} C {xm:.1f},{yy:.1f} {xm:.1f},{t0:.1f} {x1:.1f},{t0:.1f} "
+                        f"L {x1:.1f},{t0 + h_tgt:.1f} C {xm:.1f},{t0 + h_tgt:.1f} {xm:.1f},{yy + h_src:.1f} "
+                        f"{x0:.1f},{yy + h_src:.1f} Z")
+                shapes.append(dict(type="path", path=path, fillcolor=_lt_rgba(_lt_fund_color(f), 0.30),
+                                   line=dict(width=0), layer="below"))
+                hx.append(xm)
+                hy.append((yy + h_src / 2.0 + t0 + h_tgt / 2.0) / 2.0)
+                ht.append(f"<b>{f} into {_lt_esc(_lt_flow_name(k))}</b><br>{_lt_pct(v)} of the portfolio")
+                hs.append(max(min(h_src, h_tgt), 6))
+                yy += h_src
+
+    # Left nodes and labels
+    centers = [(ly[f][0] + ly[f][1]) / 2.0 for f in funds]
+    pos = _lt_spread(centers, [34.0] * len(funds), top - 6, top + Hp + 6)
+    for f, cy in zip(funds, pos):
+        y0, y1 = ly[f]
+        _cx_rect(shapes, xL, y0, xL + nw, max(y1, y0 + 1.5), _lt_fund_color(f), r=3)
+        _lt_text(ann, xL - 12, cy - 8, f if f != "CASH" else "Cash", anchor="right", size=15,
+                 color=TEXT_PRIMARY, weight=700)
+        _lt_text(ann, xL - 12, cy + 9, _lt_pct(wts[f]), anchor="right", size=13, color=TEXT_SECONDARY)
+        hx.append(xL + nw / 2.0)
+        hy.append((y0 + y1) / 2.0)
+        ht.append(f"<b>{f}</b> ({_lt_esc(_lt_fund_name(f))})<br>{_lt_pct(wts[f])} of the basket")
+        hs.append(max(y1 - y0, 8))
+
+    # Right nodes and labels
+    single = [k for k, _ks in right if k not in ("other_stocks", "not_broken", "cash")]
+    largest = max(single, key=lambda k: rv[k]) if single else None
+    heights = [34.0 if k == "other_stocks" else 18.0 for k, _ in right]
+    centers = [(ry[k][0] + ry[k][1]) / 2.0 for k, _ in right]
+    pos = _lt_spread(centers, heights, top - 4, top + Hp + 4)
+    xt = xR + nw + 10
+    for (k, ks), cy, hgt in zip(right, pos, heights):
+        y0, y1 = ry[k]
+        color = "#C6D4E6" if k == "other_stocks" else _lt_color(k)
+        _cx_rect(shapes, xR, y0, xR + nw, max(y1, y0 + 1.5), color, r=3,
+                 line_color=LT_GOLD_EDGE if k == "gold" else None, line_width=1 if k == "gold" else 0)
+        label = _lt_flow_name(k)
+        ly_main = cy - 8 if k == "other_stocks" else cy
+        _lt_text(ann, xt, ly_main, label, size=13.5, color=TEXT_PRIMARY, weight=600)
+        _lt_text(ann, W, ly_main, _lt_pct(rv[k]), anchor="right", size=13.5, color=TEXT_SECONDARY, weight=500)
+        if k == "other_stocks":
+            _lt_text(ann, xt, cy + 9, _lt_other_stocks_note(exp, W - xt), size=11.5, color=TEXT_MUTED)
+        if k == largest and len(right) > 1:
+            lx = xt + _lt_tw(label, 13.5, 600) + 8
+            if lx + 58 <= W - _lt_tw(_lt_pct(rv[k]), 13.5, 500) - 8:
+                _cx_rect(shapes, lx, ly_main - 8.5, lx + 58, ly_main + 8.5, ANALYTICS_TINT, r=8.5)
+                _lt_text(ann, lx + 29, ly_main, "Largest", anchor="center", size=11, color=BRAND_PURPLE,
+                         weight=600)
+        parts = []
+        for f in funds:
+            v = sum(flows.get(f, {}).get(x, 0.0) for x in ks)
+            if v > 0.02:
+                parts.append(f"{f} {v:.1f}")
+        detail = ""
+        if k == "other_stocks":
+            detail = "<br>" + "<br>".join(f"{_lt_esc(_lt_label(x))} {exp['themes'].get(x, 0.0):.1f}%"
+                                          for x in ks if exp["themes"].get(x, 0.0) >= LT_MIN_PCT)
+        hx.append(xR + nw / 2.0)
+        hy.append((y0 + y1) / 2.0)
+        ht.append(f"<b>{_lt_esc(label)}</b> {_lt_pct(rv[k])} of the portfolio<br>"
+                  + ", ".join(parts) + detail)
+        hs.append(max(y1 - y0, 8))
+    H = int(top + Hp + 16)
+    fig = go.Figure()
+    _lt_hover(fig, hx, hy, ht, hs)
+    return _pixel_layout(fig, W, H, shapes, ann)
+
+
+def _lt_flow_name(key):
+    return "Other stock sectors" if key == "other_stocks" else _lt_label(key)
+
+
+def _lt_other_stocks_note(exp, max_w):
+    """'Consumer, financials and more': the two largest sectors in the group,
+    or one, whichever fits max_w at 11.5 px."""
+    parts = sorted(((exp["themes"].get(k, 0.0), k) for k in LT_OTHER_STOCKS), reverse=True)
+    names = [LT_SHORT[k] for v, k in parts if v >= LT_MIN_PCT][:2]
+    if not names:
+        return ""
+    cands = []
+    if len(names) == 2:
+        cands.append(f"{names[0]}, {names[1]} and more")
+    cands.append(f"{names[0]} and more")
+    for text in cands:
+        text = text[:1].upper() + text[1:]
+        if _lt_tw(text, 11.5) <= max_w:
+            return text
+    return ""
+
+
+# ---------- Option B: Table ----------
+
+def build_lt_table_figure(exp, cmp_exp, cmp_period, tiles):
+    """Each theme's share of the portfolio with what every fund contributes,
+    its bar, and the change from the comparison basket; then the largest
+    single holdings across funds. Pixel figure, 780 px wide."""
+    W = ANALYTICS_WIDTH
+    shapes, ann = [], []
+    hx, hy, ht, hs = [], [], [], []
+    tile_h = _cx_tiles(shapes, ann, tiles, 0)
+    y = tile_h + 22.0
+    wts = exp["weights"]
+    flows = exp["flows"]
+    funds = [t for t in canonical_order([t for t in wts if t != "CASH"]) if wts[t] >= LT_MIN_PCT]
+    if wts.get("CASH", 0.0) >= LT_MIN_PCT:
+        funds.append("CASH")
+    X_FUNDS, X_FUNDS_END = 214.0, 548.0
+    cw = min(78.0, (X_FUNDS_END - X_FUNDS) / max(len(funds), 1))
+    cx = {f: X_FUNDS + cw / 2.0 + i * cw for i, f in enumerate(funds)}
+    xv, xb0, xb1, xd = 586.0, 598.0, 690.0, 774.0
+    hdr, rh, gh = 54.0, 28.0, 32.0
+    th = exp["themes"]
+    tp = cmp_exp["themes"] if cmp_exp is not None else {}
+    vs_label = f"vs {pd.Period(cmp_period, freq='M').strftime('%b')}" if cmp_exp is not None else ""
+
+    groups = []
+    for fam, fam_label in LT_FAMILIES:
+        keys = [k for k, (_l, _c, f) in LT_THEMES.items() if f == fam
+                and max(th.get(k, 0.0), tp.get(k, 0.0)) >= LT_MIN_PCT]
+        if keys:
+            groups.append((fam_label, keys))
+
+    y0 = y
+    _cx_rect(shapes, 0, y0, W, y0 + hdr, ANALYTICS_HEADER_BG)
+    _cx_line(shapes, 0, y0 + hdr, W, y0 + hdr, BRAND_PURPLE, 2)
+    _lt_text(ann, 12, y0 + hdr / 2.0, "Exposure", size=13.5, color=TEXT_PRIMARY, weight=700)
+    for f in funds:
+        _lt_text(ann, cx[f], y0 + 19, "Cash" if f == "CASH" else f, anchor="center", size=14,
+                 color=TEXT_PRIMARY, weight=700)
+        _lt_text(ann, cx[f], y0 + 37, _lt_pct(wts[f]), anchor="center", size=12, color=TEXT_MUTED)
+    _lt_text(ann, xv, y0 + hdr / 2.0, "Portfolio", anchor="right", size=13.5, color=TEXT_PRIMARY, weight=700)
+    if vs_label:
+        _lt_text(ann, xd, y0 + hdr / 2.0, vs_label, anchor="right", size=13.5, color=TEXT_PRIMARY, weight=700)
+    maxc = max([v for f in funds for v in flows.get(f, {}).values()] or [1.0])
+    maxp = max(th.values()) if th else 1.0
+    y = y0 + hdr
+
+    def change(yc, d, big_cut=3.0, group=False):
+        if cmp_exp is None:
+            return
+        if abs(d) >= LT_MIN_PCT:
+            big = group or abs(d) >= big_cut
+            amount = f"{abs(d):.1f}"
+            weight = 700 if big else 400
+            color = TEXT_PRIMARY if group else (ANALYTICS_CELL_TEXT if big else TEXT_SECONDARY)
+            _lt_text(ann, xd, yc, amount, anchor="right", size=13, color=color, weight=weight)
+            _cx_triangle(shapes, xd - _lt_tw(amount, 13, weight) - 8, yc, d > 0, 4.2, color)
+        else:
+            _lt_text(ann, xd, yc, "0.0", anchor="right", size=13, color=TEXT_MUTED)
+
+    for gname, keys in groups:
+        gt = sum(th.get(k, 0.0) for k in keys)
+        gp = sum(tp.get(k, 0.0) for k in keys)
+        _cx_line(shapes, 0, y, W, y, ANALYTICS_RULE, 1)
+        yc = y + gh / 2.0 + 1
+        _lt_text(ann, 12, yc, gname, size=13.5, color=TEXT_PRIMARY, weight=700)
+        _lt_text(ann, xv, yc, _lt_pct(gt), anchor="right", size=13.5, color=TEXT_PRIMARY, weight=700)
+        change(yc, gt - gp, group=True)
+        y += gh
+        for k in keys:
+            yc = y + rh / 2.0
+            _cx_rect(shapes, 14, yc - 5, 24, yc + 5, _lt_color(k), r=2,
+                     line_color=LT_GOLD_EDGE if k == "gold" else None, line_width=1 if k == "gold" else 0)
+            _lt_text(ann, 32, yc, _lt_label(k), size=13, color=ANALYTICS_CELL_TEXT)
+            for f in funds:
+                v = flows.get(f, {}).get(k, 0.0)
+                if v >= LT_MIN_PCT:
+                    t = min(1.0, v / maxc)
+                    _cx_rect(shapes, cx[f] - cw / 2.0 + 6, y + 3, cx[f] + cw / 2.0 - 6, y + rh - 3,
+                             _cx_mix("#FFFFFF", LT_SHADE, 0.15 + 0.85 * t), r=5)
+                    _lt_text(ann, cx[f], yc, f"{v:.1f}", anchor="center", size=13,
+                             color=ANALYTICS_CELL_TEXT, weight=500)
+                    hx.append(cx[f])
+                    hy.append(yc)
+                    ht.append(f"<b>{_lt_esc(_lt_label(k))}</b> through {f}<br>{_lt_pct(v)} of the portfolio")
+                    hs.append(min(cw - 12, rh - 6))
+                else:
+                    _lt_text(ann, cx[f], yc, "\u00b7", anchor="center", size=14, color=LT_DOT)
+            pv = th.get(k, 0.0)
+            _lt_text(ann, xv, yc, _lt_pct(pv), anchor="right", size=13, color=ANALYTICS_CELL_TEXT, weight=600)
+            shapes.append(dict(type="path", path=_rounded_bar_path(xb0, xb1, yc, 10), fillcolor=LT_TRACK,
+                               line=dict(width=0), layer="below"))
+            if pv >= LT_MIN_PCT:
+                shapes.append(dict(type="path",
+                                   path=_rounded_bar_path(xb0, xb0 + max(10.0, (xb1 - xb0) * pv / maxp), yc, 10),
+                                   fillcolor=LT_BAR, line=dict(width=0), layer="below"))
+            change(yc, pv - tp.get(k, 0.0))
+            y += rh
+    _cx_rect(shapes, 0, y, W, y + 36, ANALYTICS_HEADER_BG)
+    _cx_line(shapes, 0, y, W, y, TEXT_PRIMARY, 1)
+    yc = y + 18
+    _lt_text(ann, 12, yc, "Total", size=13.5, color=TEXT_PRIMARY, weight=700)
+    for f in funds:
+        _lt_text(ann, cx[f], yc, f"{wts[f]:.1f}", anchor="center", size=13.5, color=TEXT_PRIMARY, weight=700)
+    _lt_text(ann, xv, yc, _lt_pct(sum(th.values())), anchor="right", size=13.5, color=TEXT_PRIMARY, weight=700)
+    y += 36
+
+    # Largest single holdings across funds
+    singles = [s for s in exp["singles"] if s[1] >= LT_MIN_PCT][:10]
+    if singles:
+        y += 30
+        _lt_text(ann, 0, y, "Largest single holdings across funds", size=14, color=TEXT_PRIMARY, weight=700)
+        y += 22
+        col_w = (W - 30) / 2.0
+        per_col = (len(singles) + 1) // 2
+        for i, (name, v, funds_of, theme, by_fund) in enumerate(singles):
+            c, r = divmod(i, per_col)
+            x0 = c * (col_w + 30)
+            yc = y + r * 26 + 13
+            if r > 0:
+                _cx_line(shapes, x0, yc - 13, x0 + col_w, yc - 13, ANALYTICS_RULE, 1)
+            _lt_text(ann, x0 + 2, yc, str(i + 1), size=12, color=TEXT_MUTED)
+            _cx_rect(shapes, x0 + 24, yc - 4.5, x0 + 33, yc + 4.5, _lt_color(theme), r=2,
+                     line_color=LT_GOLD_EDGE if theme == "gold" else None,
+                     line_width=1 if theme == "gold" else 0)
+            _lt_text(ann, x0 + 41, yc, name, size=13, color=ANALYTICS_CELL_TEXT, weight=600)
+            via = "via " + _cap_join(["Cash" if f == "CASH" else f for f in funds_of])
+            _lt_text(ann, x0 + 47 + _lt_tw(name, 13, 600), yc, via, size=12, color=TEXT_MUTED)
+            _lt_text(ann, x0 + col_w, yc, _lt_pct(v), anchor="right", size=13, color=ANALYTICS_CELL_TEXT,
+                     weight=600)
+            hx.append(x0 + col_w / 2.0)
+            hy.append(yc)
+            ht.append(f"<b>{_lt_esc(name)}</b> ({_lt_esc(_lt_label(theme))})<br>{_lt_pct(v)} of the portfolio: "
+                      + ", ".join(f"{f} {b:.2f}" for f, b in by_fund.items()))
+            hs.append(20)
+        y += per_col * 26
+    H = int(y + 6)
+    fig = go.Figure()
+    _lt_hover(fig, hx, hy, ht, hs)
+    return _pixel_layout(fig, W, H, shapes, ann)
+
+
+# ---------- Option C: Map ----------
+
+def _lt_wrap2(label):
+    words = label.split(" ")
+    if len(words) < 2:
+        return [label]
+    best = None
+    for i in range(1, len(words)):
+        a, b = " ".join(words[:i]), " ".join(words[i:])
+        m = max(len(a), len(b))
+        if best is None or m < best[0]:
+            best = (m, [a, b])
+    return best[1]
+
+
+def _lt_label_plan(w, h, name, val, size=12, bold=600):
+    """The first label layout that fits a w x h box, as (layout, label), or
+    None. Tries the full name with its value, then shorter names
+    (LT_ALT_LABELS) with the value, then names alone at 11 and 10 px."""
+    pad = 7
+    names = (name,) + LT_ALT_LABELS.get(name, ()) + (("Other",) if name.startswith("Other ") else ())
+    vw = _lt_tw(val, size)
+    for nm in names:
+        nw_ = _lt_tw(nm, size, bold)
+        if w >= max(nw_, vw) + 2 * pad and h >= 36:
+            return ("stack", nm)
+        lines = _lt_wrap2(nm)
+        if (len(lines) == 2 and h >= 50 and w >= vw + 2 * pad
+                and w >= max(_lt_tw(t, size, bold) for t in lines) + 2 * pad):
+            return ("wrap", nm)
+        if w >= _lt_tw(f"{nm} {val}", 11, bold) + 2 * pad and h >= 20:
+            return ("inline", nm)
+        if w >= max(_lt_tw(nm, 11, bold), _lt_tw(val, 11)) + 10 and h >= 30:
+            return ("small", nm)
+    for nm in names:
+        if w >= _lt_tw(nm, 11, bold) + 10 and h >= 16:
+            return ("name11", nm)
+        if w >= _lt_tw(nm, 10, bold) + 6 and h >= 14:
+            return ("name10", nm)
+    return None
+
+
+def _lt_box_label(ann, x, y, w, h, name, val, fill, size=12, bold=600):
+    """Draw the label _lt_label_plan picks; returns False when none fits."""
+    plan = _lt_label_plan(w, h, name, val, size, bold)
+    if plan is None:
+        return False
+    layout, nm = plan
+    tc = _cx_text_on(fill)
+    pad = 7
+    if layout == "stack":
+        _lt_text(ann, x + pad, y + 13, nm, size=size, color=tc, weight=bold)
+        _lt_text(ann, x + pad, y + 28, val, size=size, color=tc)
+    elif layout == "wrap":
+        a, b = _lt_wrap2(nm)
+        _lt_text(ann, x + pad, y + 13, a, size=size, color=tc, weight=bold)
+        _lt_text(ann, x + pad, y + 27, b, size=size, color=tc, weight=bold)
+        _lt_text(ann, x + pad, y + 42, val, size=size, color=tc)
+    elif layout == "inline":
+        _lt_text(ann, x + pad, y + h / 2.0, f"{nm} {val}", size=11, color=tc, weight=bold)
+    elif layout == "small":
+        _lt_text(ann, x + 5, y + 11, nm, size=11, color=tc, weight=bold)
+        _lt_text(ann, x + 5, y + 24, val, size=11, color=tc)
+    elif layout == "name11":
+        _lt_text(ann, x + 5, y + h / 2.0, nm, size=11, color=tc, weight=bold)
+    else:
+        _lt_text(ann, x + 3, y + h / 2.0, nm, size=10, color=tc, weight=bold)
+    return True
+
+
+def _lt_layout_leaves(leaves, x, y, w, h, key=""):
+    """Squarify a theme's leaves, folding any named holding whose box is too
+    small to label into its fund's remainder, so every named box carries its
+    name. Returns [(leaf, rect)]."""
+    leaves = list(leaves)
+    for _ in range(12):
+        rects = _lt_squarify([lf[1] for lf in leaves], x, y, w, h)
+        bad = [i for i, (lf, r) in enumerate(zip(leaves, rects))
+               if not lf[2] and _lt_label_plan(r[2], r[3], lf[0], _lt_pct(lf[1])) is None]
+        if not bad:
+            return list(zip(leaves, rects))
+        i = min(bad, key=lambda j: leaves[j][1])
+        name, v, _rest, funds = leaves.pop(i)
+        f = funds[0]
+        for j, lf in enumerate(leaves):
+            if lf[2] and lf[3] == [f]:
+                leaves[j] = (lf[0], lf[1] + v, True, lf[3])
+                break
+        else:
+            leaves.append((LT_RESIDUAL_LABEL.get(f, f"Other {LT_SHORT.get(key, 'holdings')}"), v, True, [f]))
+        named = sorted([lf for lf in leaves if not lf[2]], key=lambda lf: -lf[1])
+        rest = sorted([lf for lf in leaves if lf[2]], key=lambda lf: -lf[1])
+        leaves = named + rest
+    return list(zip(leaves, _lt_squarify([lf[1] for lf in leaves], x, y, w, h)))
+
+
+def _lt_map_leaves(exp, key):
+    """A theme's leaves: named holdings at LT_MAP_NAME_PCT of the portfolio or
+    more, then what each fund holds beyond them. (name, pct, is_rest, funds)."""
+    named, rest = [], []
+    for f, wt in exp["weights"].items():
+        c = exp["flows"].get(f, {}).get(key, 0.0)
+        if c <= 0:
+            continue
+        got = 0.0
+        for name, v, _funds, theme, by_fund in exp["singles"]:
+            if theme != key or f not in by_fund:
+                continue
+            part = by_fund[f]
+            if part >= LT_MAP_NAME_PCT:
+                named.append((name, part, False, [f]))
+                got += part
+        left = c - got
+        if left > 0.12:
+            if key == "not_broken":
+                label = "Cash" if f == "CASH" else f
+            elif key == "cash":
+                label = "T-bills" if f == "BIL" else "Cash"
+            else:
+                label = LT_RESIDUAL_LABEL.get(f, f"Other {LT_SHORT.get(key, 'holdings')}")
+            rest.append((label, left, True, [f]))
+    merged = {}
+    for name, v, is_rest, funds in named:
+        cur = merged.setdefault(name, [0.0, []])
+        cur[0] += v
+        cur[1] += funds
+    named = [(n, v, False, fs) for n, (v, fs) in merged.items()]
+    named.sort(key=lambda x: -x[1])
+    rest.sort(key=lambda x: -x[1])
+    return named + rest
+
+
+def build_lt_map_figure(exp):
+    """Treemap of themes sized by share of the portfolio, grouped into
+    stocks, commodities and crypto side by side, with each theme's largest
+    holdings inside it; the largest single positions follow underneath.
+    Pixel figure, 780 px wide."""
+    W = ANALYTICS_WIDTH
+    shapes, ann = [], []
+    hx, hy, ht, hs = [], [], [], []
+    th = exp["themes"]
+    H_MAP = 540.0
+    gapF, gapT = 6.0, 4.0
+    fams = []
+    for fam, _label in LT_FAMILIES:
+        keys = [k for k in LT_THEMES if _lt_family(k) == fam and th.get(k, 0.0) >= LT_MIN_PCT]
+        if keys:
+            fams.append((fam, keys, sum(th[k] for k in keys)))
+    avail = W - gapF * max(len(fams) - 1, 0)
+    grand = sum(v for _f, _k, v in fams) or 1.0
+    x = 0.0
+    for fam, keys, ftot in fams:
+        fw = avail * ftot / grand
+        keys = sorted(keys, key=lambda k: -th[k])
+        rects = _lt_squarify([th[k] for k in keys], x, 0.0, fw, H_MAP)
+        for k, (rx, ry, rw, rhh) in zip(keys, rects):
+            bx, by, bw, bh = rx + gapT / 2.0, ry + gapT / 2.0, rw - gapT, rhh - gapT
+            if bw <= 0.5 or bh <= 0.5:
+                continue
+            col, lab, tv = _lt_color(k), _lt_label(k), th[k]
+            leaves = _lt_map_leaves(exp, k)
+            header_ok = (_lt_tw(lab, 12.5, 700) + _lt_tw(_lt_pct(tv), 12.5) + 20 <= bw
+                         and bh >= 70 and len(leaves) > 1)
+            placed = []
+            if header_ok:
+                placed = _lt_layout_leaves(leaves, bx + 2, by + 23, bw - 4, bh - 25, k)
+                labelled = [lf for lf, (qx, qy, qw, qh) in placed
+                            if _lt_label_plan(qw, qh, lf[0], _lt_pct(lf[1])) is not None]
+                header_ok = len(placed) > 1 and bool(labelled)
+            if header_ok:
+                _cx_rect(shapes, bx, by, bx + bw, by + bh, col, r=4)
+                tc = _cx_text_on(col)
+                _lt_text(ann, bx + 8, by + 12, lab, size=12.5, color=tc, weight=700)
+                _lt_text(ann, bx + 8 + _lt_tw(lab, 12.5, 700) + 6, by + 12, _lt_pct(tv), size=12.5, color=tc)
+                for (name, v, is_rest, funds), (qx, qy, qw, qh) in placed:
+                    if qw <= 0.5 or qh <= 0.5:
+                        continue
+                    fill = _lt_legible(_cx_mix(col, "#FFFFFF", 0.28) if is_rest else col)
+                    _cx_rect(shapes, qx, qy, qx + qw, qy + qh, fill, r=3, line_color="#FFFFFF", line_width=1.5)
+                    _lt_box_label(ann, qx, qy, qw, qh, name, _lt_pct(v), fill)
+                    hx.append(qx + qw / 2.0)
+                    hy.append(qy + qh / 2.0)
+                    ht.append(f"<b>{_lt_esc(name)}</b> ({_lt_esc(lab)})<br>{_lt_pct(v, 2)} of the portfolio, "
+                              f"through {_cap_join(['Cash' if f == 'CASH' else f for f in funds])}")
+                    hs.append(max(min(qw, qh) - 4, 6))
+            else:
+                fill = _lt_legible(col)
+                _cx_rect(shapes, bx, by, bx + bw, by + bh, fill, r=4,
+                         line_color=LT_GOLD_EDGE if k == "gold" else None, line_width=1 if k == "gold" else 0)
+                _lt_box_label(ann, bx, by, bw, bh, lab, _lt_pct(tv), fill, 12.5, 700)
+                contrib = [f"{('Cash' if f == 'CASH' else f)} {exp['flows'].get(f, {}).get(k, 0.0):.1f}"
+                           for f in exp["weights"] if exp["flows"].get(f, {}).get(k, 0.0) > 0.02]
+                hx.append(bx + bw / 2.0)
+                hy.append(by + bh / 2.0)
+                ht.append(f"<b>{_lt_esc(lab)}</b> {_lt_pct(tv)} of the portfolio<br>" + ", ".join(contrib))
+                hs.append(max(min(bw, bh) - 4, 6))
+        x += fw + gapF
+
+    # Largest single positions
+    y = H_MAP + 30.0
+    singles = [s for s in exp["singles"] if s[1] >= LT_MIN_PCT][:10]
+    if singles:
+        _lt_text(ann, 0, y, "Largest single positions", size=14, color=TEXT_PRIMARY, weight=700)
+        y += 20.0
+        cx0, row_h, chip_h = 0.0, 38.0, 28.0
+        rows = 0
+        for i, (name, v, funds, theme, by_fund) in enumerate(singles):
+            rank, val = str(i + 1), _lt_pct(v)
+            wchip = 11 + _lt_tw(rank, 12) + 6 + _lt_tw(name, 13, 600) + 6 + _lt_tw(val, 13) + 11
+            if cx0 > 0 and cx0 + wchip > W:
+                cx0 = 0.0
+                rows += 1
+            yy = y + rows * row_h
+            _cx_rect(shapes, cx0, yy, cx0 + wchip, yy + chip_h, ANALYTICS_HEADER_BG, r=14,
+                     line_color=ANALYTICS_RULE, line_width=1)
+            tx = cx0 + 11
+            _lt_text(ann, tx, yy + chip_h / 2.0, rank, size=12, color=TEXT_MUTED)
+            tx += _lt_tw(rank, 12) + 6
+            _lt_text(ann, tx, yy + chip_h / 2.0, name, size=13, color=ANALYTICS_CELL_TEXT, weight=600)
+            tx += _lt_tw(name, 13, 600) + 6
+            _lt_text(ann, tx, yy + chip_h / 2.0, val, size=13, color=ANALYTICS_CELL_TEXT)
+            hx.append(cx0 + wchip / 2.0)
+            hy.append(yy + chip_h / 2.0)
+            ht.append(f"<b>{_lt_esc(name)}</b> ({_lt_esc(_lt_label(theme))})<br>{_lt_pct(v, 2)} of the portfolio, "
+                      f"through {_cap_join(['Cash' if f == 'CASH' else f for f in funds])}")
+            hs.append(chip_h - 4)
+            cx0 += wchip + 8
+        y += (rows + 1) * row_h - 10
+    H = int(y + 4)
+    fig = go.Figure()
+    _lt_hover(fig, hx, hy, ht, hs)
+    return _pixel_layout(fig, W, H, shapes, ann)
+
+
+# ---------- Companion: Where the Risk Comes From ----------
+
+def build_lt_risk_figure(rk, other, other_name):
+    """Each fund's share of the money (left bar) next to its share of the
+    risk (right bar), linked by ribbons, with three tiles at the right."""
+    W = ANALYTICS_WIDTH
+    shapes, ann = [], []
+    hx, hy, ht, hs = [], [], [], []
+    top, bh, bw, gap = 34.0, 380.0, 112.0, 196.0
+    xa, xb = 0.0, bw + gap
+    _lt_text(ann, xa + bw / 2.0, 14, "Share of money", anchor="center", size=13, color=TEXT_PRIMARY, weight=600)
+    _lt_text(ann, xb + bw / 2.0, 14, "Share of risk", anchor="center", size=13, color=TEXT_PRIMARY, weight=600)
+    funds, w, rc, vol = rk["funds"], list(rk["w"]), list(rk["rc"]), list(rk["vol"])
+    pos_total = sum(max(r, 0.0) for r in rc) or 1.0
+    ya = yb = top
+    segs = []
+    for t, wi, ri, vi in zip(funds, w, rc, vol):
+        ha = bh * wi / 100.0
+        hb = bh * max(ri, 0.0) / pos_total
+        segs.append((t, ya, ha, yb, hb, wi, ri, vi))
+        ya += ha
+        yb += hb
+    x0, x1 = xa + bw, xb
+    xm = (x0 + x1) / 2.0
+    for t, a0, ha, b0, hb, wi, ri, vi in segs:
+        path = (f"M {x0},{a0:.1f} C {xm},{a0:.1f} {xm},{b0:.1f} {x1},{b0:.1f} L {x1},{b0 + hb:.1f} "
+                f"C {xm},{b0 + hb:.1f} {xm},{a0 + ha:.1f} {x0},{a0 + ha:.1f} Z")
+        shapes.append(dict(type="path", path=path, fillcolor=_lt_rgba(_lt_fund_color(t), 0.20),
+                           line=dict(width=0), layer="below"))
+    negatives = []
+    for t, a0, ha, b0, hb, wi, ri, vi in segs:
+        label = "Cash" if t == "CASH" else t
+        fill = _lt_legible(_lt_fund_color(t))
+        tc = _cx_text_on(fill)
+        for xx, y0, hh, val in ((xa, a0, ha, wi), (xb, b0, hb, ri)):
+            if hh <= 0.5:
+                continue
+            _cx_rect(shapes, xx, y0 + 1, xx + bw, y0 + hh - 1, fill, r=4)
+            if hh >= 40:
+                _lt_text(ann, xx + bw / 2.0, y0 + hh / 2.0 - 8, label, anchor="center", size=13.5, color=tc,
+                         weight=700)
+                _lt_text(ann, xx + bw / 2.0, y0 + hh / 2.0 + 9, _lt_pct(val), anchor="center", size=13, color=tc)
+            elif hh >= 14:
+                _lt_text(ann, xx + bw / 2.0, y0 + hh / 2.0, f"{label} {_lt_pct(val)}", anchor="center",
+                         size=12.5, color=tc, weight=600)
+        if ri < -0.05:
+            negatives.append(f"{label} {MINUS}{abs(ri):.1f}%")
+        text = (f"<b>{label}</b> ({_lt_esc(_lt_fund_name(t))})<br>{_lt_pct(wi)} of the money<br>"
+                f"{(MINUS if ri < 0 else '')}{abs(ri):.1f}% of the risk<br>Volatility {vi:.1f}% a year")
+        hx += [xa + bw / 2.0, xb + bw / 2.0]
+        hy += [a0 + ha / 2.0, b0 + hb / 2.0]
+        ht += [text, text]
+        hs += [max(ha - 4, 6), max(hb - 4, 6)]
+    y_end = top + bh
+    if negatives:
+        _lt_text(ann, xb + bw / 2.0, y_end + 16, "Offsets risk: " + ", ".join(negatives), anchor="center",
+                 size=11.5, color=TEXT_MUTED)
+        y_end += 22
+
+    # Tiles at the right
+    tx0, tx1 = xb + bw + 40.0, float(W)
+    tw_ = tx1 - tx0
+    n = len([t for t in funds if t != "CASH"])
+    idx = int(np.argmax([r / wi if wi > 0 else -np.inf for r, wi in zip(rc, w)]))
+    tiles = [
+        ("Expected swings", f"{rk['port_vol']:.1f}% a year",
+         f"{other_name}'s basket: {other['port_vol']:.1f}%" if other else "Annualized volatility"),
+        ("Independent bets", f"{rk['bets']:.1f} of {n}",
+         (f"{other_name}'s basket: {other['bets']:.1f}. " if other else "")
+         + "One means the funds move as a single bet."),
+        ("Most risk per dollar", "Cash" if funds[idx] == "CASH" else funds[idx],
+         f"{w[idx]:.0f}% of the money but {rc[idx]:.0f}% of the risk"),
+    ]
+    ty = top
+    for label, value, sub in tiles:
+        lines = _cx_wrap(sub, 12.5, tw_ - 32)[:3]
+        th_ = 76 + 16 * len(lines)
+        _cx_rect(shapes, tx0, ty, tx1, ty + th_, ANALYTICS_TINT, r=10)
+        _lt_text(ann, tx0 + 16, ty + 20, label, size=13, color=TEXT_SECONDARY)
+        _lt_text(ann, tx0 + 16, ty + 47, value, size=26, color=BRAND_PURPLE, weight=700)
+        for j, line in enumerate(lines):
+            _lt_text(ann, tx0 + 16, ty + 74 + 16 * j, line, size=12.5, color=TEXT_SECONDARY)
+        ty += th_ + 12
+    H = int(max(y_end, ty - 12) + 10)
+    fig = go.Figure()
+    _lt_hover(fig, hx, hy, ht, hs)
+    return _pixel_layout(fig, W, H, shapes, ann)
+
+
+# ---------- rendering ----------
+
+def _lt_pill_css():
+    """Brand-purple pills for this section's controls only. Streamlit 1.54
+    marks the selected pill with data-testid stBaseButton-pillsActive and
+    1.61 with aria-checked on data-variant pills; the app-wide pill CSS
+    targets older markup, so selected pills would otherwise draw in red."""
+    keys = LT_PILL_KEYS
+    sel = ", ".join(f'.st-key-{k} button[data-testid="stBaseButton-pillsActive"], '
+                    f'.st-key-{k} button[data-variant="pills"][aria-checked="true"]' for k in keys)
+    sel_p = ", ".join(f'.st-key-{k} button[data-testid="stBaseButton-pillsActive"] p, '
+                      f'.st-key-{k} button[data-variant="pills"][aria-checked="true"] p' for k in keys)
+    off = ", ".join(f'.st-key-{k} button[data-testid="stBaseButton-pills"], '
+                    f'.st-key-{k} button[data-variant="pills"][aria-checked="false"]' for k in keys)
+    off_hover = ", ".join(f'.st-key-{k} button[data-testid="stBaseButton-pills"]:hover, '
+                          f'.st-key-{k} button[data-variant="pills"][aria-checked="false"]:hover' for k in keys)
+    return (
+        "<style>"
+        f"{off} {{ border: 1px solid #ddd !important; border-radius: 8px !important; "
+        f"background-color: #ffffff !important; color: {TEXT_SECONDARY} !important; font-weight: 500 !important; }}"
+        f"{off_hover} {{ border-color: #bbb !important; background-color: #f5f5f8 !important; }}"
+        f"{sel} {{ border: 1px solid {BRAND_PURPLE} !important; border-radius: 8px !important; "
+        f"background-color: {ANALYTICS_TINT} !important; color: {BRAND_PURPLE} !important; font-weight: 600 !important; }}"
+        f"{sel_p} {{ color: {BRAND_PURPLE} !important; font-weight: 600 !important; }}"
+        "</style>"
+    )
+
+
+def _lt_pick(label, options, key, default, fmt=None):
+    """Single-select pills keyed in session state. A stale or cleared value
+    falls back to the default, which stays selected."""
+    if key in st.session_state and st.session_state[key] not in options:
+        del st.session_state[key]
+    if key not in st.session_state:
+        st.session_state[key] = default
+    value = st.pills(label, options, selection_mode="single", key=key, format_func=fmt or str)
+    return value if value in options else default
+
+
+def _lt_basket_label(bk, which):
+    b = bk[which]
+    return _lt_short_month(b["period"]) if b else which
+
+
+def _lt_basket_phrase(b):
+    month = _lt_month(b["period"])
+    if b["kind"] == "target":
+        return f"{month} target weights, as in the Next Allocation table"
+    if b.get("date") is not None:
+        return f"{month} going-in weights, the holdings at the {_long_date(b['date'])} close"
+    return f"{month} weights"
+
+
+def _lt_sources_text(comps, tickers):
+    """Where each fund's holdings came from, e.g. 'IWM and EMXC from iShares
+    as of 10/29/2026'. Funds with a fixed look-through are named at the end."""
+    seen, groups, fixed = set(), {}, []
+    for t in tickers:
+        if t in seen or t == "CASH":
+            continue
+        seen.add(t)
+        c = comps.get(t)
+        if not c or c["kind"] == "none":
+            continue
+        if c["kind"] == "fixed":
+            fixed.append(t)
+            continue
+        if c["kind"] == "hand-entered":
+            src = "hand-entered late-October 2026 holdings, because no issuer file loaded"
+        elif t == "HGER":
+            src = "Harbor"
+        elif "Invesco" in c["source"]:
+            src = "Invesco (GICS sectors from iShares' Nasdaq-100 fund)"
+        elif "iShares" in c["source"]:
+            src = "iShares"
+        else:
+            src = "the holdings file"
+        when = f" as of {_cap_date(c['as_of'])}" if c.get("as_of") else ""
+        groups.setdefault((src, when), []).append(t)
+    parts = []
+    for (src, when), ts in groups.items():
+        if ts == ["HGER"] and src == "Harbor":
+            parts.append(f"HGER's mix is the Quantix Commodity Index it tracks, from Harbor{when}")
+        else:
+            parts.append(f"{_cap_join(ts)} from {src}{when}")
+    text = ("Fund holdings: " + "; ".join(parts) + ".") if parts else ""
+    if fixed:
+        what = {"GLD": "gold", "BIL": "T-bills", "IBIT": "bitcoin", "GBTC": "bitcoin", "BITO": "bitcoin"}
+        text += " " + "; ".join(f"{t} is all {what.get(t, t)}" for t in fixed) + "."
+    return text.strip()
+
+
+def _lt_gap_notes(comps, tickers, snapshot):
+    """Caption naming funds that show as one Not broken down block, and why."""
+    none = [t for t in tickers if comps.get(t, {}).get("kind") == "none" and t != "CASH"]
+    if not none:
+        return ""
+    no_file = [t for t in none if snapshot is None and t in LT_SNAPSHOT_FUNDS]
+    others = [t for t in none if t not in no_file]
+    parts = []
+    if no_file:
+        verb = "shows" if len(no_file) == 1 else "show"
+        parts.append(f"{_cap_join(no_file)} {verb} as Not broken down because the fund holdings file "
+                     "(holdings_snapshot.json) did not load.")
+    if others:
+        verb, pron, block = (("shows", "its", "a single Not broken down block") if len(others) == 1
+                             else ("show", "their", "one Not broken down block"))
+        parts.append(f"{_cap_join(others)} {verb} as {block} because {pron} holdings aren't loaded here.")
+    return " ".join(parts)
+
+
+def render_lt_views(bk, comps, snapshot, view, which):
+    basket = bk[which]
+    exp = lt_exposure(basket["weights"], comps)
+    cmp_key = "current" if which == "next" else "prev"
+    cmp_basket = bk.get(cmp_key)
+    cmp_exp = lt_exposure(cmp_basket["weights"], comps) if cmp_basket else None
+    note = _lt_gap_notes(comps, list(basket["weights"]), snapshot)
+    if view == "Table" and cmp_basket:
+        cmp_none = [t for t in canonical_order(list(cmp_basket["weights"]))
+                    if t != "CASH" and t not in basket["weights"] and comps.get(t, {}).get("kind") == "none"]
+        if cmp_none:
+            period = pd.Period(cmp_basket["period"], freq="M")
+            share = sum(cmp_basket["weights"][t] for t in cmp_none)
+            verb, pron = ("is", "it counts") if len(cmp_none) == 1 else ("are", "they count")
+            note += ((" " if note else "") + f"{period.strftime('%B')}'s {_cap_join(cmp_none)} ({share:.1f}% of "
+                     f"that basket) {verb} not broken down, so {pron} in no theme in the vs "
+                     f"{period.strftime('%b')} column or the tiles.")
+    if note:
+        st.caption(note)
+    if view == "Table":
+        fig = build_lt_table_figure(exp, cmp_exp, cmp_basket["period"] if cmp_basket else None,
+                                    lt_table_tiles(exp, cmp_exp, cmp_basket["period"] if cmp_basket else None))
+        name = "Look-Through Exposure Table"
+    elif view == "Map":
+        fig = build_lt_map_figure(exp)
+        name = "Look-Through Exposure Map"
+    else:
+        fig = build_lt_flow_figure(exp, comps, lt_flow_tiles(exp, comps))
+        name = "Look-Through Exposure Flow"
+    st.plotly_chart(fig, use_container_width=False, config=chart_config(name, static=True),
+                    key=f"lt_fig_{view}_{which}")
+    shown = canonical_order([t for t in basket["weights"] if t != "CASH"])
+    if view == "Table" and cmp_basket:
+        shown += [t for t in canonical_order(list(cmp_basket["weights"])) if t not in shown]
+    lead = f"{_lt_basket_phrase(basket)}, looked through to each fund's holdings."
+    if view == "Table":
+        how = ("Percentage points of the whole portfolio. Each fund column shows what that fund contributes "
+               "to the row.")
+        if cmp_basket:
+            how += (f" vs {pd.Period(cmp_basket['period'], freq='M').strftime('%b')} is the change from the "
+                    f"{_lt_month(cmp_basket['period'])} basket; both baskets are looked through to the same, "
+                    "latest fund holdings, so the change reflects only the new weights.")
+        how += (" Largest single holdings add up each name across funds; Alphabet's two share classes and "
+                "Samsung's common and preferred shares count as one.")
+    elif view == "Map":
+        how = ("Box size is share of the portfolio. Blue boxes are stocks, brown are commodities, orange is "
+               f"bitcoin. Holdings of {LT_MAP_NAME_PCT:.1f}% of the portfolio or more are named; lighter boxes "
+               "are the rest of a fund's holdings in that group.")
+    else:
+        how = "Percentages are shares of the whole portfolio; each ribbon is one fund's holdings in a theme."
+    _footnote(
+        f"{lead} {how} Chips include chip designers, makers and equipment suppliers (for example NVIDIA, "
+        "Broadcom, TSMC, Samsung Electronics and SK hynix); the rest of information technology is Software "
+        "&amp; other tech. Each fund's small cash and derivatives sleeve is spread across its holdings. "
+        + _lt_esc(_lt_sources_text(comps, shown))
+    )
+
+
+def render_lt_risk(bk, returns):
+    _corr_subhead("Where the Risk Comes From",
+                  "Each fund's share of the money next to its share of the basket's day-to-day swings.")
+    options = ["current", "next"] if bk["next"] else ["current"]
+    c1, c2 = st.columns(2)
+    with c1:
+        which = _lt_pick("Basket", options, "lt_risk_basket", options[-1],
+                         fmt=lambda k: _lt_basket_label(bk, k))
+    with c2:
+        win_label = _lt_pick("Window", list(LT_RISK_WINDOWS), "lt_risk_window", "3 months")
+    window = LT_RISK_WINDOWS[win_label]
+    if returns is None or returns.empty:
+        st.info("Where the Risk Comes From needs daily fund prices, which did not load right now. "
+                "Reloading in a few minutes usually restores them.")
+        return
+    rk = lt_risk(returns, bk[which]["weights"], window)
+    if rk is None:
+        st.info("Where the Risk Comes From needs at least a month of daily prices for the basket's funds.")
+        return
+    other_key = "current" if which == "next" else ("next" if bk["next"] else "prev")
+    other_b = bk.get(other_key)
+    other = lt_risk(returns, other_b["weights"], window) if other_b else None
+    other_name = pd.Period(other_b["period"], freq="M").strftime("%B") if other_b else ""
+    fig = build_lt_risk_figure(rk, other, other_name)
+    st.plotly_chart(fig, use_container_width=False,
+                    config=chart_config("Where the Risk Comes From", static=True),
+                    key=f"lt_risk_fig_{which}_{window}")
+    ratios = {t: r / wi for t, r, wi in zip(rk["funds"], rk["rc"], rk["w"]) if t != "CASH" and wi > 0}
+    zig = min(ratios, key=ratios.get) if ratios else None
+    zig_txt = (f", like {zig} lately," if zig and ratios[zig] < 0.6 else "")
+    missing = ""
+    if rk["missing"]:
+        missing = f" Prices did not load for {_cap_join(rk['missing'])}, so the shares cover the other funds."
+    short = ""
+    if rk["n"] < window * 0.9:
+        short = f" Only {rk['n']} sessions of history are available for this basket's funds."
+    _footnote(
+        f"Risk share is each fund's contribution to the basket's variance, from daily returns over the chosen "
+        f"window: 3 months is the last {LT_RISK_WINDOWS['3 months']} trading days, 12 months the last "
+        f"{LT_RISK_WINDOWS['12 months']}, here {_long_date(rk['start'])} through {_long_date(rk['end'])}, using "
+        f"{_lt_basket_phrase(bk[which])}. A fund that tends to zig when the others zag{zig_txt} takes up less "
+        "risk than money. Expected swings is the basket's annualized volatility over the same days. "
+        "Independent bets is the diversification ratio squared (Choueifaty and Coignard, 2008): 1 means the "
+        f"funds move as one bet; {len([t for t in rk['funds'] if t != 'CASH'])} unrelated, equally volatile "
+        f"funds would score {len([t for t in rk['funds'] if t != 'CASH'])}. Daily returns come from adjusted "
+        f"closes on U.S. equity trading days.{short}{missing}"
+    )
+
+
+def render_lookthrough_section(holdings_values):
+    """Look-Through Exposure: a Flow / Table / Map switcher over the current
+    or next basket, then Where the Risk Comes From. Each part is guarded so a
+    data problem in one leaves the other standing."""
+    st.markdown(
+        f'<p style="font-size:0.92rem; color:{TEXT_SECONDARY}; margin:0 0 0.4rem 0;">Everything the funds '
+        'hold, combined, so overlap between them is visible.</p>',
+        unsafe_allow_html=True,
+    )
+    if holdings_values is None or holdings_values.empty:
+        st.info("Look-Through Exposure needs holdings_daily_values.csv, which did not load.")
+        return
+    totals = _load_reconstructed_totals()
+    next_rows = load_next_allocation()
+    baskets = corr_going_in_baskets(holdings_values, totals)
+    bk = lt_baskets(baskets, holdings_values.index.max(), next_rows)
+    if bk is None:
+        st.info("Look-Through Exposure needs a completed rebalance in holdings_daily_values.csv.")
+        return
+    snapshot = load_holdings_snapshot()
+    tickers = []
+    for key in ("current", "next", "prev"):
+        if bk[key]:
+            tickers += [t for t in bk[key]["weights"] if t not in tickers]
+    # What HGER Holds (just above) already fetched Harbor when it is showing.
+    hger_panel_shown = _hger_is_held(derive_current_allocation(holdings_values)[0])
+    comps = lt_compositions(tickers, snapshot, live_hger=not hger_panel_shown)
+    st.markdown(_lt_pill_css(), unsafe_allow_html=True)
+    options = ["current", "next"] if bk["next"] else ["current"]
+    c1, c2 = st.columns(2)
+    with c1:
+        which = _lt_pick("Basket", options, "lt_basket", options[-1], fmt=lambda k: _lt_basket_label(bk, k))
+    with c2:
+        view = _lt_pick("View", LT_VIEWS, "lt_view", LT_VIEWS[0])
+    _render_guarded(f"Look-Through Exposure ({view})", render_lt_views, bk, comps, snapshot, view, which,
+                    heading=False)
+    start = (pd.Timestamp(ALLOC_HISTORY_START) - timedelta(days=CORR_PRICE_LEAD_DAYS)).strftime("%Y-%m-%d")
+    end = local_now().strftime("%Y-%m-%d")
+    try:
+        prices = load_holding_prices(tuple(corr_price_tickers(baskets, next_rows)), start, end)
+        returns = corr_equity_returns(prices)
+    except Exception:
+        returns = pd.DataFrame()
+    _render_guarded("Where the Risk Comes From", render_lt_risk, bk, returns, heading=False)
+
+
 def main():
     # Branded header
     st.markdown("""
@@ -8869,6 +10447,16 @@ def main():
     # ================================================================
     if _hger_is_held(current_alloc_rows):
         render_hger_lookthrough_section()
+
+    # ================================================================
+    # LOOK-THROUGH EXPOSURE (added October 31, 2026)
+    # Everything the current and next baskets hold, combined across
+    # funds (Flow, Table and Map views), then Where the Risk Comes From.
+    # Fund holdings come from holdings_snapshot.json (written by
+    # make_holdings_snapshot.py in ae-dashboard-deploy) and HGER's
+    # live Harbor feed above.
+    # ================================================================
+    _render_guarded(LT_SECTION_TITLE, render_lookthrough_section, _holdings_for_alloc)
 
     # ================================================================
     # LIVE POSITION DRIFT (intramonth, for deposit / withdrawal sizing)
