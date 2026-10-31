@@ -9497,10 +9497,7 @@ def build_lt_table_figure(exp, cmp_exp, cmp_period, tiles):
     funds = [t for t in canonical_order([t for t in wts if t != "CASH"]) if wts[t] >= LT_MIN_PCT]
     if wts.get("CASH", 0.0) >= LT_MIN_PCT:
         funds.append("CASH")
-    X_FUNDS, X_FUNDS_END = 214.0, 548.0
-    cw = min(78.0, (X_FUNDS_END - X_FUNDS) / max(len(funds), 1))
-    cx = {f: X_FUNDS + cw / 2.0 + i * cw for i, f in enumerate(funds)}
-    xv, xd = 662.0, 774.0
+    X_FUNDS, xd = 214.0, 774.0
     hdr, rh, gh = 54.0, 28.0, 32.0
     th = exp["themes"]
     tp = cmp_exp["themes"] if cmp_exp is not None else {}
@@ -9512,6 +9509,27 @@ def build_lt_table_figure(exp, cmp_exp, cmp_period, tiles):
                 and max(th.get(k, 0.0), tp.get(k, 0.0)) >= LT_MIN_PCT]
         if keys:
             groups.append((fam_label, keys))
+
+    # Change column: triangles sit in one fixed column and the amounts start one
+    # fixed gap to their right, sized to the widest amount, so nothing zigzags.
+    deltas = []
+    for _gname, keys in groups:
+        deltas.append(sum(th.get(k, 0.0) for k in keys) - sum(tp.get(k, 0.0) for k in keys))
+        deltas.extend(th.get(k, 0.0) - tp.get(k, 0.0) for k in keys)
+    amt_w = max([_lt_tw(f"{abs(d):.1f} pts", 13, 700) for d in deltas if abs(d) >= LT_MIN_PCT]
+                or [_lt_tw("0.0 pts", 13, 700)])
+    x_amt = xd - amt_w
+    x_tri = x_amt - 10.0
+    # Portfolio sits a set gap left of the change column (or at the right edge
+    # when there is nothing to compare), and the fund columns spread into the
+    # room left over, so no wide empty band opens up between them.
+    xv = (x_tri - 4.2 - 30.0) if cmp_exp is not None else xd
+    port_w = max(_lt_tw("Portfolio", 13.5, 700), _lt_tw("100.0%", 13.5, 700))
+    room = xv - port_w - 22.0 - X_FUNDS
+    cw = min(100.0, room / max(len(funds), 1))
+    x_first = X_FUNDS + max(0.0, room - cw * len(funds)) / 2.0
+    cx = {f: x_first + cw / 2.0 + i * cw for i, f in enumerate(funds)}
+    box_w = min(72.0, cw - 12.0)
 
     y0 = y
     _cx_rect(shapes, 0, y0, W, y0 + hdr, ANALYTICS_HEADER_BG)
@@ -9526,17 +9544,6 @@ def build_lt_table_figure(exp, cmp_exp, cmp_period, tiles):
         _lt_text(ann, xd, y0 + hdr / 2.0, vs_label, anchor="right", size=13.5, color=TEXT_PRIMARY, weight=700)
     maxc = max([v for f in funds for v in flows.get(f, {}).values()] or [1.0])
     y = y0 + hdr
-
-    # Change column: triangles sit in one fixed column and the amounts start one
-    # fixed gap to their right, sized to the widest amount, so nothing zigzags.
-    deltas = []
-    for _gname, keys in groups:
-        deltas.append(sum(th.get(k, 0.0) for k in keys) - sum(tp.get(k, 0.0) for k in keys))
-        deltas.extend(th.get(k, 0.0) - tp.get(k, 0.0) for k in keys)
-    amt_w = max([_lt_tw(f"{abs(d):.1f} pts", 13, 700) for d in deltas if abs(d) >= LT_MIN_PCT]
-                or [_lt_tw("0.0 pts", 13, 700)])
-    x_amt = xd - amt_w
-    x_tri = x_amt - 10.0
 
     def change(yc, d, big_cut=3.0, group=False):
         if cmp_exp is None:
@@ -9570,14 +9577,14 @@ def build_lt_table_figure(exp, cmp_exp, cmp_period, tiles):
                 v = flows.get(f, {}).get(k, 0.0)
                 if v >= LT_MIN_PCT:
                     t = min(1.0, v / maxc)
-                    _cx_rect(shapes, cx[f] - cw / 2.0 + 6, y + 3, cx[f] + cw / 2.0 - 6, y + rh - 3,
+                    _cx_rect(shapes, cx[f] - box_w / 2.0, y + 3, cx[f] + box_w / 2.0, y + rh - 3,
                              _cx_mix("#FFFFFF", LT_SHADE, 0.15 + 0.85 * t), r=5)
                     _lt_text(ann, cx[f], yc, f"{v:.1f}%", anchor="center", size=13,
                              color=ANALYTICS_CELL_TEXT, weight=500)
                     hx.append(cx[f])
                     hy.append(yc)
                     ht.append(f"<b>{_lt_esc(_lt_label(k))}</b> through {f}<br>{_lt_pct(v)} of the portfolio")
-                    hs.append(min(cw - 12, rh - 6))
+                    hs.append(min(box_w, rh - 6))
             pv = th.get(k, 0.0)
             _lt_text(ann, xv, yc, _lt_pct(pv), anchor="right", size=13, color=ANALYTICS_CELL_TEXT, weight=600)
             change(yc, pv - tp.get(k, 0.0))
