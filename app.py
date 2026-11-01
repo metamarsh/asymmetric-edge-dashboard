@@ -140,6 +140,124 @@ st.markdown("""
         justify-content: center !important;
         margin-top: 0.25rem;
     }
+
+    /* ---------- Page navigation (added October 31, 2026) ---------- */
+    /* Menu bar (Navigation Build Spec, Option A): today's wordmark on the
+       left, one link per page on the right, the current page in Deep Purple
+       with a 2px underline. The bar takes the place of the old top padding. */
+    .block-container {
+        padding-top: 0;
+    }
+    .st-key-ae_topbar {
+        min-height: 64px;
+        border-bottom: 1px solid #E5E7EB;
+        flex-wrap: wrap;
+        column-gap: 32px;
+        row-gap: 0;
+    }
+    .st-key-ae_topbar .brand-header {
+        margin-bottom: 0;
+    }
+    .ae-font-warm {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+        font-family: 'DM Sans', sans-serif;
+    }
+    .st-key-ae_nav {
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+    .st-key-ae_nav [data-testid="stPageLink-NavLink"] {
+        display: flex;
+        align-items: center;
+        box-sizing: border-box;
+        min-height: 64px;
+        margin: 0;
+        padding: 0 12px;
+        border-radius: 0;
+        border-bottom: 2px solid transparent;
+        background: transparent !important;
+    }
+    .st-key-ae_nav [data-testid="stPageLink-NavLink"] p {
+        font-size: 15px;
+        font-weight: 500;
+        color: #555566;
+    }
+    .st-key-ae_nav [data-testid="stPageLink-NavLink"]:hover p {
+        color: """ + BRAND_PURPLE + """;
+    }
+    .st-key-ae_nav_current [data-testid="stPageLink-NavLink"] {
+        border-bottom-color: """ + BRAND_PURPLE + """;
+    }
+    .st-key-ae_nav_current [data-testid="stPageLink-NavLink"] p {
+        font-weight: 600;
+        color: """ + BRAND_PURPLE + """;
+    }
+
+    /* Page title, description and the On this page row */
+    .ae-page-head {
+        margin: 1rem 0 1.5rem 0;
+    }
+    .ae-page-title {
+        font-size: 32px;
+        line-height: 1.15;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        color: #2E2E38;
+    }
+    [data-testid="stMarkdownContainer"] p.ae-page-desc {
+        margin: 8px 0 0 0;
+        max-width: 720px;
+        font-size: 16px;
+        line-height: 1.6;
+        color: #555566;
+    }
+    .ae-otp {
+        display: flex;
+        align-items: baseline;
+        column-gap: 24px;
+        margin-top: 20px;
+        padding: 12px 0;
+        border-top: 1px solid #E5E7EB;
+        border-bottom: 1px solid #E5E7EB;
+    }
+    .ae-otp-links {
+        display: flex;
+        flex-wrap: wrap;
+        column-gap: 24px;
+        row-gap: 6px;
+    }
+    .ae-otp-label {
+        flex: none;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: """ + TEXT_SECONDARY + """;
+    }
+    [data-testid="stMarkdownContainer"] .ae-otp a,
+    [data-testid="stMarkdownContainer"] .ae-otp a:visited {
+        font-size: 14px;
+        font-weight: 500;
+        color: #555566;
+        text-decoration: none;
+    }
+    [data-testid="stMarkdownContainer"] .ae-otp a:hover {
+        color: """ + BRAND_PURPLE + """;
+    }
+
+    /* Section anchors take no space: their element container is pulled up by
+       the block gap, so the page spacing is unchanged. */
+    [data-testid="stElementContainer"]:has(.ae-anchor) {
+        margin-bottom: -1rem;
+    }
+    .ae-anchor {
+        scroll-margin-top: 16px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -10275,36 +10393,30 @@ def render_lookthrough_section(holdings_values):
     _render_guarded("Where the Risk Comes From", render_lt_risk, bk, returns, heading=False)
 
 
-def main():
-    # Branded header
-    st.markdown("""
-    <div class="brand-header">
-        <span class="brand-name">Asymmetric Edge</span>
-        <span class="brand-tag">Market Performance</span>
-    </div>
-    """, unsafe_allow_html=True)
+# ================================================================
+# PAGES AND NAVIGATION (added October 31, 2026)
+#
+# The dashboard is six pages with a menu bar across the top (Navigation
+# Build Spec, Option A). main() is the entrypoint: the menu, the data every
+# page shares (AEContext), the update section, then the selected page and
+# the footer. Each section that used to be written inline in main() is now
+# its own function below with its body unchanged; it reads what it needs
+# from the shared context, so a section no longer depends on another
+# section having run above it.
+# ================================================================
 
-    # One-time-per-session reset of stale session-state date fields.
-    # Streamlit's `value=` widget defaults only apply on first render;
-    # after that, session state owns the value. Across dashboard restarts
-    # this means values like an as-of date set days ago can stick around
-    # and quietly drift out of date. Bumping DATE_RESET_VERSION forces a
-    # one-time clear on each user's first load of the new version. User
-    # changes within the same session still persist normally.
-    #
-    # We also PRE-POPULATE the MTD return and as-of date here so the
-    # partial-month extension below runs on this same render, which is
-    # what advances `latest_date` past the CSV's last row and lets the
-    # Performance Summary date pickers default to today rather than to
-    # the CSV's stale endpoint.
-    DATE_RESET_VERSION = "v2026_06_07a"
-    if st.session_state.get("_dates_reset_version") != DATE_RESET_VERSION:
-        for _k in ("upd_as_of", "upd_mtd_return", "summary_end_date", "summary_start_date"):
-            st.session_state.pop(_k, None)
-        # MTD return not seeded; field defaults to empty after a full rebuild.
-        st.session_state["upd_as_of"] = local_now().date()
-        st.session_state["_dates_reset_version"] = DATE_RESET_VERSION
 
+class AEContext:
+    """Data every page shares, built once per rerun before the page runs."""
+
+
+AE_CTX = None   # this run's AEContext; main() sets it before the page runs
+
+
+def build_shared_context():
+    """Load and derive the data the pages share. Moved here unchanged from
+    main(), where several of these were computed partway down the page.
+    Every loader is cached."""
     # Load data
     portfolio_df = load_portfolio_data()
 
@@ -10366,21 +10478,55 @@ def main():
         (combined.index >= inception_date) & (combined.index <= latest_date)
     ]
 
-    latest_str = latest_date.strftime("%B %d, %Y")
-    st.markdown(
-        f'<p class="brand-sub">Data through {latest_str} &nbsp;&middot;&nbsp; '
-        f'Refreshed {format_clock(local_now())} MT &nbsp;&middot;&nbsp; '
-        f'<span style="color:#9CA3AF; font-size:0.78rem;">Build v2026-05-27c</span></p>',
-        unsafe_allow_html=True,
+    # Load asset class data once
+    asset_start = (pd.Timestamp(latest_date) - timedelta(days=400)).strftime("%Y-%m-%d")
+    asset_close = load_asset_class_data(
+        tuple(ASSET_CLASS_TICKERS.values()), asset_start, latest_date.strftime("%Y-%m-%d")
     )
 
-    # Partial-month update expander (collapsed by default). Placed near the
-    # top of the page so the workflow instructions sit next to the freshness
-    # indicator above. The MTD return entered here feeds back into the
-    # portfolio series at the top of main() via session state, extending the
-    # data for all charts on the next rerun.
-    render_update_section(portfolio_df)
+    # Auto-derive the current allocation from actual end-of-day holdings at the
+    # most recent rebalance, the same source the Allocation Drift table uses for
+    # its Month Start column. The table updates itself every time the pipeline
+    # regenerates holdings_daily_values.csv, so it can never disagree with the
+    # drift table's Month Start. There is no hardcoded fallback, if the holdings
+    # data is missing the dashboard shows an error rather than stale numbers.
+    _holdings_for_alloc = load_holdings_values()
+    current_alloc_rows, current_alloc_date = derive_current_allocation(_holdings_for_alloc)
 
+    holdings_values_df = load_holdings_values()
+
+    _analytics_totals = _load_reconstructed_totals()
+    _held = _held_tickers(holdings_values_df, since=inception_date)
+    holding_prices = (
+        load_holding_prices(
+            tuple(sorted(_held)),
+            (inception_date - timedelta(days=10)).strftime("%Y-%m-%d"),
+            latest_date.strftime("%Y-%m-%d"),
+        )
+        if _held else pd.DataFrame()
+    )
+
+    ctx = AEContext()
+    ctx.portfolio_df = portfolio_df
+    ctx.portfolio_series = portfolio_series
+    ctx.inception_date = inception_date
+    ctx.latest_date = latest_date
+    ctx.bench_close = bench_close
+    ctx.combined = combined
+    ctx.asset_close = asset_close
+    ctx.holdings_for_alloc = _holdings_for_alloc
+    ctx.current_alloc_rows = current_alloc_rows
+    ctx.current_alloc_date = current_alloc_date
+    ctx.holdings_values_df = holdings_values_df
+    ctx.analytics_totals = _analytics_totals
+    ctx.held = _held
+    ctx.holding_prices = holding_prices
+    return ctx
+
+
+def render_performance_summary_section(ctx):
+    """Performance Summary (date range, metrics table, footnote)."""
+    latest_date, inception_date, combined = ctx.latest_date, ctx.inception_date, ctx.combined
     # ================================================================
     # PERFORMANCE SUMMARY (above-the-fold executive summary table)
     # ================================================================
@@ -10482,34 +10628,14 @@ def main():
         )
         st.markdown(f'<p class="footer-text">{footnote_summary}</p>', unsafe_allow_html=True)
 
-    st.divider()
 
-    # Load asset class data once
-    asset_start = (pd.Timestamp(latest_date) - timedelta(days=400)).strftime("%Y-%m-%d")
-    asset_close = load_asset_class_data(
-        tuple(ASSET_CLASS_TICKERS.values()), asset_start, latest_date.strftime("%Y-%m-%d")
-    )
-
-    # ================================================================
-    # ASSET UNIVERSE
-    # ================================================================
-    render_asset_universe_section()
-
-    st.divider()
-
+def render_current_allocation_section(ctx):
+    """Current Allocation table and footnote."""
+    current_alloc_rows, current_alloc_date = ctx.current_alloc_rows, ctx.current_alloc_date
     # ================================================================
     # CURRENT ALLOCATION
     # ================================================================
     st.markdown("## Current Allocation")
-
-    # Auto-derive the current allocation from actual end-of-day holdings at the
-    # most recent rebalance, the same source the Allocation Drift table uses for
-    # its Month Start column. The table updates itself every time the pipeline
-    # regenerates holdings_daily_values.csv, so it can never disagree with the
-    # drift table's Month Start. There is no hardcoded fallback, if the holdings
-    # data is missing the dashboard shows an error rather than stale numbers.
-    _holdings_for_alloc = load_holdings_values()
-    current_alloc_rows, current_alloc_date = derive_current_allocation(_holdings_for_alloc)
 
     if current_alloc_rows is None:
         current_alloc_date = None
@@ -10533,22 +10659,10 @@ def main():
         )
         st.markdown(f'<p class="footer-text">{footnote_alloc}</p>', unsafe_allow_html=True)
 
-    # ================================================================
-    # WHAT HGER HOLDS (QCI look-through, shown only while HGER is held)
-    # ================================================================
-    if _hger_is_held(current_alloc_rows):
-        render_hger_lookthrough_section()
 
-    # ================================================================
-    # LOOK-THROUGH EXPOSURE (added October 31, 2026)
-    # Everything the current and next baskets hold, combined across
-    # funds (Flow, Table and Map views), then Where the Risk Comes From.
-    # Fund holdings come from holdings_snapshot.json (written by
-    # make_holdings_snapshot.py in ae-dashboard-deploy) and HGER's
-    # live Harbor feed above.
-    # ================================================================
-    _render_guarded(LT_SECTION_TITLE, render_lookthrough_section, _holdings_for_alloc)
-
+def render_live_position_drift_section(ctx):
+    """Live Position Drift table and footnote."""
+    current_alloc_rows = ctx.current_alloc_rows
     # ================================================================
     # LIVE POSITION DRIFT (intramonth, for deposit / withdrawal sizing)
     # ================================================================
@@ -10602,6 +10716,9 @@ def main():
             )
             st.markdown(f'<p class="footer-text">{footnote_live}</p>', unsafe_allow_html=True)
 
+
+def render_next_allocation_section(ctx):
+    """Next Allocation reminder, editor and table."""
     # ================================================================
     # NEXT ALLOCATION (editable)
     # ================================================================
@@ -10723,12 +10840,14 @@ def main():
     else:
         st.info("No next allocation configured yet. Use the editor above to add holdings.")
 
+
+def render_allocation_drift_section(ctx):
+    """Allocation Drift table and footnote."""
+    holdings_values_df = ctx.holdings_values_df
     # ================================================================
     # ALLOCATION DRIFT
     # ================================================================
     st.markdown("## Allocation Drift")
-
-    holdings_values_df = load_holdings_values()
 
     if holdings_values_df.empty:
         st.info(
@@ -10778,8 +10897,10 @@ def main():
             )
             st.markdown(f'<p class="footer-text">{footnote_drift}</p>', unsafe_allow_html=True)
 
-    st.divider()
 
+def render_allocation_history_section(ctx):
+    """Asset Allocation Over Time chart, footnote and caption."""
+    holdings_values_df, inception_date, latest_date = ctx.holdings_values_df, ctx.inception_date, ctx.latest_date
     # ================================================================
     # ASSET ALLOCATION OVER TIME
     # ================================================================
@@ -10823,37 +10944,10 @@ def main():
                 "money market funds."
             )
 
-    st.divider()
 
-    # ================================================================
-    # REBALANCE LOG (added October 22, 2026)
-    # ================================================================
-    _analytics_totals = _load_reconstructed_totals()
-    _held = _held_tickers(holdings_values_df, since=inception_date)
-    holding_prices = (
-        load_holding_prices(
-            tuple(sorted(_held)),
-            (inception_date - timedelta(days=10)).strftime("%Y-%m-%d"),
-            latest_date.strftime("%Y-%m-%d"),
-        )
-        if _held else pd.DataFrame()
-    )
-    _render_guarded("Rebalance Log", render_rebalance_log_section,
-                    holdings_values_df, _analytics_totals, holding_prices)
-
-    st.divider()
-
-    # ================================================================
-    # CORRELATION AND DIVERSIFICATION (added October 31, 2026)
-    # Correlation Over Time, Correlation Matrix, and Did the
-    # Diversification Hold?, from the same holdings and prices as the
-    # allocation sections above.
-    # ================================================================
-    _render_guarded(CORR_SECTION_TITLE, render_correlation_section,
-                    holdings_values_df, _analytics_totals)
-
-    st.divider()
-
+def render_performance_comparison_section(ctx):
+    """Performance Comparison chart, footnote and caption."""
+    latest_date, inception_date, combined = ctx.latest_date, ctx.inception_date, ctx.combined
     # ================================================================
     # 1. PERFORMANCE COMPARISON
     # ================================================================
@@ -10904,8 +10998,10 @@ def main():
         f"{_cap_date(inception_date)}. " + NEWSLETTER_RETURNS_SENTENCES
     )
 
-    st.divider()
 
+def render_portfolio_growth_section(ctx):
+    """Portfolio Growth chart, toggles, footnote and caption, then the partial-month status and the diagnostic."""
+    latest_date, inception_date, combined, portfolio_df = ctx.latest_date, ctx.inception_date, ctx.combined, ctx.portfolio_df
     # ================================================================
     # 2. PORTFOLIO GROWTH
     # ================================================================
@@ -11030,21 +11126,10 @@ def main():
                 f"Final portfolio_df last date: {pd.Timestamp(portfolio_df['date'].iloc[-1]).strftime('%Y-%m-%d')}."
             )
 
-    st.divider()
 
-    # ================================================================
-    # MONTHLY RETURNS and WHAT DROVE THE MONTH (added October 22, 2026)
-    # ================================================================
-    _render_guarded("Monthly Returns", render_monthly_returns_section, combined, latest_date)
-
-    st.divider()
-
-    _render_guarded("Where the Month's Return Came From", render_attribution_section,
-                    portfolio_series, holdings_values_df, _analytics_totals,
-                    holding_prices, latest_date, heading=False)
-
-    st.divider()
-
+def render_max_drawdown_section(ctx):
+    """Maximum Drawdown chart, footnote and caption."""
+    latest_date, inception_date, combined = ctx.latest_date, ctx.inception_date, ctx.combined
     # ================================================================
     # 3. MAXIMUM DRAWDOWN
     # ================================================================
@@ -11096,28 +11181,10 @@ def main():
         + NEWSLETTER_RETURNS_SENTENCES
     )
 
-    st.divider()
 
-    # ================================================================
-    # DRAWDOWNS OVER TIME, THE ASYMMETRY, ROLLING 12-MONTH RETURN,
-    # RISK VS. RETURN (added October 22, 2026)
-    # ================================================================
-    _render_guarded("Drawdowns Over Time", render_underwater_section, combined, latest_date)
-
-    st.divider()
-
-    _render_guarded("The Asymmetry", render_capture_section, combined, latest_date)
-
-    st.divider()
-
-    _render_guarded("Rolling 12-Month Return", render_rolling_section, combined, latest_date)
-
-    st.divider()
-
-    _render_guarded("Risk vs. Return", render_risk_return_section, combined, latest_date)
-
-    st.divider()
-
+def render_asset_class_returns_section(ctx):
+    """Asset Class Returns chart, footnote and caption."""
+    latest_date, asset_close = ctx.latest_date, ctx.asset_close
     # ================================================================
     # 4. ASSET CLASS RETURNS
     # ================================================================
@@ -11186,8 +11253,10 @@ def main():
         + " Past performance does not guarantee future results."
     )
 
-    st.divider()
 
+def render_total_return_section(ctx):
+    """Total Return Comparison controls, chart and footnote."""
+    latest_date, inception_date, portfolio_series = ctx.latest_date, ctx.inception_date, ctx.portfolio_series
     # ================================================================
     # 5. TOTAL RETURN COMPARISON
     # ================================================================
@@ -11283,6 +11352,9 @@ def main():
     )
     st.markdown(f'<p class="footer-text">{footnote_tr}</p>', unsafe_allow_html=True)
 
+
+def render_footer():
+    """The footer line at the bottom of every page."""
     # Bottom footer
     st.markdown(
         f'<p style="text-align:center; color:{TEXT_MUTED}; font-size:0.72rem; margin-top:2rem;">'
@@ -11290,6 +11362,321 @@ def main():
         f'</p>',
         unsafe_allow_html=True,
     )
+
+
+# ---------- Page chrome ----------
+# The menu bar, page titles, and the On this page row. The pages call the
+# section functions above; dividers sit where they sit on the old single page.
+
+PAGE_HEADERS = {
+    "performance": (
+        "Performance",
+        "How Asymmetric Edge compares with the 80/20, 60/40 and S&P 500 portfolios, "
+        "over any period and month by month.",
+    ),
+    "risk": (
+        "Risk",
+        "How deep the losses have been, how quickly they recovered, and how much of "
+        "the market's downside the strategy has taken.",
+    ),
+    "diversification": (
+        "Diversification",
+        "How closely the funds move together, and what the basket holds once each "
+        "fund is looked through.",
+    ),
+    "holdings": (
+        "Holdings",
+        "What the portfolio holds now, what changes at the next rebalance, and how "
+        "the allocation has moved since inception.",
+    ),
+    "markets": (
+        "Markets",
+        "The funds the strategy chooses from, how each asset class has done, and a "
+        "tool to compare any ticker.",
+    ),
+}
+
+
+def _esc(text):
+    return (str(text).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def render_top_bar(pages, current_page):
+    """Wordmark on the left (today's brand-header styling), one link per page on
+    the right. Links are st.page_link, so switching pages keeps the session
+    (and anything typed into the update section)."""
+    with st.container(key="ae_topbar", horizontal=True, horizontal_alignment="distribute",
+                      vertical_alignment="center", gap=None):
+        # The hidden ae-font-warm line makes the browser load every DM Sans
+        # weight before any chart draws. Plotly measures chart text when it
+        # draws, so a chart drawn before the font arrives keeps fallback-font
+        # spacing (a legend wraps differently, table text sits 1 to 2 px off).
+        # The old single page got this for free from the summary table at the
+        # top; a page that opens with a chart needs it done here.
+        st.markdown(
+            '<div class="brand-header"><span class="brand-name">Asymmetric Edge</span>'
+            '<span class="brand-tag">Market Performance</span></div>'
+            '<div class="ae-font-warm" aria-hidden="true">'
+            '<span style="font-weight:400">Aa 0.9% \u2212</span>'
+            '<span style="font-weight:500">Aa 0.9% \u2212</span>'
+            '<span style="font-weight:600">Aa 0.9% \u2212</span>'
+            '<span style="font-weight:700">Aa 0.9% \u2212</span></div>',
+            unsafe_allow_html=True,
+            width="content",
+        )
+        with st.container(key="ae_nav", horizontal=True, horizontal_alignment="right",
+                          vertical_alignment="center", gap=None, width="content"):
+            for page in pages:
+                slug = page.url_path or "overview"
+                is_current = page.url_path == current_page.url_path
+                with st.container(key=f"ae_nav_{'current' if is_current else slug}", width="content"):
+                    st.page_link(page, label=page.title)
+
+
+def render_page_header(page_key, sections=None):
+    """Page title and one-line description, then (optionally) the On this page
+    row of jump links to each section's anchor."""
+    title, description = PAGE_HEADERS[page_key]
+    html = (
+        f'<div class="ae-page-head"><div class="ae-page-title" role="heading" aria-level="1">'
+        f'{_esc(title)}</div><p class="ae-page-desc">{_esc(description)}</p>'
+    )
+    if sections:
+        links = "".join(f'<a href="#{anchor}">{_esc(label)}</a>' for anchor, label in sections)
+        html += (f'<div class="ae-otp" role="navigation" aria-label="On this page">'
+                 f'<span class="ae-otp-label">On this page</span>'
+                 f'<span class="ae-otp-links">{links}</span></div>')
+    html += "</div>"
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def section_anchor(anchor_id):
+    """A zero-height jump target for the On this page links. CSS pulls its
+    element container up by the block gap, so the page spacing is the same as
+    if it were not there."""
+    st.markdown(f'<div class="ae-anchor" id="{anchor_id}"></div>', unsafe_allow_html=True)
+
+
+# ---------- Pages ----------
+
+def page_overview():
+    ctx = AE_CTX
+    render_portfolio_growth_section(ctx)
+
+    st.divider()
+
+    render_current_allocation_section(ctx)
+
+
+PERFORMANCE_SECTIONS = [
+    ("summary", "Performance Summary"),
+    ("comparison", "Performance Comparison"),
+    ("monthly", "Monthly Returns"),
+    ("drivers", "What Drove the Month"),
+    ("rolling", "Rolling 12-Month Return"),
+]
+
+
+def page_performance():
+    ctx = AE_CTX
+    render_page_header("performance", PERFORMANCE_SECTIONS)
+
+    section_anchor("summary")
+    render_performance_summary_section(ctx)
+
+    st.divider()
+
+    section_anchor("comparison")
+    render_performance_comparison_section(ctx)
+
+    st.divider()
+
+    section_anchor("monthly")
+    _render_guarded("Monthly Returns", render_monthly_returns_section, ctx.combined, ctx.latest_date)
+
+    st.divider()
+
+    section_anchor("drivers")
+    _render_guarded("Where the Month's Return Came From", render_attribution_section,
+                    ctx.portfolio_series, ctx.holdings_values_df, ctx.analytics_totals,
+                    ctx.holding_prices, ctx.latest_date, heading=False)
+
+    st.divider()
+
+    section_anchor("rolling")
+    _render_guarded("Rolling 12-Month Return", render_rolling_section, ctx.combined, ctx.latest_date)
+
+
+RISK_SECTIONS = [
+    ("drawdown", "Maximum Drawdown"),
+    ("underwater", "Drawdowns Over Time"),
+    ("asymmetry", "The Asymmetry"),
+    ("risk-return", "Risk vs. Return"),
+]
+
+
+def page_risk():
+    ctx = AE_CTX
+    render_page_header("risk", RISK_SECTIONS)
+
+    section_anchor("drawdown")
+    render_max_drawdown_section(ctx)
+
+    st.divider()
+
+    section_anchor("underwater")
+    _render_guarded("Drawdowns Over Time", render_underwater_section, ctx.combined, ctx.latest_date)
+
+    st.divider()
+
+    section_anchor("asymmetry")
+    _render_guarded("The Asymmetry", render_capture_section, ctx.combined, ctx.latest_date)
+
+    st.divider()
+
+    section_anchor("risk-return")
+    _render_guarded("Risk vs. Return", render_risk_return_section, ctx.combined, ctx.latest_date)
+
+
+DIVERSIFICATION_SECTIONS = [
+    ("correlation", "Correlation and Diversification"),
+    ("exposure", "Look-Through Exposure"),
+]
+
+
+def page_diversification():
+    ctx = AE_CTX
+    render_page_header("diversification", DIVERSIFICATION_SECTIONS)
+
+    section_anchor("correlation")
+    _render_guarded(CORR_SECTION_TITLE, render_correlation_section,
+                    ctx.holdings_values_df, ctx.analytics_totals)
+
+    st.divider()
+
+    section_anchor("exposure")
+    _render_guarded(LT_SECTION_TITLE, render_lookthrough_section, ctx.holdings_for_alloc)
+
+
+def page_holdings():
+    ctx = AE_CTX
+    hger_held = _hger_is_held(ctx.current_alloc_rows)
+    render_page_header("holdings", [
+        ("current", "Current Allocation"),
+        *([("hger", "What HGER Holds")] if hger_held else []),
+        ("live-drift", "Live Position Drift"),
+        ("next", "Next Allocation"),
+        ("drift", "Allocation Drift"),
+        ("history", "Asset Allocation Over Time"),
+        ("rebalances", "Rebalance Log"),
+    ])
+
+    section_anchor("current")
+    render_current_allocation_section(ctx)
+
+    # What HGER Holds (QCI look-through), shown only while HGER is held
+    if hger_held:
+        section_anchor("hger")
+        render_hger_lookthrough_section()
+
+    section_anchor("live-drift")
+    render_live_position_drift_section(ctx)
+
+    section_anchor("next")
+    render_next_allocation_section(ctx)
+
+    section_anchor("drift")
+    render_allocation_drift_section(ctx)
+
+    st.divider()
+
+    section_anchor("history")
+    render_allocation_history_section(ctx)
+
+    st.divider()
+
+    section_anchor("rebalances")
+    _render_guarded("Rebalance Log", render_rebalance_log_section,
+                    ctx.holdings_values_df, ctx.analytics_totals, ctx.holding_prices)
+
+
+def page_markets():
+    ctx = AE_CTX
+    render_page_header("markets")
+
+    render_asset_universe_section()
+
+    st.divider()
+
+    render_asset_class_returns_section(ctx)
+
+    st.divider()
+
+    render_total_return_section(ctx)
+
+
+def build_pages():
+    """The six pages, in menu order. Overview is the default page (the bare
+    URL); the others are reachable directly at their URL paths."""
+    return [
+        st.Page(page_overview, title="Overview", default=True),
+        st.Page(page_performance, title="Performance", url_path="performance"),
+        st.Page(page_risk, title="Risk", url_path="risk"),
+        st.Page(page_diversification, title="Diversification", url_path="diversification"),
+        st.Page(page_holdings, title="Holdings", url_path="holdings"),
+        st.Page(page_markets, title="Markets", url_path="markets"),
+    ]
+
+
+def main():
+    global AE_CTX
+    pages = build_pages()
+    current_page = st.navigation(pages, position="hidden")
+    render_top_bar(pages, current_page)
+
+    # One-time-per-session reset of stale session-state date fields.
+    # Streamlit's `value=` widget defaults only apply on first render;
+    # after that, session state owns the value. Across dashboard restarts
+    # this means values like an as-of date set days ago can stick around
+    # and quietly drift out of date. Bumping DATE_RESET_VERSION forces a
+    # one-time clear on each user's first load of the new version. User
+    # changes within the same session still persist normally.
+    #
+    # We also PRE-POPULATE the MTD return and as-of date here so the
+    # partial-month extension below runs on this same render, which is
+    # what advances `latest_date` past the CSV's last row and lets the
+    # Performance Summary date pickers default to today rather than to
+    # the CSV's stale endpoint.
+    DATE_RESET_VERSION = "v2026_06_07a"
+    if st.session_state.get("_dates_reset_version") != DATE_RESET_VERSION:
+        for _k in ("upd_as_of", "upd_mtd_return", "summary_end_date", "summary_start_date"):
+            st.session_state.pop(_k, None)
+        # MTD return not seeded; field defaults to empty after a full rebuild.
+        st.session_state["upd_as_of"] = local_now().date()
+        st.session_state["_dates_reset_version"] = DATE_RESET_VERSION
+
+    AE_CTX = build_shared_context()
+    portfolio_df, latest_date = AE_CTX.portfolio_df, AE_CTX.latest_date
+
+    latest_str = latest_date.strftime("%B %d, %Y")
+    st.markdown(
+        f'<p class="brand-sub">Data through {latest_str} &nbsp;&middot;&nbsp; '
+        f'Refreshed {format_clock(local_now())} MT &nbsp;&middot;&nbsp; '
+        f'<span style="color:#9CA3AF; font-size:0.78rem;">Build v2026-05-27c</span></p>',
+        unsafe_allow_html=True,
+    )
+
+    # Partial-month update expander (collapsed by default). Placed near the
+    # top of the page so the workflow instructions sit next to the freshness
+    # indicator above. The MTD return entered here feeds back into the
+    # portfolio series at the top of main() via session state, extending the
+    # data for all charts on the next rerun.
+    render_update_section(portfolio_df)
+
+    current_page.run()
+
+    render_footer()
 
 
 if __name__ == "__main__":
