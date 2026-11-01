@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 import yfinance as yf
 from datetime import datetime, timedelta
 import os
+import hmac
 import json
 import re
 import textwrap
@@ -4394,6 +4395,8 @@ def render_hger_lookthrough_section():
         f"as of {_cap_date(as_of_dt)}. Source: Harbor Capital. Weights change daily."
     )
 
+    if not studio_mode():
+        return
     if st.button("Refresh from Harbor", key="qci_refresh"):
         fetch_qci_weights.clear()
         st.rerun()
@@ -4892,6 +4895,8 @@ def render_asset_universe_section():
     )
     st.markdown(f'<p class="footer-text">{footnote_au}</p>', unsafe_allow_html=True)
 
+    if not studio_mode():
+        return
     with st.expander("Edit Asset Universe", expanded=False):
         st.caption(
             "Edit the categories and assets below, then click Save. Categories render in the order shown. "
@@ -5215,7 +5220,10 @@ def newsletter_returns_sentences(keys):
 
 
 def newsletter_caption(text):
-    """A collapsed, copy-ready caption for pasting under the chart in Ghost."""
+    """A collapsed, copy-ready caption for pasting under the chart in Ghost.
+    Studio mode only."""
+    if not studio_mode():
+        return
     with st.expander("Newsletter caption", expanded=False):
         st.code(text, language=None, wrap_lines=True)
 
@@ -11103,105 +11111,109 @@ def render_next_allocation_section(ctx):
     # NEXT ALLOCATION (editable)
     # ================================================================
     st.markdown("## Next Allocation")
+    studio = studio_mode()
 
-    st.markdown(
-        '<p style="background-color:#FFF3CD; color:#856404; padding:0.6rem 1rem; '
-        'border-radius:6px; font-size:0.88rem; font-weight:500; '
-        'border-left:4px solid #F4D35E; margin-bottom:1rem;">'
-        '\u26A0\uFE0F  Remember to update <b>next_allocation.json</b> (via the editor below) '
-        'whenever the planned allocation changes. This table is manually maintained.</p>',
-        unsafe_allow_html=True,
-    )
+    if studio:
+        st.markdown(
+            '<p style="background-color:#FFF3CD; color:#856404; padding:0.6rem 1rem; '
+            'border-radius:6px; font-size:0.88rem; font-weight:500; '
+            'border-left:4px solid #F4D35E; margin-bottom:1rem;">'
+            '\u26A0\uFE0F  Remember to update <b>next_allocation.json</b> (via the editor below) '
+            'whenever the planned allocation changes. This table is manually maintained.</p>',
+            unsafe_allow_html=True,
+        )
 
     # --- Load saved rows ---
     saved_rows = load_next_allocation()
 
     # --- Editor expander ---
     available_tickers = sorted(ASSET_CATALOG.keys())
-    with st.expander("Edit Next Allocation"):
-        st.caption(
-            "Select tickers and enter weights below. Asset name and purpose auto-populate "
-            "from the asset catalog. Click **Save** to persist changes to next_allocation.json."
-        )
-
-        num_rows = st.number_input(
-            "Number of holdings",
-            min_value=1,
-            max_value=12,
-            value=max(len(saved_rows), 4),
-            step=1,
-            key="next_alloc_num_rows",
-        )
-
-        editor_rows = []
-        for i in range(int(num_rows)):
-            cols = st.columns([2, 1])
-            # Pre-fill from saved data if available
-            default_ticker_idx = 0
-            default_weight = ""
-            if i < len(saved_rows):
-                saved_ticker = saved_rows[i].get("ticker", "")
-                if saved_ticker in available_tickers:
-                    default_ticker_idx = available_tickers.index(saved_ticker)
-                default_weight = saved_rows[i].get("weight", "").replace("%", "")
-
-            with cols[0]:
-                ticker = st.selectbox(
-                    f"Ticker {i + 1}",
-                    options=available_tickers,
-                    index=default_ticker_idx,
-                    key=f"next_alloc_ticker_{i}",
-                )
-            with cols[1]:
-                weight = st.text_input(
-                    f"Weight % {i + 1}",
-                    value=default_weight,
-                    placeholder="e.g. 25.00",
-                    key=f"next_alloc_weight_{i}",
-                )
-
-            info = ASSET_CATALOG.get(ticker, {})
-            editor_rows.append({
-                "ticker": ticker,
-                "asset": info.get("asset", ticker),
-                "emoji": info.get("emoji", ""),
-                "purpose": info.get("purpose", ""),
-                "weight": f"{weight}%" if weight else "",
-            })
-
-        # --- Weight total (live sum check) ---
-        total_weight = 0.0
-        for row in editor_rows:
-            w_str = row["weight"].replace("%", "").strip()
-            if w_str:
-                try:
-                    total_weight += float(w_str)
-                except ValueError:
-                    pass
-
-        is_balanced = abs(total_weight - 100.0) < 0.01
-        if is_balanced:
-            status_html = (
-                f"<div style='margin-top:8px; margin-bottom:12px; "
-                f"padding:10px 14px; background-color:#D6E8DF; color:#14543E; "
-                f"border-radius:6px; font-weight:600;'>"
-                f"Total weight: {total_weight:.2f}% &nbsp;\u2713</div>"
+    editor_rows = []
+    if studio:
+        with st.expander("Edit Next Allocation"):
+            st.caption(
+                "Select tickers and enter weights below. Asset name and purpose auto-populate "
+                "from the asset catalog. Click **Save** to persist changes to next_allocation.json."
             )
-        else:
-            diff = total_weight - 100.0
-            sign = "+" if diff > 0 else ""
-            status_html = (
-                f"<div style='margin-top:8px; margin-bottom:12px; "
-                f"padding:10px 14px; background-color:#F4E5C5; color:#7E4A0A; "
-                f"border-radius:6px; font-weight:600;'>"
-                f"Total weight: {total_weight:.2f}% &nbsp;({sign}{diff:.2f})</div>"
-            )
-        st.markdown(status_html, unsafe_allow_html=True)
 
-        if st.button("Save Next Allocation", key="save_next_alloc"):
-            save_next_allocation(editor_rows)
-            st.success("Saved to next_allocation.json.")
-            st.rerun()
+            num_rows = st.number_input(
+                "Number of holdings",
+                min_value=1,
+                max_value=12,
+                value=max(len(saved_rows), 4),
+                step=1,
+                key="next_alloc_num_rows",
+            )
+
+            editor_rows = []
+            for i in range(int(num_rows)):
+                cols = st.columns([2, 1])
+                # Pre-fill from saved data if available
+                default_ticker_idx = 0
+                default_weight = ""
+                if i < len(saved_rows):
+                    saved_ticker = saved_rows[i].get("ticker", "")
+                    if saved_ticker in available_tickers:
+                        default_ticker_idx = available_tickers.index(saved_ticker)
+                    default_weight = saved_rows[i].get("weight", "").replace("%", "")
+
+                with cols[0]:
+                    ticker = st.selectbox(
+                        f"Ticker {i + 1}",
+                        options=available_tickers,
+                        index=default_ticker_idx,
+                        key=f"next_alloc_ticker_{i}",
+                    )
+                with cols[1]:
+                    weight = st.text_input(
+                        f"Weight % {i + 1}",
+                        value=default_weight,
+                        placeholder="e.g. 25.00",
+                        key=f"next_alloc_weight_{i}",
+                    )
+
+                info = ASSET_CATALOG.get(ticker, {})
+                editor_rows.append({
+                    "ticker": ticker,
+                    "asset": info.get("asset", ticker),
+                    "emoji": info.get("emoji", ""),
+                    "purpose": info.get("purpose", ""),
+                    "weight": f"{weight}%" if weight else "",
+                })
+
+            # --- Weight total (live sum check) ---
+            total_weight = 0.0
+            for row in editor_rows:
+                w_str = row["weight"].replace("%", "").strip()
+                if w_str:
+                    try:
+                        total_weight += float(w_str)
+                    except ValueError:
+                        pass
+
+            is_balanced = abs(total_weight - 100.0) < 0.01
+            if is_balanced:
+                status_html = (
+                    f"<div style='margin-top:8px; margin-bottom:12px; "
+                    f"padding:10px 14px; background-color:#D6E8DF; color:#14543E; "
+                    f"border-radius:6px; font-weight:600;'>"
+                    f"Total weight: {total_weight:.2f}% &nbsp;\u2713</div>"
+                )
+            else:
+                diff = total_weight - 100.0
+                sign = "+" if diff > 0 else ""
+                status_html = (
+                    f"<div style='margin-top:8px; margin-bottom:12px; "
+                    f"padding:10px 14px; background-color:#F4E5C5; color:#7E4A0A; "
+                    f"border-radius:6px; font-weight:600;'>"
+                    f"Total weight: {total_weight:.2f}% &nbsp;({sign}{diff:.2f})</div>"
+                )
+            st.markdown(status_html, unsafe_allow_html=True)
+
+            if st.button("Save Next Allocation", key="save_next_alloc"):
+                save_next_allocation(editor_rows)
+                st.success("Saved to next_allocation.json.")
+                st.rerun()
 
     # --- Render the table ---
     display_rows = saved_rows if saved_rows else editor_rows
@@ -11441,6 +11453,9 @@ def render_portfolio_growth_section(ctx):
         f"Growth of $10,000, {_cap_date(start_g)} through {_cap_date(end_g)}. "
         + newsletter_returns_sentences(enabled_series)
     )
+
+    if not studio_mode():
+        return
 
     # Partial-month extension status. Surfaced here so it's visible alongside
     # the chart whose shape it controls, not just in the collapsed Update
@@ -12023,6 +12038,68 @@ def render_explore_links(ctx):
                 st.page_link(page, label="Open →")
 
 
+# ---------- Studio mode ----------
+# Navigation Build Spec, phase 3 (October 31, 2026). Tyler's working tools show
+# only in Studio mode: Update Portfolio Data, the Newsletter caption boxes, Edit
+# Next Allocation and its next_allocation.json reminder, Edit Asset Universe,
+# "Diagnostic: last 15 portfolio values", the partial-month status line,
+# Refresh from Harbor, and the Build tag. Studio mode is on for local runs
+# (Windows; AE_STUDIO=1 or AE_STUDIO=0 overrides that) and off on Streamlit
+# Community Cloud unless the link carries ?studio=<code> matching studio_code
+# in the app's Secrets. Once unlocked it lasts for the browser session, and the
+# code goes back on the URL after each page change so a reload keeps it.
+# Charts, tables and every number are the same in both modes.
+STUDIO_QUERY_PARAM = "studio"
+STUDIO_SECRET_KEY = "studio_code"
+STUDIO_STATE_KEY = "_ae_studio"
+STUDIO_CODE_STATE_KEY = "_ae_studio_code"
+
+
+def _studio_local():
+    """On for local runs: Tyler runs the dashboard on Windows; Community Cloud is Linux."""
+    flag = os.environ.get("AE_STUDIO", "").strip().lower()
+    if flag in ("1", "true", "yes", "on"):
+        return True
+    if flag in ("0", "false", "no", "off"):
+        return False
+    return os.name == "nt"
+
+
+def _studio_secret():
+    """studio_code from the app's Secrets, or None when there is none."""
+    try:
+        code = st.secrets.get(STUDIO_SECRET_KEY)
+    except Exception:  # no secrets file, or one that does not parse
+        return None
+    code = "" if code is None else str(code).strip()
+    return code or None
+
+
+def resolve_studio_mode():
+    """Decide Studio mode for this rerun, before anything draws."""
+    if st.session_state.get(STUDIO_STATE_KEY):
+        code = st.session_state.get(STUDIO_CODE_STATE_KEY)
+        if code and st.query_params.get(STUDIO_QUERY_PARAM) != code:
+            st.query_params[STUDIO_QUERY_PARAM] = code
+        return True
+    if _studio_local():
+        st.session_state[STUDIO_STATE_KEY] = True
+        return True
+    supplied = st.query_params.get(STUDIO_QUERY_PARAM)
+    secret = _studio_secret()
+    if supplied and secret and hmac.compare_digest(str(supplied).strip().encode("utf-8"),
+                                                   secret.encode("utf-8")):
+        st.session_state[STUDIO_STATE_KEY] = True
+        st.session_state[STUDIO_CODE_STATE_KEY] = secret
+        return True
+    return False
+
+
+def studio_mode():
+    """True when Tyler's working tools should show (see resolve_studio_mode)."""
+    return bool(st.session_state.get(STUDIO_STATE_KEY))
+
+
 # ---------- Page chrome ----------
 # The menu bar, page titles, and the On this page row. The pages call the
 # section functions above; dividers sit where they sit on the old single page.
@@ -12315,6 +12392,7 @@ def build_pages():
 
 def main():
     global AE_CTX
+    studio = resolve_studio_mode()
     pages = build_pages()
     current_page = st.navigation(pages, position="hidden")
     render_top_bar(pages, current_page)
@@ -12347,10 +12425,12 @@ def main():
     # The Overview's headline shows the data date, so the line is left off there.
     if current_page.url_path:
         latest_str = latest_date.strftime("%B %d, %Y")
+        build_tag = (' &nbsp;&middot;&nbsp; '
+                     '<span style="color:#9CA3AF; font-size:0.78rem;">Build v2026-05-27c</span>'
+                     if studio else "")
         st.markdown(
             f'<p class="brand-sub">Data through {latest_str} &nbsp;&middot;&nbsp; '
-            f'Refreshed {format_clock(local_now())} MT &nbsp;&middot;&nbsp; '
-            f'<span style="color:#9CA3AF; font-size:0.78rem;">Build v2026-05-27c</span></p>',
+            f'Refreshed {format_clock(local_now())} MT{build_tag}</p>',
             unsafe_allow_html=True,
         )
 
@@ -12358,8 +12438,9 @@ def main():
     # top of the page so the workflow instructions sit next to the freshness
     # indicator above. The MTD return entered here feeds back into the
     # portfolio series at the top of main() via session state, extending the
-    # data for all charts on the next rerun.
-    render_update_section(portfolio_df)
+    # data for all charts on the next rerun. Studio mode only.
+    if studio:
+        render_update_section(portfolio_df)
 
     current_page.run()
 
