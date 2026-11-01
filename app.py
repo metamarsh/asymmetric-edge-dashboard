@@ -258,6 +258,360 @@ st.markdown("""
     .ae-anchor {
         scroll-margin-top: 16px;
     }
+    /* Narrower windows (Tyler's Firefox column is about 795 px): the page
+       links drop under the wordmark, aligned with it, on a shorter row. */
+    @media (max-width: 1100px) {
+        .st-key-ae_topbar {
+            padding-top: 12px;
+        }
+        .st-key-ae_nav {
+            position: relative;
+            left: -12px;
+        }
+        .st-key-ae_nav [data-testid="stPageLink-NavLink"] {
+            min-height: 48px;
+        }
+    }
+
+    /* ---------- Performance Summary, restyled (added October 31, 2026) ---------- */
+    /* Overview headline and tiles */
+    .ae-hero {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin: 0.75rem 0 1.25rem 0;
+        font-family: 'DM Sans', sans-serif;
+    }
+    [data-testid="stMarkdownContainer"] .ae-hero p {
+        margin: 0;
+        font-family: 'DM Sans', sans-serif;
+    }
+    [data-testid="stMarkdownContainer"] .ae-hero p.ae-hero-eyebrow {
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #666677;
+    }
+    .ae-hero-title {
+        font-size: 38px;
+        line-height: 1.12;
+        font-weight: 700;
+        letter-spacing: -0.025em;
+        color: #2E2E38;
+    }
+    [data-testid="stMarkdownContainer"] .ae-hero p.ae-hero-lede {
+        max-width: 720px;
+        font-size: 17px;
+        line-height: 1.6;
+        color: #555566;
+    }
+    [data-testid="stMarkdownContainer"] .ae-hero p.ae-hero-status {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 4px;
+        font-size: 13px;
+        color: #666677;
+    }
+    .ae-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #1F8A4C;
+    }
+    .ae-tiles {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr));
+        gap: 16px;
+        margin-top: 14px;
+    }
+    .ae-tile {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 20px;
+        border: 1px solid #E5E7EB;
+        border-radius: 12px;
+    }
+    [data-testid="stMarkdownContainer"] .ae-hero p.ae-tile-label {
+        font-size: 14px;
+        font-weight: 500;
+        color: #555566;
+    }
+    [data-testid="stMarkdownContainer"] .ae-hero p.ae-tile-value {
+        font-size: 34px;
+        line-height: 1;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        color: """ + BRAND_PURPLE + """;
+        font-variant-numeric: tabular-nums;
+    }
+    .ae-tile-foot {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        color: #555566;
+        font-variant-numeric: tabular-nums;
+    }
+    /* vs 80/20 chips, shared by the tiles and the table */
+    .ae-chip {
+        display: inline-block;
+        padding: 2px 9px;
+        border: 1px solid transparent;
+        border-radius: 999px;
+        font-family: 'DM Sans', sans-serif;
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 1.5;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+    }
+    .ae-chip-better {
+        color: #17703C;
+        background: #EAF5EE;
+        border-color: #EAF5EE;
+    }
+    .ae-chip-worse {
+        color: #B03224;
+        background: #ffffff;
+        border-color: #E0948A;
+    }
+    .ae-chip-even {
+        color: #555566;
+        background: #F3F4F6;
+        border-color: #F3F4F6;
+    }
+
+    /* Performance page table */
+    [data-testid="stMarkdownContainer"] p.ae-ps-range {
+        margin: 0;
+        font-size: 14px;
+        color: #555566;
+    }
+    .st-key-ae_ps_head {
+        flex-wrap: wrap;
+        row-gap: 8px;
+    }
+    .st-key-perf_summary_period button {
+        min-height: 34px;
+        padding: 0 12px !important;
+        border: 1px solid #DDDDE3 !important;
+        border-radius: 8px !important;
+        background: #ffffff !important;
+    }
+    .st-key-perf_summary_period button p {
+        font-size: 13px;
+        font-weight: 500;
+        color: #555566;
+    }
+    .st-key-perf_summary_period button[aria-checked="true"],
+    .st-key-perf_summary_period button[data-testid="stBaseButton-pillsActive"] {
+        border-color: """ + BRAND_PURPLE + """ !important;
+        background: #F0EDF8 !important;
+    }
+    .st-key-perf_summary_period button[aria-checked="true"] p,
+    .st-key-perf_summary_period button[data-testid="stBaseButton-pillsActive"] p {
+        font-weight: 600;
+        color: """ + BRAND_PURPLE + """;
+    }
+    .ae-ps-wrap {
+        overflow-x: auto;
+        margin-bottom: 12px;
+        border: 1px solid #E5E7EB;
+        border-radius: 12px;
+    }
+    [data-testid="stMarkdownContainer"] table.ae-ps {
+        width: 100%;
+        min-width: 640px;
+        margin: 0;
+        border: none;
+        border-collapse: collapse;
+        font-family: 'DM Sans', sans-serif;
+        font-size: 14px;
+        color: #2E2E38;
+        font-variant-numeric: tabular-nums;
+    }
+    [data-testid="stMarkdownContainer"] table.ae-ps th,
+    [data-testid="stMarkdownContainer"] table.ae-ps td {
+        padding: 11px 18px;
+        border: none;
+        border-top: 1px solid #EEEEF2;
+        background: transparent;
+        font-size: 14px;
+        font-weight: 400;
+        text-align: right;
+        vertical-align: middle;
+        white-space: nowrap;
+        color: #2E2E38;
+    }
+    [data-testid="stMarkdownContainer"] table.ae-ps thead th {
+        padding: 14px 18px;
+        border-top: none;
+        border-bottom: 2px solid """ + BRAND_PURPLE + """;
+        background: #F9FAFB;
+        font-size: 13px;
+        font-weight: 600;
+        color: """ + TEXT_PRIMARY + """;
+    }
+    [data-testid="stMarkdownContainer"] table.ae-ps thead th.ae-ps-metric {
+        width: 30%;
+        text-align: left;
+    }
+    [data-testid="stMarkdownContainer"] table.ae-ps thead th.ae-ps-ae {
+        background: #F0EDF8;
+        font-weight: 700;
+        color: """ + BRAND_PURPLE + """;
+    }
+    [data-testid="stMarkdownContainer"] table.ae-ps tbody th {
+        text-align: left;
+        font-weight: 500;
+        color: """ + TEXT_PRIMARY + """;
+    }
+    [data-testid="stMarkdownContainer"] table.ae-ps tbody td.ae-ps-ae {
+        background: #F7F5FC;
+        font-weight: 700;
+        color: """ + BRAND_PURPLE + """;
+    }
+    [data-testid="stMarkdownContainer"] table.ae-ps td.ae-ps-vs,
+    [data-testid="stMarkdownContainer"] table.ae-ps th.ae-ps-vs {
+        padding-top: 8px;
+        padding-bottom: 8px;
+        border-left: 1px solid #E5E7EB;
+    }
+    [data-testid="stMarkdownContainer"] table.ae-ps thead th.ae-ps-vs {
+        padding-top: 14px;
+        padding-bottom: 14px;
+    }
+    [data-testid="stMarkdownContainer"] table.ae-ps tr.ae-ps-group th {
+        padding: 22px 18px 6px 18px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #666677;
+    }
+    [data-testid="stMarkdownContainer"] table.ae-ps tr.ae-ps-first th,
+    [data-testid="stMarkdownContainer"] table.ae-ps tr.ae-ps-first td {
+        padding-top: 16px;
+        border-top: none;
+    }
+    [data-testid="stMarkdownContainer"] table.ae-ps tr.ae-ps-text td {
+        white-space: normal;
+    }
+    [data-testid="stMarkdownContainer"] table.ae-ps .ae-ps-date {
+        display: block;
+        margin-top: 2px;
+        font-size: 11px;
+        font-weight: 400;
+        color: """ + TEXT_MUTED + """;
+    }
+    .st-key-ae_ps_tools {
+        flex-wrap: wrap;
+        row-gap: 8px;
+    }
+    .st-key-perf_summary_more button {
+        min-height: 36px;
+        padding: 0 14px;
+        border: 1px solid #D9D2EE;
+        border-radius: 8px;
+        background: #ffffff;
+        color: """ + BRAND_PURPLE + """;
+    }
+    .st-key-perf_summary_more button p {
+        font-size: 14px;
+        font-weight: 600;
+        color: """ + BRAND_PURPLE + """;
+    }
+    .ae-ps-legend {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px 16px;
+        font-family: 'DM Sans', sans-serif;
+        font-size: 13px;
+        color: #555566;
+    }
+    .ae-ps-key {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .ae-swatch {
+        display: inline-block;
+        width: 22px;
+        height: 12px;
+        border-radius: 999px;
+    }
+    .ae-swatch-better {
+        background: #EAF5EE;
+        border: 1px solid #CFE6D7;
+    }
+    .ae-swatch-worse {
+        background: #ffffff;
+        border: 1px solid #E0948A;
+    }
+    [data-testid="stMarkdownContainer"] p.ae-ps-note {
+        max-width: 860px;
+        margin: 0;
+        font-family: 'DM Sans', sans-serif;
+        font-size: 13px;
+        line-height: 1.6;
+        color: #666677;
+    }
+
+    /* Explore the dashboard (Overview) */
+    .ae-explore-title {
+        font-size: 18px;
+        font-weight: 700;
+        color: #2E2E38;
+    }
+    .st-key-ae_explore {
+        border: 1px solid #E5E7EB;
+        border-radius: 12px;
+        overflow: hidden;
+    }
+    [class*="st-key-ae_explore_"] {
+        padding: 12px 20px;
+        border-top: 1px solid #EEEEF2;
+        column-gap: 20px;
+        flex-wrap: nowrap;
+    }
+    [class*="st-key-ae_explore_"] > [data-testid="stElementContainer"]:nth-child(2) {
+        flex: 1 1 0 !important;
+        min-width: 0 !important;
+    }
+    @media (max-width: 640px) {
+        [class*="st-key-ae_explore_"] {
+            flex-wrap: wrap;
+        }
+    }
+    .st-key-ae_explore_performance {
+        border-top: none;
+    }
+    .ae-explore-name {
+        font-size: 15px;
+        font-weight: 700;
+        color: #2E2E38;
+    }
+    .ae-explore-secs {
+        font-size: 14px;
+        line-height: 1.55;
+        color: #555566;
+    }
+    [class*="st-key-ae_explore_"] [data-testid="stPageLink-NavLink"] {
+        background: transparent !important;
+        padding: 0;
+    }
+    [class*="st-key-ae_explore_"] [data-testid="stPageLink-NavLink"] p {
+        font-size: 14px;
+        font-weight: 600;
+        color: """ + BRAND_PURPLE + """;
+        white-space: nowrap;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -10525,11 +10879,11 @@ def build_shared_context():
 
 
 def render_performance_summary_section(ctx):
-    """Performance Summary (date range, metrics table, footnote)."""
+    """Performance Summary, restyled October 31, 2026 (Navigation Build Spec,
+    phase 2): period buttons, a grouped table with a vs 80/20 column, and the
+    long footnote under Full methodology. Presentation only; the numbers come
+    from compute_summary_metrics exactly as before."""
     latest_date, inception_date, combined = ctx.latest_date, ctx.inception_date, ctx.combined
-    # ================================================================
-    # PERFORMANCE SUMMARY (above-the-fold executive summary table)
-    # ================================================================
     st.markdown("## Performance Summary")
 
     # Default custom range to full inception â†’ latest. The date pickers below
@@ -10562,26 +10916,41 @@ def render_performance_summary_section(ctx):
             st.session_state["summary_end_date"] = _latest_end
             st.session_state["_summary_end_tracked_latest"] = _latest_end
 
-    col_sd, col_ed = st.columns(2)
-    with col_sd:
-        summary_start = st.date_input(
-            "Start date",
-            value=inception_date.date(),
-            min_value=inception_date.date(),
-            max_value=latest_date.date(),
-            key="summary_start_date",
-        )
-    with col_ed:
-        summary_end = st.date_input(
-            "End date",
-            value=latest_date.date(),
-            min_value=inception_date.date(),
-            max_value=latest_date.date(),
-            key="summary_end_date",
-        )
+    options = ps_period_options(inception_date, latest_date)
+    if st.session_state.get(PS_PERIOD_KEY) not in options + [None]:
+        st.session_state.pop(PS_PERIOD_KEY, None)
+    with st.container(key="ae_ps_head", horizontal=True, horizontal_alignment="distribute",
+                      vertical_alignment="center", gap="small"):
+        range_slot = st.empty()
+        choice = st.pills("Period", options, default=PS_SINCE_INCEPTION, selection_mode="single",
+                          key=PS_PERIOD_KEY, on_change=_ps_keep_period, label_visibility="collapsed")
+    choice = choice or st.session_state.get(PS_LAST_PERIOD_KEY, PS_SINCE_INCEPTION)
+    st.session_state[PS_LAST_PERIOD_KEY] = choice
 
-    summary_start_ts = pd.Timestamp(summary_start)
-    summary_end_ts = pd.Timestamp(summary_end)
+    if choice == PS_CUSTOM:
+        # Custom shows today's Start and End date inputs, with their session-state logic.
+        col_sd, col_ed = st.columns(2)
+        with col_sd:
+            summary_start = st.date_input(
+                "Start date",
+                value=inception_date.date(),
+                min_value=inception_date.date(),
+                max_value=latest_date.date(),
+                key="summary_start_date",
+            )
+        with col_ed:
+            summary_end = st.date_input(
+                "End date",
+                value=latest_date.date(),
+                min_value=inception_date.date(),
+                max_value=latest_date.date(),
+                key="summary_end_date",
+            )
+        summary_start_ts = pd.Timestamp(summary_start)
+        summary_end_ts = pd.Timestamp(summary_end)
+    else:
+        summary_start_ts, summary_end_ts = ps_period_range(choice, inception_date, latest_date)
+    range_slot.markdown(ps_range_html(combined, summary_start_ts, summary_end_ts), unsafe_allow_html=True)
 
     if summary_start_ts >= summary_end_ts:
         st.warning("Start date must be before end date.")
@@ -10603,12 +10972,22 @@ def render_performance_summary_section(ctx):
                     end_date=summary_end_ts,
                 )
 
+        show_all = bool(st.session_state.get(PS_ALL_KEY, False))
         if any(summary_metrics_by_series.values()):
-            table_html = build_summary_table_html(summary_metrics_by_series, SERIES_ORDER)
-            st.markdown(table_html, unsafe_allow_html=True)
+            st.markdown(build_perf_summary_table(summary_metrics_by_series, show_all), unsafe_allow_html=True)
+            with st.container(key="ae_ps_tools", horizontal=True, horizontal_alignment="distribute",
+                              vertical_alignment="center", gap="small"):
+                st.button(
+                    "Show fewer metrics" if show_all else "Show all 18 metrics, with dates",
+                    key="perf_summary_more",
+                    on_click=_ps_toggle_all,
+                    icon=":material/keyboard_arrow_up:" if show_all else ":material/keyboard_arrow_down:",
+                )
+                st.markdown(ps_legend_html(), unsafe_allow_html=True, width="content")
         else:
             st.info("Not enough data in the selected range to compute summary metrics.")
 
+        # Today's full footnote, unchanged, under Full methodology.
         footnote_summary = (
             f"Metrics computed from daily portfolio values over the selected period. "
             f"Monthly-based figures (CAGR, Sortino, Calmar, Annualized Vol, Best/Worst Year, Win Rate) "
@@ -10626,8 +11005,9 @@ def render_performance_summary_section(ctx):
             f"S&P 500 (SPY), 60/40 (AOR), and 80/20 (AOA) total return data sourced from Yahoo Finance (adjusted close, dividends reinvested). "
             f"All figures are pre-tax and pre-fee."
         )
-        st.markdown(f'<p class="footer-text">{footnote_summary}</p>', unsafe_allow_html=True)
-
+        st.markdown(f'<p class="ae-ps-note">{PS_NOTE}</p>', unsafe_allow_html=True)
+        with st.expander("Full methodology"):
+            st.markdown(f'<p class="footer-text">{footnote_summary}</p>', unsafe_allow_html=True)
 
 def render_current_allocation_section(ctx):
     """Current Allocation table and footnote."""
@@ -11364,6 +11744,285 @@ def render_footer():
     )
 
 
+# ---------- Performance Summary, restyled (added October 31, 2026) ----------
+# Navigation Build Spec, phase 2. Presentation only: compute_summary_metrics
+# and every number are unchanged. The Overview opens with a since-inception
+# headline and four tiles; the Performance page shows a grouped table with a
+# vs 80/20 column. Better than 80/20 means higher for returns, ratios and
+# months with a gain, less negative for drawdowns and the worst periods, and
+# lower for volatility.
+
+PS_SINCE_INCEPTION = "Since inception"
+PS_YTD = "YTD"
+PS_CUSTOM = "Custom"
+PS_PERIOD_KEY = "perf_summary_period"
+PS_LAST_PERIOD_KEY = "_perf_summary_last_period"
+PS_ALL_KEY = "perf_summary_all"
+
+# (row label, metric key, format, better, date key, date kind)
+#   format: "pct" (one decimal), "pct_signed" (with a plus sign), "ratio",
+#   "dollar" or "text"; better: "higher", "lower" or None (no vs chip)
+PS_GROUPS = [
+    ("Return", [
+        ("Total return", "Total Return", "pct_signed", "higher", None, None),
+        ("Annual growth rate (CAGR)", "CAGR", "pct", "higher", None, None),
+        ("Best year", "Best Year", "pct", "higher", None, None),
+        ("Worst year", "Worst Year", "pct", "higher", None, None),
+    ]),
+    ("Risk", [
+        ("Max drawdown, daily closes", "Max Drawdown (Daily)", "pct", "higher", None, None),
+        ("Max drawdown, month-end", "Max Drawdown", "pct", "higher", None, None),
+        ("Annualized volatility", "Annualized Vol", "pct", "lower", None, None),
+    ]),
+    ("Risk-adjusted", [
+        ("Sortino ratio", "Sortino Ratio", "ratio", "higher", None, None),
+        ("Calmar ratio", "Calmar Ratio", "ratio", "higher", None, None),
+    ]),
+    ("Consistency", [
+        ("Months with a gain", "Win Rate", "pct", "higher", None, None),
+    ]),
+]
+# Revealed by "Show all 18 metrics, with dates".
+PS_MORE_GROUPS = [
+    ("Best and worst periods", [
+        ("Worst single day", "Worst Day", "pct", "higher", "Worst Day Date", "day"),
+        ("Best single day", "Best Day", "pct", "higher", "Best Day Date", "day"),
+        ("Worst week", "Worst Week", "pct", "higher", "Worst Week Date", "week"),
+        ("Best week", "Best Week", "pct", "higher", "Best Week Date", "week"),
+        ("Worst month", "Worst Month", "pct", "higher", "Worst Month Date", "month"),
+        ("Best month", "Best Month", "pct", "higher", "Best Month Date", "month"),
+    ]),
+    ("Growth", [
+        ("Growth of $10,000", "Growth of $10,000", "dollar", "higher", None, None),
+        ("Period", "Period", "text", None, None, None),
+    ]),
+]
+PS_NOTE = (
+    "Asymmetric Edge’s monthly figures tie to Fidelity’s reported returns. Its daily "
+    "figures come from a close-only reconstruction and are approximate. Benchmarks are Yahoo "
+    "Finance adjusted closes with dividends reinvested. Sortino uses BIL as the risk-free rate. "
+    "Before taxes and fees."
+)
+# (tile label, metric key, format, better, chip style, hover text)
+OVERVIEW_TILES = [
+    ("Total return", "Total Return", "pct_signed", "higher", "signed",
+     "Cumulative return since inception"),
+    ("Annual growth rate", "CAGR", "pct", "higher", "signed",
+     "Compound annual growth rate (CAGR) since inception"),
+    ("Max drawdown", "Max Drawdown (Daily)", "pct", "higher", "depth",
+     "Largest decline from a previous high, measured on daily closes"),
+    ("Sortino ratio", "Sortino Ratio", "ratio", "higher", "signed",
+     "Return above T-bills (BIL) per unit of downside risk"),
+]
+
+
+def _ps_finite(v):
+    try:
+        return v is not None and bool(np.isfinite(float(v)))
+    except (TypeError, ValueError):
+        return False
+
+
+def _ps_value(v, fmt):
+    """One table or tile value: percentages to one decimal, ratios to two."""
+    if fmt == "text":
+        return _esc(v) if isinstance(v, str) and v else "N/A"
+    if not _ps_finite(v):
+        return "N/A"
+    v = float(v)
+    if fmt == "pct_signed":
+        return _fmt_pct(v * 100, digits=1, signed=True)
+    if fmt == "pct":
+        return _fmt_pct(v * 100, digits=1, signed=False)
+    if fmt == "ratio":
+        return f"{MINUS if v < 0 and round(v, 2) != 0 else ''}{abs(v):.2f}"
+    if fmt == "dollar":
+        return f"{MINUS if v < 0 else ''}${abs(v):,.0f}"
+    return _esc(v)
+
+
+def _ps_chip(ae, bench, fmt, better, style="signed"):
+    """Asymmetric Edge minus 80/20: a filled green chip when better, an outlined
+    red one when worse. style="depth" words a drawdown gap as shallower/deeper."""
+    if better is None or not (_ps_finite(ae) and _ps_finite(bench)):
+        return ""
+    d = float(ae) - float(bench)
+    if fmt in ("pct", "pct_signed"):
+        mag, num, unit = round(abs(d) * 100, 1), f"{abs(d) * 100:.1f}", " pts"
+    elif fmt == "ratio":
+        mag, num, unit = round(abs(d), 2), f"{abs(d):.2f}", ""
+    else:
+        mag, num, unit = round(abs(d)), f"${abs(d):,.0f}", ""
+    if mag == 0:
+        return f'<span class="ae-chip ae-chip-even">{"0.0" if unit else num}{unit}</span>'
+    good = d > 0 if better == "higher" else d < 0
+    if style == "depth":
+        text = f"{num}{unit} {'shallower' if d > 0 else 'deeper'}"
+    else:
+        text = f"{'+' if d > 0 else MINUS}{num}{unit}"
+    return f'<span class="ae-chip {"ae-chip-better" if good else "ae-chip-worse"}">{text}</span>'
+
+
+def _ps_date(ts, kind):
+    """(text under the value, hover text), worded as the old table worded them."""
+    ts = pd.Timestamp(ts)
+    if kind == "month":
+        return ts.strftime("%b %Y"), ts.strftime("%B %Y")
+    d = f"{ts.strftime('%b')} {ts.day}, {ts.year}"
+    return d, (f"Week ending {d}" if kind == "week" else d)
+
+
+def build_perf_summary_table(metrics_by_series, show_all):
+    """The Performance page table: Metric, the four series, then vs 80/20."""
+    ae = metrics_by_series.get("AsymEdge") or {}
+    bench = metrics_by_series.get(PRIMARY_BENCHMARK) or {}
+    col_class = {s: ("ae-ps-ae" if s == "AsymEdge" else "") for s in SERIES_ORDER}
+    head = ['<th scope="col" class="ae-ps-metric">Metric</th>']
+    head += [f'<th scope="col" class="{col_class[s]}">{_esc(series_label(s))}</th>' for s in SERIES_ORDER]
+    head.append(f'<th scope="col" class="ae-ps-vs">vs {_esc(series_label(PRIMARY_BENCHMARK))}</th>')
+    body = []
+    groups = PS_GROUPS + (PS_MORE_GROUPS if show_all else [])
+    for gi, (group, rows) in enumerate(groups):
+        blanks = "".join(f'<td class="{col_class[s]}"></td>' for s in SERIES_ORDER)
+        body.append(f'<tr class="ae-ps-group{" ae-ps-first" if gi == 0 else ""}">'
+                    f'<th scope="rowgroup">{_esc(group)}</th>{blanks}<td class="ae-ps-vs"></td></tr>')
+        for label, key, fmt, better, date_key, date_kind in rows:
+            cells = []
+            for s in SERIES_ORDER:
+                m = metrics_by_series.get(s) or {}
+                value = _ps_value(m.get(key), fmt) if m else "N/A"
+                when = m.get(date_key) if (m and date_key) else None
+                if when is not None and not (isinstance(when, float) and np.isnan(when)):
+                    inline, tip = _ps_date(when, date_kind)
+                    cells.append(f'<td class="{col_class[s]}" title="{_esc(tip)}">{value}'
+                                 f'<span class="ae-ps-date">{_esc(inline)}</span></td>')
+                else:
+                    cells.append(f'<td class="{col_class[s]}">{value}</td>')
+            chip = _ps_chip(ae.get(key), bench.get(key), fmt, better) if (ae and bench) else ""
+            text_row = ' class="ae-ps-text"' if fmt == "text" else ""
+            body.append(f'<tr{text_row}><th scope="row">{_esc(label)}</th>{"".join(cells)}'
+                        f'<td class="ae-ps-vs">{chip}</td></tr>')
+    return ('<div class="ae-ps-wrap"><table class="ae-ps"><thead><tr>' + "".join(head)
+            + "</tr></thead><tbody>" + "".join(body) + "</tbody></table></div>")
+
+
+def ps_legend_html():
+    b = _esc(series_label(PRIMARY_BENCHMARK))
+    return ('<div class="ae-ps-legend">'
+            f'<span class="ae-ps-key"><span class="ae-swatch ae-swatch-better"></span>Better than {b}</span>'
+            f'<span class="ae-ps-key"><span class="ae-swatch ae-swatch-worse"></span>Worse than {b}</span>'
+            '</div>')
+
+
+def ps_period_options(inception_date, latest_date):
+    """Since inception, YTD, each full calendar year newest first, then Custom."""
+    years = [str(y) for y in range(pd.Timestamp(latest_date).year - 1,
+                                   pd.Timestamp(inception_date).year - 1, -1)]
+    return [PS_SINCE_INCEPTION, PS_YTD] + years + [PS_CUSTOM]
+
+
+def ps_period_range(choice, inception_date, latest_date):
+    """Start and end for a period button. Monthly figures anchor on the prior
+    month-end, so a year starts on January 1 (no 1Y button: a trailing year
+    would anchor on a month-end 13 months back)."""
+    inception, latest = pd.Timestamp(inception_date), pd.Timestamp(latest_date)
+    if choice == PS_YTD:
+        start, end = pd.Timestamp(latest.year, 1, 1), latest
+    elif str(choice).isdigit():
+        start, end = pd.Timestamp(int(choice), 1, 1), pd.Timestamp(int(choice), 12, 31)
+    else:
+        start, end = inception, latest
+    return max(start, inception), min(end, latest)
+
+
+def ps_range_html(combined, start, end):
+    """The date range under the title: first and last Asymmetric Edge closes in range."""
+    s = combined["AsymEdge"].dropna() if "AsymEdge" in combined.columns else pd.Series(dtype="float64")
+    s = s[(s.index >= start) & (s.index <= end)]
+    first, last = (s.index[0], s.index[-1]) if len(s) else (start, end)
+    return f'<p class="ae-ps-range">{_long_date(first)} to {_long_date(last)}</p>'
+
+
+def _ps_keep_period():
+    """Clicking the selected period again would clear it; keep it selected."""
+    if st.session_state.get(PS_PERIOD_KEY) is None:
+        st.session_state[PS_PERIOD_KEY] = st.session_state.get(PS_LAST_PERIOD_KEY, PS_SINCE_INCEPTION)
+
+
+def _ps_toggle_all():
+    st.session_state[PS_ALL_KEY] = not st.session_state.get(PS_ALL_KEY, False)
+
+
+def build_overview_summary_html(metrics_by_series, inception_date, latest_date):
+    """Overview headline, lede, data date and four tiles, since inception."""
+    ae = metrics_by_series.get("AsymEdge") or {}
+    if not ae or not _ps_finite(ae.get("Total Return")):
+        return '<div class="ae-hero"><p class="ae-hero-lede">Not enough data yet to summarize the track record.</p></div>'
+    bench = metrics_by_series.get(PRIMARY_BENCHMARK) or {}
+    spx = metrics_by_series.get("S&P 500") or {}
+    tr = float(ae["Total Return"])
+    headline = f"{'Up' if tr >= 0 else 'Down'} {abs(tr) * 100:.1f}% since {pd.Timestamp(inception_date):%B %Y}"
+    against = []
+    if _ps_finite(bench.get("Total Return")):
+        against.append(f"{_fmt_pct(float(bench['Total Return']) * 100, 1, signed=False)} for the "
+                       f"{_esc(series_label(PRIMARY_BENCHMARK))} portfolio")
+    if _ps_finite(spx.get("Total Return")):
+        against.append(f"{_fmt_pct(float(spx['Total Return']) * 100, 1, signed=False)} for the S&amp;P 500")
+    lede = (f'<p class="ae-hero-lede">Against {" and ".join(against)} over the same period.</p>'
+            if against else "")
+    tiles = []
+    for label, key, fmt, better, style, hover in OVERVIEW_TILES:
+        chip = _ps_chip(ae.get(key), bench.get(key), fmt, better, style) if bench else ""
+        bench_text = (f'<span>{_esc(series_label(PRIMARY_BENCHMARK))} {_ps_value(bench.get(key), fmt)}</span>'
+                      if bench else "")
+        tiles.append(f'<div class="ae-tile" title="{_esc(hover)}"><p class="ae-tile-label">{_esc(label)}</p>'
+                     f'<p class="ae-tile-value">{_ps_value(ae.get(key), fmt)}</p>'
+                     f'<div class="ae-tile-foot">{bench_text}{chip}</div></div>')
+    return ('<div class="ae-hero">'
+            f'<p class="ae-hero-eyebrow">Live Fidelity account since {_long_date(inception_date)}</p>'
+            f'<div class="ae-hero-title" role="heading" aria-level="1">{headline}</div>'
+            f'{lede}'
+            f'<p class="ae-hero-status"><span class="ae-dot" aria-hidden="true"></span>'
+            f'Data through {_long_date(latest_date)}</p>'
+            f'<div class="ae-tiles">{"".join(tiles)}</div></div>')
+
+
+def render_overview_summary(ctx):
+    """The Overview's headline and tiles, from the same since-inception metrics
+    the Performance Summary table shows by default."""
+    latest_date, inception_date, combined = ctx.latest_date, ctx.inception_date, ctx.combined
+    rf_monthly = load_bil_data(inception_date.strftime("%Y-%m-%d"), latest_date.strftime("%Y-%m-%d"))
+    metrics = {}
+    for name in SERIES_ORDER:
+        if name in combined.columns:
+            metrics[name] = compute_summary_metrics(
+                combined[name], rf_monthly=rf_monthly,
+                start_date=pd.Timestamp(inception_date.date()), end_date=pd.Timestamp(latest_date.date()),
+            )
+    st.markdown(build_overview_summary_html(metrics, inception_date, latest_date), unsafe_allow_html=True)
+
+
+def render_explore_links(ctx):
+    """Explore the dashboard: one row per page with its sections and an Open link."""
+    pages = {page.url_path: page for page in getattr(ctx, "pages", [])}
+    hger_held = _hger_is_held(ctx.current_alloc_rows)
+    st.markdown('<div class="ae-explore-title" role="heading" aria-level="2">Explore the dashboard</div>',
+                unsafe_allow_html=True)
+    with st.container(key="ae_explore", gap=None):
+        for slug, sections in EXPLORE_PAGES:
+            page = pages.get(slug)
+            if page is None:
+                continue
+            labels = [label for anchor, label in sections if anchor != "hger" or hger_held]
+            with st.container(key=f"ae_explore_{slug}", horizontal=True, vertical_alignment="center",
+                              gap="medium"):
+                st.markdown(f'<span class="ae-explore-name">{_esc(page.title)}</span>',
+                            unsafe_allow_html=True, width=150)
+                st.markdown(f'<span class="ae-explore-secs">{_esc(", ".join(labels))}</span>',
+                            unsafe_allow_html=True, width="stretch")
+                st.page_link(page, label="Open →")
+
+
 # ---------- Page chrome ----------
 # The menu bar, page titles, and the On this page row. The pages call the
 # section functions above; dividers sit where they sit on the old single page.
@@ -11462,11 +12121,17 @@ def section_anchor(anchor_id):
 
 def page_overview():
     ctx = AE_CTX
+    render_overview_summary(ctx)
+
     render_portfolio_growth_section(ctx)
 
     st.divider()
 
     render_current_allocation_section(ctx)
+
+    st.divider()
+
+    render_explore_links(ctx)
 
 
 PERFORMANCE_SECTIONS = [
@@ -11559,18 +12224,21 @@ def page_diversification():
     _render_guarded(LT_SECTION_TITLE, render_lookthrough_section, ctx.holdings_for_alloc)
 
 
+HOLDINGS_SECTIONS = [
+    ("current", "Current Allocation"),
+    ("hger", "What HGER Holds"),   # shown only while HGER is held
+    ("live-drift", "Live Position Drift"),
+    ("next", "Next Allocation"),
+    ("drift", "Allocation Drift"),
+    ("history", "Asset Allocation Over Time"),
+    ("rebalances", "Rebalance Log"),
+]
+
+
 def page_holdings():
     ctx = AE_CTX
     hger_held = _hger_is_held(ctx.current_alloc_rows)
-    render_page_header("holdings", [
-        ("current", "Current Allocation"),
-        *([("hger", "What HGER Holds")] if hger_held else []),
-        ("live-drift", "Live Position Drift"),
-        ("next", "Next Allocation"),
-        ("drift", "Allocation Drift"),
-        ("history", "Asset Allocation Over Time"),
-        ("rebalances", "Rebalance Log"),
-    ])
+    render_page_header("holdings", [s for s in HOLDINGS_SECTIONS if s[0] != "hger" or hger_held])
 
     section_anchor("current")
     render_current_allocation_section(ctx)
@@ -11616,6 +12284,22 @@ def page_markets():
     render_total_return_section(ctx)
 
 
+MARKETS_SECTIONS = [
+    ("universe", "Asset Universe"),
+    ("asset-classes", "Asset Class Returns"),
+    ("total-return", "Total Return Comparison"),
+]
+
+# Explore the dashboard (Overview): each page and what is on it.
+EXPLORE_PAGES = [
+    ("performance", PERFORMANCE_SECTIONS),
+    ("risk", RISK_SECTIONS),
+    ("diversification", DIVERSIFICATION_SECTIONS),
+    ("holdings", HOLDINGS_SECTIONS),
+    ("markets", MARKETS_SECTIONS),
+]
+
+
 def build_pages():
     """The six pages, in menu order. Overview is the default page (the bare
     URL); the others are reachable directly at their URL paths."""
@@ -11657,15 +12341,18 @@ def main():
         st.session_state["_dates_reset_version"] = DATE_RESET_VERSION
 
     AE_CTX = build_shared_context()
+    AE_CTX.pages = pages
     portfolio_df, latest_date = AE_CTX.portfolio_df, AE_CTX.latest_date
 
-    latest_str = latest_date.strftime("%B %d, %Y")
-    st.markdown(
-        f'<p class="brand-sub">Data through {latest_str} &nbsp;&middot;&nbsp; '
-        f'Refreshed {format_clock(local_now())} MT &nbsp;&middot;&nbsp; '
-        f'<span style="color:#9CA3AF; font-size:0.78rem;">Build v2026-05-27c</span></p>',
-        unsafe_allow_html=True,
-    )
+    # The Overview's headline shows the data date, so the line is left off there.
+    if current_page.url_path:
+        latest_str = latest_date.strftime("%B %d, %Y")
+        st.markdown(
+            f'<p class="brand-sub">Data through {latest_str} &nbsp;&middot;&nbsp; '
+            f'Refreshed {format_clock(local_now())} MT &nbsp;&middot;&nbsp; '
+            f'<span style="color:#9CA3AF; font-size:0.78rem;">Build v2026-05-27c</span></p>',
+            unsafe_allow_html=True,
+        )
 
     # Partial-month update expander (collapsed by default). Placed near the
     # top of the page so the workflow instructions sit next to the freshness
