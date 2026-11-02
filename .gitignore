@@ -1,4 +1,5 @@
 __pycache__/
 *.pyc
 *.bak*
-
+# ETF Screener data stays on the PC (Watchlist verdicts, backtest results)
+etf_screener/

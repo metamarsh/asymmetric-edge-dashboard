@@ -12130,6 +12130,11 @@ PAGE_HEADERS = {
         "The funds the strategy chooses from, how each asset class has done, and a "
         "tool to compare any ticker.",
     ),
+    "screener": (
+        "ETF Screener",
+        "Every US-listed ETF checked against the ETF Scouting gates and fit signals, "
+        "with each threshold adjustable. Studio only.",
+    ),
 }
 
 
@@ -12157,7 +12162,7 @@ def render_top_bar(pages, current_page):
             '<span style="font-weight:400">Aa 0.9% \u2212</span>'
             '<span style="font-weight:500">Aa 0.9% \u2212</span>'
             '<span style="font-weight:600">Aa 0.9% \u2212</span>'
-            '<span style="font-weight:700">Aa 0.9% \u2212</span></div>',
+            '<span style="font-weight:700">Aa 0.9% \u2212</span></div>' + _nav_fit_css(pages),
             unsafe_allow_html=True,
             width="content",
         )
@@ -12377,10 +12382,874 @@ EXPLORE_PAGES = [
 ]
 
 
-def build_pages():
+# ---------- ETF Screener (Studio only, added November 2, 2026) ----------
+# A working page for ETF scouting, shown only in Studio mode. Once a quarter,
+# right after the ETF Scouting universe pull and screen,
+# etf_screener\make_etf_screener.py (beside app.py) writes etf_screener.csv
+# from the newest Universe Data files and Watchlist.csv, plus a Yahoo pull of
+# expense ratio, AUM, issuer, category and inception. The page only reads that
+# file, so nothing is fetched when it opens. The file stays on the PC: the
+# deploy repo is public and the file holds backtest results and Watchlist
+# verdicts, so on Streamlit Community Cloud the page says where the data
+# lives. Default thresholds follow ETF Scouting Method.md (October 31, 2026).
+
+SCR_FOLDER = "etf_screener"
+SCR_DATA_FILE = "etf_screener.csv"
+SCR_META_FILE = "etf_screener_meta.json"
+SCR_EQUITY_INCUMBENTS = ["QQQ", "IWM", "DXJ", "EMXC"]   # Universe Screen.py EQUITY_BASKET
+SCR_WATCH_STATUSES = ["Incumbent", "Shadow", "Alternate", "Open question", "Watch", "Rejected"]
+SCR_STATUS_RANK = {s: i for i, s in enumerate(SCR_WATCH_STATUSES + ["Reference"])}
+SCR_ASSET_CLASSES = ["Equity", "Bonds and credit", "Commodities", "Currency", "Crypto",
+                     "Alternatives", "Allocation", "Leveraged or inverse"]
+SCR_ANY_ER = 99.0
+SCR_DV_OPTIONS = [0.0, 1e6, 2e6, 5e6, 10e6, 25e6, 50e6, 100e6]
+SCR_PX_OPTIONS = [0.0, 5.0, 8.0, 10.0, 15.0, 20.0, 25.0, 50.0]
+SCR_AUM_OPTIONS = [0.0, 25e6, 50e6, 100e6, 250e6, 500e6, 1e9, 5e9]
+SCR_ER_OPTIONS = [0.10, 0.20, 0.35, 0.50, 0.75, 1.00, 1.50, SCR_ANY_ER]
+SCR_HIST_OPTIONS = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 5.75, 6.0, 7.0, 8.0, 10.0, 12.0, 15.0, 20.0, 25.0]
+SCR_CORR_OPTIONS = [round(0.50 + 0.01 * i, 2) for i in range(51)]      # 1.00 means off
+SCR_QT_MONTH_OPTIONS = [36, 48, 60, 84, 120, 180, 240]
+
+# The method's hard gates (ETF Scouting Method.md): $5M a day, $10 a share,
+# $100M in assets, 60 test months (about 5.75 years of prices), correlation
+# below 0.90 with every incumbent and, for equity-like funds, below the most
+# similar pair of equity incumbents (QQQ and IWM, 0.79); no leverage above 1x,
+# no exchange-traded notes, no K-1. Inverse funds are allowed but flagged.
+SCR_GATES_METHOD = {
+    "scr_dv": 5e6, "scr_px": 10.0, "scr_aum": 100e6, "scr_er": SCR_ANY_ER, "scr_hist": 5.75,
+    "scr_corr": 0.90, "scr_eqcorr": 0.79, "scr_ex_lev": True, "scr_ex_etn": True,
+    "scr_ex_k1": True, "scr_ex_inv": False,
+}
+SCR_GATES_OFF = {
+    "scr_dv": 0.0, "scr_px": 0.0, "scr_aum": 0.0, "scr_er": SCR_ANY_ER, "scr_hist": 0.0,
+    "scr_corr": 1.0, "scr_eqcorr": 1.0, "scr_ex_lev": False, "scr_ex_etn": False,
+    "scr_ex_k1": False, "scr_ex_inv": False,
+}
+SCR_SIGNALS_OFF = {
+    "scr_fit_trend": False, "scr_ic": 0.05, "scr_fit_indep": False, "scr_indep_max": 0.70,
+    "scr_fit_down": False, "scr_qt": False, "scr_qt_months": 60, "scr_only_wl": False,
+    "scr_near": False,
+}
+SCR_PRESETS = {
+    "Hard gates": {**SCR_GATES_METHOD, **SCR_SIGNALS_OFF},
+    "Gates + fit signals": {**SCR_GATES_METHOD, **SCR_SIGNALS_OFF,
+                            "scr_fit_trend": True, "scr_fit_indep": True},
+    "Quick-test passes": {**SCR_GATES_OFF, **SCR_SIGNALS_OFF, "scr_dv": 5e6, "scr_ex_lev": True,
+                          "scr_qt": True},
+    "Down-market helpers": {**SCR_GATES_METHOD, **SCR_SIGNALS_OFF, "scr_fit_down": True},
+    "Basket and Watchlist": {**SCR_GATES_OFF, **SCR_SIGNALS_OFF, "scr_only_wl": True},
+    "Everything": {**SCR_GATES_OFF, **SCR_SIGNALS_OFF},
+}
+SCR_PRESET_SORT = {
+    "Hard gates": ("trend_ic", False), "Gates + fit signals": ("trend_ic", False),
+    "Quick-test passes": ("d_sortino", False), "Down-market helpers": ("losing_excess", False),
+    "Basket and Watchlist": ("status_rank", True), "Everything": ("dollar_vol", False),
+}
+SCR_DEFAULTS = {"scr_preset": "Hard gates", **SCR_PRESETS["Hard gates"], "scr_search": "",
+                "scr_classes": [], "scr_cats": [], "scr_placement": "Any", "scr_view": "Key facts"}
+
+SCR_VIEWS = {
+    "Key facts": ["ticker", "name", "category", "expense_ratio", "aum", "dollar_vol", "history_years",
+                  "trend_ic", "most_similar_txt", "status", "issuer"],
+    "Gates": ["ticker", "name", "dollar_vol", "price", "aum", "aum_change_pct", "expense_ratio",
+              "history_years", "trading_since_dt", "most_similar_txt", "flags", "tax_note"],
+    "Fit signals": ["ticker", "name", "placement_txt", "trend_ic", "timing_gain", "most_similar_txt",
+                    "corr_strategy", "corr_spy", "losing_excess_pct", "both_down_excess_pct",
+                    "bear_excess_pct", "status"],
+    "Quick test": ["ticker", "name", "placement_txt", "test_start", "test_months", "d_sortino",
+                   "d_sortino_h1", "d_sortino_h2", "d_cagr_pts", "d_mdd_pts", "held_pct_pct",
+                   "avg_w_held_pct", "quick_test_note"],
+    "Returns": ["ticker", "name", "first_price_month", "cagr_pct", "vol_pct", "sortino",
+                "max_dd_pct", "beta_spy", "corr_spy"],
+}
+
+SCR_TEXT_COLS = ["ticker", "name", "issuer", "category", "asset_class", "exchange", "status",
+                 "tax_note", "most_similar", "placement", "test_start", "first_price_month",
+                 "quick_test_note", "wl_driver", "wl_verdict", "wl_reopen", "wl_shadow_start",
+                 "wl_last_reviewed", "trading_since", "fund_inception", "first_trade", "price_date",
+                 "aum_prev_date", "details_as_of"]
+SCR_BOOL_COLS = ["leveraged", "inverse", "etn", "k1_likely", "above_floor", "listed"]
+SCR_NUM_COLS = ["expense_ratio", "aum", "aum_prev", "aum_change", "price", "dollar_vol",
+                "history_years", "price_months", "cagr", "vol", "sortino", "max_dd", "corr_spy",
+                "beta_spy", "corr_strategy", "max_corr", "losing_excess", "losing_n",
+                "both_down_excess", "both_down_n", "bear_excess", "bear_n", "spy_bad_excess",
+                "spy_bad_n", "trend_ic", "timing_gain", "trend_spread", "trend_on_frac",
+                "test_months", "d_sortino", "d_sortino_h1", "d_sortino_h2", "d_cagr", "d_mdd",
+                "held_pct", "avg_w_held", "eq_selected_pct"]
+
+SCR_CSS = """
+<style>
+    .st-key-scr_preset button, .st-key-scr_view button {
+        min-height: 32px;
+        padding: 0 12px !important;
+        border: 1px solid #DDDDE3 !important;
+        border-radius: 8px !important;
+        background: #ffffff !important;
+    }
+    .st-key-scr_preset button p, .st-key-scr_view button p {
+        font-size: 13px;
+        font-weight: 500;
+        color: #555566;
+    }
+    .st-key-scr_preset button[aria-checked="true"],
+    .st-key-scr_preset button[data-testid="stBaseButton-pillsActive"],
+    .st-key-scr_view button[aria-checked="true"],
+    .st-key-scr_view button[data-testid="stBaseButton-pillsActive"] {
+        border-color: #3A0CA3 !important;
+        background: #F0EDF8 !important;
+    }
+    .st-key-scr_preset button[aria-checked="true"] p,
+    .st-key-scr_preset button[data-testid="stBaseButton-pillsActive"] p,
+    .st-key-scr_view button[aria-checked="true"] p,
+    .st-key-scr_view button[data-testid="stBaseButton-pillsActive"] p {
+        font-weight: 600;
+        color: #3A0CA3;
+    }
+    [data-testid="stMarkdownContainer"] p.ae-scr-dates {
+        margin: -0.75rem 0 0.25rem 0;
+        font-size: 13px;
+        line-height: 1.6;
+        color: #666677;
+    }
+    [data-testid="stMarkdownContainer"] p.ae-scr-active {
+        margin: 0;
+        font-size: 13px;
+        line-height: 1.6;
+        color: #555566;
+    }
+    [data-testid="stMarkdownContainer"] p.ae-scr-count {
+        margin: 0.5rem 0 0 0;
+        font-size: 15px;
+        color: #2E2E38;
+    }
+    p.ae-scr-count b {
+        color: #3A0CA3;
+        font-variant-numeric: tabular-nums;
+    }
+    .ae-scr-card {
+        margin-top: 4px;
+        padding: 20px 22px;
+        border: 1px solid #E5E7EB;
+        border-radius: 12px;
+        font-family: 'DM Sans', sans-serif;
+    }
+    .ae-scr-card-title {
+        font-size: 20px;
+        font-weight: 700;
+        line-height: 1.3;
+        color: #2E2E38;
+    }
+    .ae-scr-card-title span.ae-scr-tk {
+        color: #3A0CA3;
+        margin-right: 8px;
+    }
+    [data-testid="stMarkdownContainer"] .ae-scr-card p {
+        margin: 6px 0 0 0;
+        font-size: 14px;
+        line-height: 1.55;
+        color: #555566;
+    }
+    .ae-scr-chip {
+        display: inline-block;
+        margin: 6px 6px 0 0;
+        padding: 2px 9px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+        background: #F3F4F6;
+        color: #555566;
+    }
+    .ae-scr-chip-purple { background: #F0EDF8; color: #3A0CA3; }
+    .ae-scr-chip-red { background: #FBEAE7; color: #B03224; }
+    .ae-scr-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr));
+        gap: 18px 28px;
+        margin-top: 16px;
+    }
+    .ae-scr-sec {
+        margin-bottom: 6px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #666677;
+    }
+    .ae-scr-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 5px 0;
+        border-bottom: 1px solid #EEEEF2;
+        font-size: 14px;
+    }
+    .ae-scr-row .ae-scr-k { color: #555566; }
+    .ae-scr-row .ae-scr-v {
+        color: #2E2E38;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+    }
+    .ae-scr-pass { color: #17703C; font-weight: 700; }
+    .ae-scr-fail { color: #B03224; font-weight: 700; }
+    .ae-scr-na { color: #9CA3AF; }
+    .ae-scr-wl {
+        margin-top: 16px;
+        padding: 14px 16px;
+        border-radius: 10px;
+        background: #F7F5FC;
+    }
+    .ae-scr-links a, .ae-scr-links a:visited {
+        margin-right: 16px;
+        font-size: 14px;
+        font-weight: 500;
+        color: #3A0CA3;
+        text-decoration: none;
+    }
+</style>
+"""
+
+
+# Studio mode adds a seventh menu link (Screener). At full width it would push the
+# links under the wordmark, so the menu links get 8 px of side padding instead of 12
+# when there are more than six. The public six-link menu is unchanged.
+SCR_NAV_FIT_CSS = (
+    "<style>.st-key-ae_nav [data-testid='stPageLink-NavLink'] {padding: 0 8px;} "
+    "@media (max-width: 1100px) {.st-key-ae_nav {left: -8px;}}</style>"
+)
+
+
+def _nav_fit_css(pages):
+    return SCR_NAV_FIT_CSS if len(pages) > 6 else ""
+
+
+def _scr_paths():
+    folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), SCR_FOLDER)
+    return os.path.join(folder, SCR_DATA_FILE), os.path.join(folder, SCR_META_FILE)
+
+
+@st.cache_data(show_spinner=False)
+def load_screener_data(path, mtime):
+    """etf_screener.csv, typed, with the display columns the table needs.
+    mtime is part of the cache key, so a new quarterly file loads at once."""
+    df = pd.read_csv(path)
+    if "trading_since" not in df.columns and "inception" in df.columns:
+        df["trading_since"] = df["inception"]
+    for col in SCR_TEXT_COLS:
+        df[col] = df[col].fillna("").astype(str) if col in df.columns else ""
+    for col in SCR_BOOL_COLS:
+        df[col] = df[col].astype(str).str.lower().eq("true") if col in df.columns else False
+    for col in SCR_NUM_COLS:
+        df[col] = pd.to_numeric(df[col], errors="coerce") if col in df.columns else np.nan
+    eq_cols = [f"corr_{t}" for t in SCR_EQUITY_INCUMBENTS if f"corr_{t}" in df.columns]
+    df["eq_max_corr"] = df[eq_cols].apply(pd.to_numeric, errors="coerce").max(axis=1) if eq_cols else np.nan
+    df["trading_since_dt"] = pd.to_datetime(df["trading_since"], errors="coerce")
+    df["flags"] = [", ".join(f for f, on in (("Leveraged", lev), ("Inverse", inv), ("ETN", etn)) if on)
+                   for lev, inv, etn in zip(df["leveraged"], df["inverse"], df["etn"])]
+    df["most_similar_txt"] = [f"{m} {c:.2f}" if m and pd.notna(c) else ""
+                              for m, c in zip(df["most_similar"], df["max_corr"])]
+    df["placement_txt"] = df["placement"].map({"equity": "Equity-like", "fixed": "Fixed"}).fillna("")
+    for src, dst in (("aum_change", "aum_change_pct"), ("losing_excess", "losing_excess_pct"),
+                     ("both_down_excess", "both_down_excess_pct"), ("bear_excess", "bear_excess_pct"),
+                     ("d_cagr", "d_cagr_pts"), ("d_mdd", "d_mdd_pts"), ("held_pct", "held_pct_pct"),
+                     ("avg_w_held", "avg_w_held_pct"), ("cagr", "cagr_pct"), ("vol", "vol_pct"),
+                     ("max_dd", "max_dd_pct")):
+        df[dst] = df[src] * 100
+    df["status_rank"] = df["status"].map(SCR_STATUS_RANK).fillna(99)
+    return df
+
+
+def _scr_load_meta(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+def _scr_money(v):
+    """$1.2B, $350M, $5M: compact dollars for labels and the detail card."""
+    if v is None or pd.isna(v):
+        return "n/a"
+    v = float(v)
+    for div, suffix in ((1e12, "T"), (1e9, "B"), (1e6, "M"), (1e3, "K")):
+        if abs(v) >= div:
+            x = v / div
+            return f"${x:.1f}{suffix}".replace(".0" + suffix, suffix) if x < 100 else f"${x:,.0f}{suffix}"
+    return f"${v:,.0f}"
+
+
+def _scr_minus(text):
+    return str(text).replace("-", "−")
+
+
+def _scr_num(v, fmt="{:.2f}", signed=False):
+    if v is None or pd.isna(v):
+        return "n/a"
+    text = ("{:+" + fmt[2:]).format(v) if signed else fmt.format(v)
+    return _scr_minus(text)
+
+
+def _scr_dv_label(v):
+    return "Off" if not v else _scr_money(v)
+
+
+def _scr_px_label(v):
+    return "Off" if not v else f"${v:g}"
+
+
+def _scr_er_label(v):
+    return "Off" if v >= SCR_ANY_ER else f"{v:.2f}%"
+
+
+def _scr_hist_label(v):
+    return "Off" if not v else (f"{v:g} yr" if v == 1 else f"{v:g} yrs")
+
+
+def _scr_corr_label(v):
+    return "Off" if v >= 1.0 else f"{v:.2f}"
+
+
+def _scr_init_state(df):
+    """Widget values for this visit: kept from the last visit to the page
+    (stored outside the widgets, which Streamlit clears on a page change),
+    otherwise the Hard gates preset."""
+    saved = st.session_state.get("_scr_saved", {})
+    classes = set(df["asset_class"].unique())
+    cats = set(df["category"].unique())
+    for key, default in SCR_DEFAULTS.items():
+        if key in st.session_state:
+            continue
+        value = saved.get(key, default)
+        if key == "scr_classes":
+            value = [v for v in value if v in classes]
+        elif key == "scr_cats":
+            value = [v for v in value if v in cats]
+        st.session_state[key] = value
+
+
+def _scr_apply_preset():
+    name = st.session_state.get("scr_preset")
+    for key, value in SCR_PRESETS.get(name, {}).items():
+        st.session_state[key] = value
+
+
+def _scr_save_state():
+    st.session_state["_scr_saved"] = {k: st.session_state.get(k) for k in SCR_DEFAULTS}
+
+
+def _scr_gate_checks(df, s):
+    """The active hard gates as {label: (passes, no_data)} boolean Series.
+    A fund with no data for an active gate fails it."""
+    checks = {}
+    none = pd.Series(False, index=df.index)
+
+    def add(label, passes, no_data=None):
+        checks[label] = (passes.fillna(False).astype(bool), none if no_data is None else no_data)
+
+    if s["scr_dv"] > 0:
+        add("Dollar volume", df["dollar_vol"] >= s["scr_dv"], df["dollar_vol"].isna())
+    if s["scr_px"] > 0:
+        add("Price", df["price"] >= s["scr_px"], df["price"].isna())
+    if s["scr_aum"] > 0:
+        add("AUM", df["aum"] >= s["scr_aum"], df["aum"].isna())
+    if s["scr_er"] < SCR_ANY_ER:
+        add("Expense ratio", df["expense_ratio"] <= s["scr_er"], df["expense_ratio"].isna())
+    if s["scr_hist"] > 0:
+        add("History", df["history_years"] >= s["scr_hist"], df["history_years"].isna())
+    if s["scr_corr"] < 1.0 or s["scr_eqcorr"] < 1.0:
+        passes = pd.Series(True, index=df.index)
+        no_data = pd.Series(False, index=df.index)
+        if s["scr_corr"] < 1.0:
+            passes &= df["max_corr"] < s["scr_corr"]
+            no_data |= df["max_corr"].isna()
+        if s["scr_eqcorr"] < 1.0:
+            passes &= (df["placement"] != "equity") | (df["eq_max_corr"] < s["scr_eqcorr"])
+        add("Copy of an incumbent", passes, no_data)
+    if s["scr_ex_lev"]:
+        add("Leveraged", ~df["leveraged"])
+    if s["scr_ex_etn"]:
+        add("ETN", ~df["etn"])
+    if s["scr_ex_k1"]:
+        add("Likely K-1", ~df["k1_likely"])
+    if s["scr_ex_inv"]:
+        add("Inverse", ~df["inverse"])
+    return checks
+
+
+def _scr_signal_mask(df, s):
+    mask = pd.Series(True, index=df.index)
+    if s["scr_fit_trend"]:
+        mask &= (df["trend_ic"] >= s["scr_ic"]) & (df["timing_gain"] > 0)
+    if s["scr_fit_indep"]:
+        mask &= df["max_corr"] <= s["scr_indep_max"]
+    if s["scr_fit_down"]:
+        mask &= (df["losing_excess"] > 0) & (df["both_down_excess"] > 0)
+    if s["scr_qt"]:
+        # Stage 3 as Screen Lookup.py applies it: fixed-basket funds must also sit at or
+        # below the independence limit with every incumbent.
+        mask &= ((df["d_sortino"] > 0) & (df["d_sortino_h1"] > 0) & (df["d_sortino_h2"] > 0)
+                 & (df["test_months"] >= s["scr_qt_months"])
+                 & ((df["placement"] != "fixed") | (df["max_corr"] <= s["scr_indep_max"])))
+    return mask.fillna(False).astype(bool)
+
+
+def _scr_browse_mask(df, s):
+    mask = pd.Series(True, index=df.index)
+    query = str(s.get("scr_search") or "").strip().lower()
+    if query:
+        hay = (df["ticker"] + " " + df["name"] + " " + df["issuer"]).str.lower()
+        mask &= hay.str.contains(query, regex=False)
+    if s.get("scr_classes"):
+        mask &= df["asset_class"].isin(s["scr_classes"])
+    if s.get("scr_cats"):
+        mask &= df["category"].isin(s["scr_cats"])
+    placement = s.get("scr_placement", "Any")
+    if placement == "Equity-like":
+        mask &= df["placement"] == "equity"
+    elif placement == "Fixed":
+        mask &= df["placement"] == "fixed"
+    if s.get("scr_only_wl"):
+        mask &= df["status"].isin(SCR_WATCH_STATUSES)
+    return mask
+
+
+def _scr_active_summary(s):
+    parts = []
+    if s["scr_dv"] > 0:
+        parts.append(f"dollar volume {_scr_dv_label(s['scr_dv'])}+ a day")
+    if s["scr_px"] > 0:
+        parts.append(f"price {_scr_px_label(s['scr_px'])}+")
+    if s["scr_aum"] > 0:
+        parts.append(f"AUM {_scr_money(s['scr_aum'])}+")
+    if s["scr_er"] < SCR_ANY_ER:
+        parts.append(f"expense ratio {s['scr_er']:.2f}% or less")
+    if s["scr_hist"] > 0:
+        parts.append(f"{s['scr_hist']:g}+ years of history")
+    if s["scr_corr"] < 1.0:
+        corr = f"correlation below {s['scr_corr']:.2f} with every incumbent"
+        if s["scr_eqcorr"] < 1.0:
+            corr += f" ({s['scr_eqcorr']:.2f} for equity-like funds)"
+        parts.append(corr)
+    elif s["scr_eqcorr"] < 1.0:
+        parts.append(f"equity-like funds below {s['scr_eqcorr']:.2f} with the equity incumbents")
+    out = [k for k, on in (("leveraged funds", s["scr_ex_lev"]), ("exchange-traded notes", s["scr_ex_etn"]),
+                           ("likely K-1s", s["scr_ex_k1"]), ("inverse funds", s["scr_ex_inv"])) if on]
+    if out:
+        parts.append("no " + (", ".join(out[:-1]) + " or " + out[-1] if len(out) > 1 else out[0]))
+    if s["scr_fit_trend"]:
+        parts.append(f"trend IC {s['scr_ic']:.2f}+ with a positive timing gain")
+    if s["scr_fit_indep"]:
+        parts.append(f"most similar incumbent at or below {s['scr_indep_max']:.2f}")
+    if s["scr_fit_down"]:
+        parts.append("above T-bills when the strategy is hurting")
+    if s["scr_qt"]:
+        parts.append(f"stage 3 pass with {s['scr_qt_months']}+ test months (fixed-basket funds at or "
+                     f"below {s['scr_indep_max']:.2f})")
+    if s.get("scr_only_wl"):
+        parts.append("basket and Watchlist only")
+    if not parts:
+        return "No criteria set: every fund in the file is shown."
+    text = "; ".join(parts)
+    return "Criteria: " + text[0].lower() + text[1:] + ("." if not text.endswith(".") else "")
+
+
+def _scr_dates_html(meta):
+    if not meta:
+        return ""
+    bits = []
+    if meta.get("fund_facts_as_of"):
+        bits.append(f"Expense ratio, AUM, issuer and category from Yahoo Finance as of "
+                    f"{_long_date(meta['fund_facts_as_of'])}")
+    if meta.get("price_date"):
+        bits.append(f"price and dollar volume as of {_long_date(meta['price_date'])}")
+    if meta.get("screen_date"):
+        end = meta.get("screen_window_end")
+        end_txt = f", windows ending {pd.Timestamp(end + '-01'):%B %Y}" if end else ""
+        bits.append(f"fit statistics and quick test from the {_long_date(meta['screen_date'])} "
+                    f"Universe Screen{end_txt}")
+    return f'<p class="ae-scr-dates">{_esc("; ".join(bits))}.</p>' if bits else ""
+
+
+def _scr_column_config():
+    cc = st.column_config
+    return {
+        "ticker": cc.TextColumn("Ticker", pinned=True, width="small"),
+        "name": cc.TextColumn("Fund", width="medium"),
+        "issuer": cc.TextColumn("Issuer"),
+        "category": cc.TextColumn("Category"),
+        "status": cc.TextColumn("Status", help="Incumbent, or the fund's status in Watchlist.csv"),
+        "expense_ratio": cc.NumberColumn("Expense ratio", format="%.2f%%"),
+        "aum": cc.NumberColumn("AUM ($)", format="compact",
+                               help="Net assets from Yahoo Finance. Vanguard ETFs count every share class."),
+        "aum_change_pct": cc.NumberColumn("AUM change", format="%+.1f%%",
+                                          help="Since the last quarterly snapshot at least 45 days old"),
+        "dollar_vol": cc.NumberColumn("Daily $ volume", format="compact",
+                                      help="Median daily dollar volume over the last 63 trading days"),
+        "price": cc.NumberColumn("Price", format="dollar"),
+        "history_years": cc.NumberColumn("History (yrs)", format="%.1f",
+                                         help="Years of the fund's own price record (60 test months need about 5.75)"),
+        "trading_since_dt": cc.DateColumn("Trading since", format="MMM YYYY"),
+        "most_similar_txt": cc.TextColumn("Most similar incumbent",
+                                          help="Highest monthly correlation with an incumbent, full overlap"),
+        "flags": cc.TextColumn("Flags"),
+        "tax_note": cc.TextColumn("Tax", width="medium"),
+        "fails": cc.TextColumn("Fails", help="Active gates the fund misses (near misses only)"),
+        "placement_txt": cc.TextColumn("Placement",
+                                       help="Equity-like funds join the equity sub-basket; the rest the fixed basket"),
+        "trend_ic": cc.NumberColumn("Trend IC", format="%.2f",
+                                    help="Rank correlation of the 2/8 signal (vs BIL) with next month's excess return"),
+        "timing_gain": cc.NumberColumn("Timing gain", format="%+.2f",
+                                       help="Sortino of hold-it-or-hold-BIL on the signal, minus buy-and-hold"),
+        "corr_strategy": cc.NumberColumn("Corr with strategy", format="%.2f"),
+        "corr_spy": cc.NumberColumn("Corr with S&P 500", format="%.2f"),
+        "losing_excess_pct": cc.NumberColumn("Strategy's losing months", format="%+.2f%%",
+                                             help="Average monthly return above T-bills when the strategy lost over 1%"),
+        "both_down_excess_pct": cc.NumberColumn("Stocks and bonds down", format="%+.2f%%",
+                                                help="Average monthly return above T-bills when SPY and TLT both fell"),
+        "bear_excess_pct": cc.NumberColumn("S&P 500 bear market", format="%+.2f%%",
+                                           help="Average monthly return above T-bills while SPY was 15%+ below its high"),
+        "test_start": cc.TextColumn("Test from"),
+        "test_months": cc.NumberColumn("Test months", format="%d"),
+        "d_sortino": cc.NumberColumn("Sortino change", format="%+.2f",
+                                     help="Standing configuration plus the fund, minus the standing configuration"),
+        "d_sortino_h1": cc.NumberColumn("First half", format="%+.2f"),
+        "d_sortino_h2": cc.NumberColumn("Second half", format="%+.2f"),
+        "d_cagr_pts": cc.NumberColumn("CAGR change (pts)", format="%+.2f"),
+        "d_mdd_pts": cc.NumberColumn("Max drawdown change (pts)", format="%+.2f",
+                                     help="Positive means a shallower drawdown"),
+        "held_pct_pct": cc.NumberColumn("Months held", format="%.0f%%"),
+        "avg_w_held_pct": cc.NumberColumn("Weight when held", format="%.0f%%"),
+        "quick_test_note": cc.TextColumn("Quick test", width="medium"),
+        "first_price_month": cc.TextColumn("Prices from"),
+        "cagr_pct": cc.NumberColumn("CAGR", format="%.1f%%"),
+        "vol_pct": cc.NumberColumn("Volatility", format="%.1f%%"),
+        "sortino": cc.NumberColumn("Sortino", format="%.2f"),
+        "max_dd_pct": cc.NumberColumn("Max drawdown", format="%.1f%%"),
+        "beta_spy": cc.NumberColumn("Beta to S&P 500", format="%.2f"),
+    }
+
+
+def _scr_mark(check):
+    """Pass/fail mark for the detail card: check is True, False or None."""
+    if check is None:
+        return ""
+    return ('<span class="ae-scr-pass">✓</span> ' if check
+            else '<span class="ae-scr-fail">✗</span> ')
+
+
+def _scr_row(label, value, check=None):
+    return (f'<div class="ae-scr-row"><span class="ae-scr-k">{_esc(label)}</span>'
+            f'<span class="ae-scr-v">{_scr_mark(check)}{value}</span></div>')
+
+
+def _scr_detail_html(r, s, incumbents):
+    tk = r["ticker"]
+    chips = []
+    if r["status"]:
+        chips.append(f'<span class="ae-scr-chip ae-scr-chip-purple">{_esc(r["status"])}</span>')
+    if r["asset_class"]:
+        chips.append(f'<span class="ae-scr-chip">{_esc(r["asset_class"])}</span>')
+    for flag in [f for f in r["flags"].split(", ") if f]:
+        chips.append(f'<span class="ae-scr-chip ae-scr-chip-red">{_esc(flag)}</span>')
+    if r["k1_likely"]:
+        chips.append('<span class="ae-scr-chip ae-scr-chip-red">Likely K-1</span>')
+    sub = " · ".join(_esc(x) for x in (r["issuer"], r["category"], r["exchange"]) if x)
+    if pd.notna(r["trading_since_dt"]):
+        sub += (" · " if sub else "") + f"Trading since {r['trading_since_dt']:%B %Y}"
+    yahoo = f"https://finance.yahoo.com/quote/{tk}/"
+    etfdb = f"https://etfdb.com/etf/{tk.replace('-', '.')}/"
+    links = (f'<p class="ae-scr-links"><a href="{yahoo}" target="_blank" rel="noopener">Yahoo Finance</a>'
+             f'<a href="{etfdb}" target="_blank" rel="noopener">ETF Database</a></p>')
+
+    def gate(active, ok):
+        return (bool(ok) if not (isinstance(ok, float) and np.isnan(ok)) else False) if active else None
+
+    aum_txt = _scr_money(r["aum"])
+    if pd.notna(r["aum_change_pct"]):
+        change = _scr_num(r["aum_change_pct"], "{:.1f}", signed=True)
+        aum_txt += f" ({change}% since {r['aum_prev_date']})"
+    copy_txt = r["most_similar_txt"] or "n/a"
+    if r["placement"] == "equity" and pd.notna(r["eq_max_corr"]):
+        copy_txt += f"; equity {r['eq_max_corr']:.2f}"
+    copy_ok = None
+    if s["scr_corr"] < 1.0 or s["scr_eqcorr"] < 1.0:
+        copy_ok = True
+        if s["scr_corr"] < 1.0:
+            copy_ok = bool(pd.notna(r["max_corr"]) and r["max_corr"] < s["scr_corr"])
+        if s["scr_eqcorr"] < 1.0 and r["placement"] == "equity":
+            copy_ok = copy_ok and bool(pd.notna(r["eq_max_corr"]) and r["eq_max_corr"] < s["scr_eqcorr"])
+    structure = r["flags"] or "Plain 1x fund"
+    structure_ok = None
+    if s["scr_ex_lev"] or s["scr_ex_etn"] or s["scr_ex_inv"]:
+        structure_ok = not ((s["scr_ex_lev"] and r["leveraged"]) or (s["scr_ex_etn"] and r["etn"])
+                            or (s["scr_ex_inv"] and r["inverse"]))
+    gates = "".join([
+        _scr_row("Daily dollar volume", _scr_money(r["dollar_vol"]),
+                 gate(s["scr_dv"] > 0, r["dollar_vol"] >= s["scr_dv"] if pd.notna(r["dollar_vol"]) else False)),
+        _scr_row("Price", f"${r['price']:,.2f}" if pd.notna(r["price"]) else "n/a",
+                 gate(s["scr_px"] > 0, r["price"] >= s["scr_px"] if pd.notna(r["price"]) else False)),
+        _scr_row("AUM", _esc(aum_txt),
+                 gate(s["scr_aum"] > 0, r["aum"] >= s["scr_aum"] if pd.notna(r["aum"]) else False)),
+        _scr_row("Expense ratio", f"{r['expense_ratio']:.2f}%" if pd.notna(r["expense_ratio"]) else "n/a",
+                 gate(s["scr_er"] < SCR_ANY_ER,
+                      r["expense_ratio"] <= s["scr_er"] if pd.notna(r["expense_ratio"]) else False)),
+        _scr_row("History", f"{r['history_years']:.1f} years" if pd.notna(r["history_years"]) else "n/a",
+                 gate(s["scr_hist"] > 0,
+                      r["history_years"] >= s["scr_hist"] if pd.notna(r["history_years"]) else False)),
+        _scr_row("Most similar incumbent", _esc(copy_txt), copy_ok),
+        _scr_row("Structure", _esc(structure), structure_ok),
+        _scr_row("Tax", _esc(r["tax_note"] or "No flag (check the issuer)"),
+                 (not r["k1_likely"]) if s["scr_ex_k1"] else None),
+    ])
+    fit = "".join([
+        _scr_row("Trend IC", _scr_num(r["trend_ic"]),
+                 bool(pd.notna(r["trend_ic"]) and r["trend_ic"] >= s["scr_ic"]) if s["scr_fit_trend"] else None),
+        _scr_row("Timing gain", _scr_num(r["timing_gain"], signed=True),
+                 bool(pd.notna(r["timing_gain"]) and r["timing_gain"] > 0) if s["scr_fit_trend"] else None),
+        _scr_row("Correlation with the strategy", _scr_num(r["corr_strategy"])),
+        _scr_row("Correlation with the S&P 500", _scr_num(r["corr_spy"])),
+        _scr_row(f"Strategy's losing months ({r['losing_n']:.0f})" if pd.notna(r["losing_n"])
+                 else "Strategy's losing months",
+                 _scr_num(r["losing_excess_pct"], signed=True) + ("%" if pd.notna(r["losing_excess_pct"]) else ""),
+                 bool(pd.notna(r["losing_excess"]) and r["losing_excess"] > 0) if s["scr_fit_down"] else None),
+        _scr_row(f"Stocks and bonds down ({r['both_down_n']:.0f})" if pd.notna(r["both_down_n"])
+                 else "Stocks and bonds down",
+                 _scr_num(r["both_down_excess_pct"], signed=True) + ("%" if pd.notna(r["both_down_excess_pct"]) else ""),
+                 bool(pd.notna(r["both_down_excess"]) and r["both_down_excess"] > 0) if s["scr_fit_down"] else None),
+        _scr_row("Placement", _esc(r["placement_txt"] or "n/a")),
+    ])
+    if pd.notna(r["d_sortino"]):
+        qt = "".join([
+            _scr_row("Window", _esc(f"{r['test_start']} on, {r['test_months']:.0f} months")),
+            _scr_row("Sortino change", _scr_num(r["d_sortino"], signed=True),
+                     bool(r["d_sortino"] > 0) if s["scr_qt"] else None),
+            _scr_row("First half / second half",
+                     f"{_scr_num(r['d_sortino_h1'], signed=True)} / {_scr_num(r['d_sortino_h2'], signed=True)}"),
+            _scr_row("CAGR change", _scr_num(r["d_cagr_pts"], signed=True) + " pts"),
+            _scr_row("Max drawdown change", _scr_num(r["d_mdd_pts"], signed=True) + " pts"),
+            _scr_row("Months held", f"{r['held_pct_pct']:.0f}%" if pd.notna(r["held_pct_pct"]) else "n/a"),
+            _scr_row("Weight when held", f"{r['avg_w_held_pct']:.0f}%" if pd.notna(r["avg_w_held_pct"]) else "n/a"),
+        ])
+    else:
+        qt = _scr_row("Result", _esc(r["quick_test_note"] or "Not tested"))
+    corr_bits = [f"{inc} {_scr_num(r.get(f'corr_{inc}'))}" for inc in incumbents
+                 if f"corr_{inc}" in r.index and pd.notna(r.get(f"corr_{inc}"))]
+    corr_text = " · ".join(corr_bits)
+    corr_line = f'<p>Correlation with each incumbent: {_esc(corr_text)}</p>' if corr_bits else ""
+    wl = ""
+    if r["wl_verdict"] or r["wl_driver"]:
+        items = [("Driver", r["wl_driver"]), ("Verdict", r["wl_verdict"]), ("Reopen if", r["wl_reopen"]),
+                 ("Shadow start", r["wl_shadow_start"]), ("Last reviewed", r["wl_last_reviewed"])]
+        wl = ('<div class="ae-scr-wl"><div class="ae-scr-sec">Watchlist</div>'
+              + "".join(f"<p><b>{_esc(k)}:</b> {_esc(v)}</p>" for k, v in items if v) + "</div>")
+    return (
+        '<div class="ae-scr-card">'
+        f'<div class="ae-scr-card-title"><span class="ae-scr-tk">{_esc(tk)}</span>{_esc(r["name"])}</div>'
+        f'<div>{"".join(chips)}</div>'
+        f'<p>{sub}</p>{links}'
+        '<div class="ae-scr-grid">'
+        f'<div><div class="ae-scr-sec">Gates</div>{gates}</div>'
+        f'<div><div class="ae-scr-sec">Fit signals</div>{fit}</div>'
+        f'<div><div class="ae-scr-sec">Quick strategy test</div>{qt}</div>'
+        '</div>'
+        f'{corr_line}{wl}</div>'
+    )
+
+
+def page_screener():
+    render_page_header("screener")
+    data_path, meta_path = _scr_paths()
+    if not os.path.exists(data_path):
+        st.info(
+            "The screener's data isn't in this copy of the dashboard. It's built on the PC by "
+            "etf_screener\\make_etf_screener.py and kept out of the public deploy repo, so open "
+            "the screener from the local dashboard."
+        )
+        return
+    try:
+        df = load_screener_data(data_path, os.path.getmtime(data_path))
+    except Exception as exc:  # noqa: BLE001 - a bad file must not take the page down
+        st.info(f"The screener data could not be read ({type(exc).__name__}: {exc}).")
+        return
+    meta = _scr_load_meta(meta_path)
+    incumbents = meta.get("incumbents") or [c[5:] for c in df.columns if c.startswith("corr_")
+                                             and c not in ("corr_spy", "corr_strategy")]
+    st.markdown(SCR_CSS, unsafe_allow_html=True)
+    st.markdown(_scr_dates_html(meta), unsafe_allow_html=True)
+
+    _scr_init_state(df)
+    st.pills("Start from", list(SCR_PRESETS), key="scr_preset", on_change=_scr_apply_preset)
+
+    c1, c2 = st.columns([3, 2])
+    c1.text_input("Search", key="scr_search", placeholder="Ticker, fund name or issuer")
+    present = set(df["asset_class"])
+    c2.multiselect("Asset class", [a for a in SCR_ASSET_CLASSES if a in present], key="scr_classes",
+                   placeholder="All asset classes")
+    c3, c4 = st.columns([3, 2])
+    c3.multiselect("Category", sorted(c for c in df["category"].unique() if c), key="scr_cats",
+                   placeholder="All categories")
+    c4.selectbox("Placement", ["Any", "Equity-like", "Fixed"], key="scr_placement",
+                 help="From the Universe Screen: equity-like funds would join the equity sub-basket")
+
+    with st.expander("Adjust the hard gates"):
+        g1, g2, g3 = st.columns(3)
+        g1.select_slider("Daily dollar volume, at least", SCR_DV_OPTIONS, key="scr_dv",
+                         format_func=_scr_dv_label, help="Median over the last 63 trading days")
+        g2.select_slider("Price, at least", SCR_PX_OPTIONS, key="scr_px", format_func=_scr_px_label)
+        g3.select_slider("AUM, at least", SCR_AUM_OPTIONS, key="scr_aum", format_func=_scr_dv_label)
+        g4, g5, g6 = st.columns(3)
+        g4.select_slider("Expense ratio, at most", SCR_ER_OPTIONS, key="scr_er", format_func=_scr_er_label)
+        g5.select_slider("History, at least", SCR_HIST_OPTIONS, key="scr_hist", format_func=_scr_hist_label,
+                         help="Years of the fund's own price record. The quick test's 60 test months need about 5.75.")
+        g6.select_slider("Correlation with every incumbent, below", SCR_CORR_OPTIONS, key="scr_corr",
+                         format_func=_scr_corr_label, help="Monthly returns over the full overlap")
+        g7, g8, g9 = st.columns(3)
+        g7.select_slider("Equity-like funds vs. QQQ, IWM, DXJ, EMXC, below", SCR_CORR_OPTIONS,
+                         key="scr_eqcorr", format_func=_scr_corr_label,
+                         help="The method uses the most similar pair of equity incumbents (QQQ and IWM, 0.79)")
+        with g8:
+            st.checkbox("Leave out leveraged funds", key="scr_ex_lev")
+            st.checkbox("Leave out exchange-traded notes", key="scr_ex_etn")
+        with g9:
+            st.checkbox("Leave out likely K-1 funds", key="scr_ex_k1",
+                        help="From issuer and name patterns and a list of known commodity pools; "
+                             "the Watchlist's tax form overrides. Confirm with the issuer.")
+            st.checkbox("Leave out inverse funds", key="scr_ex_inv")
+        st.checkbox("Also show near misses (funds that fail exactly one gate)", key="scr_near")
+
+    with st.expander("Fit signals and the quick strategy test"):
+        f1, f2 = st.columns([3, 2])
+        f1.checkbox("Trends well: trend IC at least the value at right, with a positive timing gain",
+                    key="scr_fit_trend")
+        f2.slider("Trend IC, at least", 0.0, 0.30, step=0.01, key="scr_ic", label_visibility="collapsed")
+        f3, f4 = st.columns([3, 2])
+        f3.checkbox("Moves independently: most similar incumbent at or below the value at right",
+                    key="scr_fit_indep")
+        f4.slider("Most similar incumbent, at most", 0.30, 0.95, step=0.01, key="scr_indep_max",
+                  label_visibility="collapsed")
+        st.checkbox("Helps when the strategy is hurting: above T-bills in its losing months and in "
+                    "months when stocks and long Treasuries both fell", key="scr_fit_down")
+        f5, f6 = st.columns([3, 2])
+        f5.checkbox("Passes stage 3: better Sortino over its window and in both halves, with at least "
+                    "this many test months; fixed-basket funds also within the independence limit above",
+                    key="scr_qt")
+        f6.select_slider("Test months, at least", SCR_QT_MONTH_OPTIONS, key="scr_qt_months",
+                         label_visibility="collapsed")
+        st.checkbox("Only the basket and the Watchlist", key="scr_only_wl")
+
+    s = {k: st.session_state.get(k) for k in SCR_DEFAULTS}
+    st.markdown(f'<p class="ae-scr-active">{_esc(_scr_active_summary(s))}</p>', unsafe_allow_html=True)
+
+    checks = _scr_gate_checks(df, s)
+    if checks:
+        fails = pd.DataFrame({label: ~passes for label, (passes, _nd) in checks.items()}, index=df.index)
+        no_data = pd.DataFrame({label: nd for label, (_p, nd) in checks.items()}, index=df.index)
+        n_fail = fails.sum(axis=1)
+    else:
+        fails = no_data = pd.DataFrame(index=df.index)
+        n_fail = pd.Series(0, index=df.index)
+    allowed = 1 if s["scr_near"] else 0
+    base = _scr_signal_mask(df, s) & _scr_browse_mask(df, s)
+    shown = df[base & (n_fail <= allowed)].copy()
+    strict = int((base & (n_fail == 0)).sum())
+    if checks and s["scr_near"]:
+        labels = list(fails.columns)
+        fail_rows = fails.loc[shown.index].to_numpy()
+        nd_rows = no_data.loc[shown.index].to_numpy()
+        shown["fails"] = [", ".join(f"{lab} (no data)" if nd else lab
+                                    for lab, f_, nd in zip(labels, frow, ndrow) if f_)
+                          for frow, ndrow in zip(fail_rows, nd_rows)]
+    else:
+        shown["fails"] = ""
+    sort_col, ascending = SCR_PRESET_SORT.get(s["scr_preset"], ("dollar_vol", False))
+    by = [sort_col] if sort_col == "dollar_vol" else [sort_col, "dollar_vol"]
+    shown = shown.sort_values(by, ascending=[ascending] + [False] * (len(by) - 1), na_position="last")
+    if s["scr_near"]:
+        shown = shown.sort_values("fails", key=lambda x: x.ne(""), kind="stable")
+
+    near = len(shown) - strict
+    count = f"<b>{strict:,}</b> of {len(df):,} funds pass"
+    if s["scr_near"]:
+        count += f", plus <b>{near:,}</b> near {'miss' if near == 1 else 'misses'}"
+    st.markdown(f'<p class="ae-scr-count">{count}</p>', unsafe_allow_html=True)
+
+    view = st.pills("Columns", list(SCR_VIEWS) + ["All"], key="scr_view")
+    if view in SCR_VIEWS:
+        cols = list(SCR_VIEWS[view])
+    else:
+        cols = list(dict.fromkeys(sum(SCR_VIEWS.values(), [])))
+        cols += ["exchange", "asset_class", "quick_test_note"]
+        cols = list(dict.fromkeys(cols))
+    if s["scr_near"] and "fails" not in cols:
+        cols.insert(2, "fails")
+    config = _scr_column_config()
+    config.setdefault("exchange", st.column_config.TextColumn("Exchange"))
+    config.setdefault("asset_class", st.column_config.TextColumn("Asset class"))
+    table = shown[cols].reset_index(drop=True)
+    height = int(min(600, 38 + 35 * max(len(table), 1)))
+    event = st.dataframe(table, column_config=config, column_order=cols, hide_index=True,
+                         height=height, key="scr_table", on_select="rerun", selection_mode="single-row")
+
+    picked = None
+    try:
+        rows = event.selection.rows
+        if rows and rows[0] < len(shown):
+            picked = shown.iloc[rows[0]]
+    except AttributeError:
+        picked = None
+    if picked is not None:
+        st.markdown(_scr_detail_html(picked, s, incumbents), unsafe_allow_html=True)
+    else:
+        st.caption("Click a row to see the fund's gates, fit signals, quick test and Watchlist notes.")
+
+    _footnote(
+        "Expense ratio and AUM are Yahoo Finance's net figures; Vanguard ETFs report every share class "
+        "together. Price, dollar volume and the fit statistics come from the quarterly ETF Scouting "
+        "run, so funds below its liquidity floor ($2M a day, $8) have no fit statistics or quick test. "
+        "A fund with no data for an active gate or signal fails it. The quick test is an in-sample "
+        "backtest, a screen rather than a verdict, and the universe holds only funds that still trade."
+    )
+    with st.expander("How the columns are measured"):
+        st.markdown(
+            "- **Daily $ volume:** median daily dollar volume over the last 63 trading days, from the "
+            "universe pull.\n"
+            "- **History:** years of the fund's own price record, from the earlier of its first month "
+            "in the universe pull and Yahoo's first trade date, to the pull's price date. Yahoo's "
+            "inception date is not used when either exists, because it is often wrong for this "
+            "purpose (it gives BND June 2016) or belongs to a predecessor mutual fund. The quick test "
+            "needs 60 test months after the 8-month lookback, about 5.75 years of prices.\n"
+            "- **Most similar incumbent:** the highest correlation of monthly returns with TLT, GLD, "
+            "BIL, BTAL, HGER, QQQ, IWM, DXJ or EMXC over the full overlap. Equity-like funds also face "
+            "the equity rule against QQQ, IWM, DXJ and EMXC.\n"
+            "- **Trend IC:** rank correlation between the strategy's 2/8-month signal (the fund's blend "
+            "minus BIL's) and the fund's next-month return above T-bills. **Timing gain:** Sortino of "
+            "holding the fund when its signal beats BIL's and T-bills otherwise, minus buy-and-hold.\n"
+            "- **Strategy's losing months, Stocks and bonds down, S&P 500 bear market:** average monthly "
+            "return above T-bills in months the strategy lost more than 1%, months SPY and TLT both "
+            "fell, and months SPY sat 15% or more below its high. The count of months is on the card.\n"
+            "- **Quick test:** the standing configuration with the fund added, against the standing "
+            "configuration alone, over the fund's own window (backtest engine, fast mode, monthly "
+            "metrics). Equity-like funds join the equity sub-basket (pick 3 of 5); the rest join the "
+            "fixed basket. A stage 3 pass, as in Screen Lookup.py, needs a better Sortino over the window "
+            "and in both halves and at least 60 test months, and a fixed-basket fund must also sit at or "
+            "below 0.70 with every incumbent. With the method's settings this reproduces the October "
+            "2026 shortlist's 20 fixed-basket and 17 equity passes.\n"
+            "- **Flags:** read from fund names. Leveraged means more than 1x; inverse funds stay in "
+            "unless you leave them out. Likely K-1 comes from issuer and name patterns and a list of "
+            "known commodity pools, and the Watchlist's tax form overrides it. Check the issuer before "
+            "relying on any tax flag.\n"
+            "- **Refresh:** run etf_screener\\make_etf_screener.py after each quarterly universe pull "
+            "and screen. It refetches expense ratio and AUM for every fund and keeps issuer, category "
+            "and inception for a year."
+        )
+    _scr_save_state()
+
+
+def build_pages(studio=False):
     """The six pages, in menu order. Overview is the default page (the bare
-    URL); the others are reachable directly at their URL paths."""
-    return [
+    URL); the others are reachable directly at their URL paths. Studio mode
+    adds a seventh, the ETF Screener (added November 2, 2026)."""
+    pages = [
         st.Page(page_overview, title="Overview", default=True),
         st.Page(page_performance, title="Performance", url_path="performance"),
         st.Page(page_risk, title="Risk", url_path="risk"),
@@ -12388,12 +13257,15 @@ def build_pages():
         st.Page(page_holdings, title="Holdings", url_path="holdings"),
         st.Page(page_markets, title="Markets", url_path="markets"),
     ]
+    if studio:
+        pages.append(st.Page(page_screener, title="Screener", url_path="screener"))
+    return pages
 
 
 def main():
     global AE_CTX
     studio = resolve_studio_mode()
-    pages = build_pages()
+    pages = build_pages(studio)
     current_page = st.navigation(pages, position="hidden")
     render_top_bar(pages, current_page)
 
