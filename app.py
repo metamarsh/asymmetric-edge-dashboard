@@ -12413,11 +12413,12 @@ SCR_QT_MONTH_OPTIONS = [36, 48, 60, 84, 120, 180, 240]
 # The method's hard gates (ETF Scouting Method.md): $5M a day, $10 a share,
 # $100M in assets, 60 test months (about 5.75 years of prices), correlation
 # below 0.90 with every incumbent and, for equity-like funds, below the most
-# similar pair of equity incumbents (QQQ and IWM, 0.79); no leverage above 1x,
-# no exchange-traded notes, no K-1. Inverse funds are allowed but flagged.
+# similar pair of equity incumbents (QQQ and IWM, 0.79); no exchange-traded
+# notes, no K-1. Leveraged and inverse funds stay in, flagged (Tyler, November
+# 2, 2026: he wants them seen and tested, not screened out up front).
 SCR_GATES_METHOD = {
     "scr_dv": 5e6, "scr_px": 10.0, "scr_aum": 100e6, "scr_er": SCR_ANY_ER, "scr_hist": 5.75,
-    "scr_corr": 0.90, "scr_eqcorr": 0.79, "scr_ex_lev": True, "scr_ex_etn": True,
+    "scr_corr": 0.90, "scr_eqcorr": 0.79, "scr_ex_lev": False, "scr_ex_etn": True,
     "scr_ex_k1": True, "scr_ex_inv": False,
 }
 SCR_GATES_OFF = {
@@ -12434,8 +12435,7 @@ SCR_PRESETS = {
     "Hard gates": {**SCR_GATES_METHOD, **SCR_SIGNALS_OFF},
     "Gates + fit signals": {**SCR_GATES_METHOD, **SCR_SIGNALS_OFF,
                             "scr_fit_trend": True, "scr_fit_indep": True},
-    "Quick-test passes": {**SCR_GATES_OFF, **SCR_SIGNALS_OFF, "scr_dv": 5e6, "scr_ex_lev": True,
-                          "scr_qt": True},
+    "Quick-test passes": {**SCR_GATES_OFF, **SCR_SIGNALS_OFF, "scr_dv": 5e6, "scr_qt": True},
     "Down-market helpers": {**SCR_GATES_METHOD, **SCR_SIGNALS_OFF, "scr_fit_down": True},
     "Basket and Watchlist": {**SCR_GATES_OFF, **SCR_SIGNALS_OFF, "scr_only_wl": True},
     "Everything": {**SCR_GATES_OFF, **SCR_SIGNALS_OFF},
@@ -13232,10 +13232,12 @@ def page_screener():
             "metrics). Equity-like funds join the equity sub-basket (pick 3 of 5); the rest join the "
             "fixed basket. A stage 3 pass, as in Screen Lookup.py, needs a better Sortino over the window "
             "and in both halves and at least 60 test months, and a fixed-basket fund must also sit at or "
-            "below 0.70 with every incumbent. With the method's settings this reproduces the October "
-            "2026 shortlist's 20 fixed-basket and 17 equity passes.\n"
-            "- **Flags:** read from fund names. Leveraged means more than 1x; inverse funds stay in "
-            "unless you leave them out. Likely K-1 comes from issuer and name patterns and a list of "
+            "below 0.70 with every incumbent. With the method's settings and leveraged funds left out, "
+            "this reproduces the October 2026 shortlist's 20 fixed-basket and 17 equity passes.\n"
+            "- **Flags:** read from fund names. Leveraged means more than 1x. Leveraged and inverse funds "
+            "stay in, and get the quick test like any other fund, unless you leave them out; daily-reset "
+            "decay should show up in their trend signal and quick test. Likely K-1 comes from issuer and "
+            "name patterns and a list of "
             "known commodity pools, and the Watchlist's tax form overrides it. Check the issuer before "
             "relying on any tax flag.\n"
             "- **Refresh:** run etf_screener\\make_etf_screener.py after each quarterly universe pull "
