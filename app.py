@@ -12408,16 +12408,21 @@ SCR_AUM_OPTIONS = [0.0, 25e6, 50e6, 100e6, 250e6, 500e6, 1e9, 5e9]
 SCR_ER_OPTIONS = [0.10, 0.20, 0.35, 0.50, 0.75, 1.00, 1.50, SCR_ANY_ER]
 SCR_HIST_OPTIONS = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 5.75, 6.0, 7.0, 8.0, 10.0, 12.0, 15.0, 20.0, 25.0]
 SCR_CORR_OPTIONS = [round(0.50 + 0.01 * i, 2) for i in range(51)]      # 1.00 means off
-SCR_QT_MONTH_OPTIONS = [36, 48, 60, 84, 120, 180, 240]
+SCR_QT_MONTH_OPTIONS = [24, 36, 48, 60, 84, 120, 180, 240]
+SCR_METHOD_TEST_MONTHS = 60      # the method's screen gate (Screen Lookup.py)
+SCR_METHOD_HIST_YEARS = 5.75     # about what 60 test months need after the 8-month lookback
 
 # The method's hard gates (ETF Scouting Method.md): $5M a day, $10 a share,
-# $100M in assets, 60 test months (about 5.75 years of prices), correlation
-# below 0.90 with every incumbent and, for equity-like funds, below the most
-# similar pair of equity incumbents (QQQ and IWM, 0.79); no exchange-traded
-# notes, no K-1. Leveraged and inverse funds stay in, flagged (Tyler, November
-# 2, 2026: he wants them seen and tested, not screened out up front).
+# $100M in assets, correlation below 0.90 with every incumbent and, for
+# equity-like funds, below the most similar pair of equity incumbents (QQQ and
+# IWM, 0.79); no exchange-traded notes, no K-1. Leveraged and inverse funds stay
+# in, flagged (Tyler, November 2, 2026: he wants them seen and tested, not
+# screened out up front). Young funds too (Tyler, November 2, 2026): History is
+# off in every preset, so funds under the method's 60 test months (about 5.75
+# years of prices) show up flagged Young, with short-window statistics. Set
+# History to 5.75 to apply the method's screen gate.
 SCR_GATES_METHOD = {
-    "scr_dv": 5e6, "scr_px": 10.0, "scr_aum": 100e6, "scr_er": SCR_ANY_ER, "scr_hist": 5.75,
+    "scr_dv": 5e6, "scr_px": 10.0, "scr_aum": 100e6, "scr_er": SCR_ANY_ER, "scr_hist": 0.0,
     "scr_corr": 0.90, "scr_eqcorr": 0.79, "scr_ex_lev": False, "scr_ex_etn": True,
     "scr_ex_k1": True, "scr_ex_inv": False,
 }
@@ -12643,8 +12648,11 @@ def load_screener_data(path, mtime):
     eq_cols = [f"corr_{t}" for t in SCR_EQUITY_INCUMBENTS if f"corr_{t}" in df.columns]
     df["eq_max_corr"] = df[eq_cols].apply(pd.to_numeric, errors="coerce").max(axis=1) if eq_cols else np.nan
     df["trading_since_dt"] = pd.to_datetime(df["trading_since"], errors="coerce")
-    df["flags"] = [", ".join(f for f, on in (("Leveraged", lev), ("Inverse", inv), ("ETN", etn)) if on)
-                   for lev, inv, etn in zip(df["leveraged"], df["inverse"], df["etn"])]
+    df["structure_flags"] = [", ".join(f for f, on in (("Leveraged", lev), ("Inverse", inv), ("ETN", etn)) if on)
+                             for lev, inv, etn in zip(df["leveraged"], df["inverse"], df["etn"])]
+    df["young"] = (df["history_years"] < SCR_METHOD_HIST_YEARS).fillna(False).astype(bool)
+    df["flags"] = [", ".join(f for f in (sf, "Young" if y else "") if f)
+                   for sf, y in zip(df["structure_flags"], df["young"])]
     df["most_similar_txt"] = [f"{m} {c:.2f}" if m and pd.notna(c) else ""
                               for m, c in zip(df["most_similar"], df["max_corr"])]
     df["placement_txt"] = df["placement"].map({"equity": "Equity-like", "fixed": "Fixed"}).fillna("")
@@ -12887,11 +12895,13 @@ def _scr_column_config():
                                       help="Median daily dollar volume over the last 63 trading days"),
         "price": cc.NumberColumn("Price", format="dollar"),
         "history_years": cc.NumberColumn("History (yrs)", format="%.1f",
-                                         help="Years of the fund's own price record (60 test months need about 5.75)"),
+                                         help="Years of the fund's own price record. Under 5.75 (the method's "
+                                              "60 test months) is flagged Young"),
         "trading_since_dt": cc.DateColumn("Trading since", format="MMM YYYY"),
         "most_similar_txt": cc.TextColumn("Most similar incumbent",
                                           help="Highest monthly correlation with an incumbent, full overlap"),
-        "flags": cc.TextColumn("Flags"),
+        "flags": cc.TextColumn("Flags", help="Leveraged, Inverse and ETN come from fund names; Young means "
+                                             "under 5.75 years of prices, so its statistics rest on a short window"),
         "tax_note": cc.TextColumn("Tax", width="medium"),
         "fails": cc.TextColumn("Fails", help="Active gates the fund misses (near misses only)"),
         "placement_txt": cc.TextColumn("Placement",
@@ -12909,7 +12919,8 @@ def _scr_column_config():
         "bear_excess_pct": cc.NumberColumn("S&P 500 bear market", format="%+.2f%%",
                                            help="Average monthly return above T-bills while SPY was 15%+ below its high"),
         "test_start": cc.TextColumn("Test from"),
-        "test_months": cc.NumberColumn("Test months", format="%d"),
+        "test_months": cc.NumberColumn("Test months", format="%d",
+                                       help="Under 60 is a short window: noisy, and not a stage 3 pass"),
         "d_sortino": cc.NumberColumn("Sortino change", format="%+.2f",
                                      help="Standing configuration plus the fund, minus the standing configuration"),
         "d_sortino_h1": cc.NumberColumn("First half", format="%+.2f"),
@@ -12949,8 +12960,10 @@ def _scr_detail_html(r, s, incumbents):
         chips.append(f'<span class="ae-scr-chip ae-scr-chip-purple">{_esc(r["status"])}</span>')
     if r["asset_class"]:
         chips.append(f'<span class="ae-scr-chip">{_esc(r["asset_class"])}</span>')
-    for flag in [f for f in r["flags"].split(", ") if f]:
+    for flag in [f for f in r["structure_flags"].split(", ") if f]:
         chips.append(f'<span class="ae-scr-chip ae-scr-chip-red">{_esc(flag)}</span>')
+    if r["young"]:
+        chips.append(f'<span class="ae-scr-chip">Young: {r["history_years"]:.1f} years of prices</span>')
     if r["k1_likely"]:
         chips.append('<span class="ae-scr-chip ae-scr-chip-red">Likely K-1</span>')
     sub = " · ".join(_esc(x) for x in (r["issuer"], r["category"], r["exchange"]) if x)
@@ -12978,7 +12991,7 @@ def _scr_detail_html(r, s, incumbents):
             copy_ok = bool(pd.notna(r["max_corr"]) and r["max_corr"] < s["scr_corr"])
         if s["scr_eqcorr"] < 1.0 and r["placement"] == "equity":
             copy_ok = copy_ok and bool(pd.notna(r["eq_max_corr"]) and r["eq_max_corr"] < s["scr_eqcorr"])
-    structure = r["flags"] or "Plain 1x fund"
+    structure = r["structure_flags"] or "Plain 1x fund"
     structure_ok = None
     if s["scr_ex_lev"] or s["scr_ex_etn"] or s["scr_ex_inv"]:
         structure_ok = not ((s["scr_ex_lev"] and r["leveraged"]) or (s["scr_ex_etn"] and r["etn"])
@@ -13020,7 +13033,8 @@ def _scr_detail_html(r, s, incumbents):
     ])
     if pd.notna(r["d_sortino"]):
         qt = "".join([
-            _scr_row("Window", _esc(f"{r['test_start']} on, {r['test_months']:.0f} months")),
+            _scr_row("Window", _esc(f"{r['test_start']} on, {r['test_months']:.0f} months"
+                                    + (" (short window)" if r["test_months"] < SCR_METHOD_TEST_MONTHS else ""))),
             _scr_row("Sortino change", _scr_num(r["d_sortino"], signed=True),
                      bool(r["d_sortino"] > 0) if s["scr_qt"] else None),
             _scr_row("First half / second half",
@@ -13100,7 +13114,9 @@ def page_screener():
         g4, g5, g6 = st.columns(3)
         g4.select_slider("Expense ratio, at most", SCR_ER_OPTIONS, key="scr_er", format_func=_scr_er_label)
         g5.select_slider("History, at least", SCR_HIST_OPTIONS, key="scr_hist", format_func=_scr_hist_label,
-                         help="Years of the fund's own price record. The quick test's 60 test months need about 5.75.")
+                         help="Years of the fund's own price record. Off by default, so young funds show up "
+                              "flagged Young. The method's screen gate is 5.75: 60 test months after the "
+                              "8-month lookback.")
         g6.select_slider("Correlation with every incumbent, below", SCR_CORR_OPTIONS, key="scr_corr",
                          format_func=_scr_corr_label, help="Monthly returns over the full overlap")
         g7, g8, g9 = st.columns(3)
@@ -13205,7 +13221,9 @@ def page_screener():
     _footnote(
         "Expense ratio and AUM are Yahoo Finance's net figures; Vanguard ETFs report every share class "
         "together. Price, dollar volume and the fit statistics come from the quarterly ETF Scouting "
-        "run, so funds below its liquidity floor ($2M a day, $8) have no fit statistics or quick test. "
+        "run, so funds below its liquidity floor ($2M a day, $8) have no fit statistics or quick test, "
+        "and neither do funds with less than about a year of prices. Trend statistics and the quick test "
+        "need about 2.75 years (24 test months); a quick test under 60 test months is a short window. "
         "A fund with no data for an active gate or signal fails it. The quick test is an in-sample "
         "backtest, a screen rather than a verdict, and the universe holds only funds that still trade."
     )
@@ -13216,14 +13234,17 @@ def page_screener():
             "- **History:** years of the fund's own price record, from the earlier of its first month "
             "in the universe pull and Yahoo's first trade date, to the pull's price date. Yahoo's "
             "inception date is not used when either exists, because it is often wrong for this "
-            "purpose (it gives BND June 2016) or belongs to a predecessor mutual fund. The quick test "
-            "needs 60 test months after the 8-month lookback, about 5.75 years of prices.\n"
+            "purpose (it gives BND June 2016) or belongs to a predecessor mutual fund. Funds under 5.75 "
+            "years, the 60 test months after the 8-month lookback that the method's screen needs, are "
+            "flagged Young and shown unless you set History (off by default since November 2, 2026).\n"
             "- **Most similar incumbent:** the highest correlation of monthly returns with TLT, GLD, "
             "BIL, BTAL, HGER, QQQ, IWM, DXJ or EMXC over the full overlap. Equity-like funds also face "
             "the equity rule against QQQ, IWM, DXJ and EMXC.\n"
             "- **Trend IC:** rank correlation between the strategy's 2/8-month signal (the fund's blend "
             "minus BIL's) and the fund's next-month return above T-bills. **Timing gain:** Sortino of "
-            "holding the fund when its signal beats BIL's and T-bills otherwise, minus buy-and-hold.\n"
+            "holding the fund when its signal beats BIL's and T-bills otherwise, minus buy-and-hold. Both "
+            "need 24 signal months, about 2.75 years of prices; correlations and the down-market figures "
+            "need 12 monthly returns. On a young fund all of them rest on a short window.\n"
             "- **Strategy's losing months, Stocks and bonds down, S&P 500 bear market:** average monthly "
             "return above T-bills in months the strategy lost more than 1%, months SPY and TLT both "
             "fell, and months SPY sat 15% or more below its high. The count of months is on the card.\n"
@@ -13232,8 +13253,12 @@ def page_screener():
             "metrics). Equity-like funds join the equity sub-basket (pick 3 of 5); the rest join the "
             "fixed basket. A stage 3 pass, as in Screen Lookup.py, needs a better Sortino over the window "
             "and in both halves and at least 60 test months, and a fixed-basket fund must also sit at or "
-            "below 0.70 with every incumbent. With the method's settings and leveraged funds left out, "
-            "this reproduces the October 2026 shortlist's 20 fixed-basket and 17 equity passes.\n"
+            "below 0.70 with every incumbent. With the method's settings this returns 42 passes (24 "
+            "fixed-basket, 18 equity; 41 with leveraged funds left out). The October 2026 shortlist's 37 "
+            "(20 and 17) came before the November 2, 2026 rerun tested the Ultra-Short bond and leveraged "
+            "funds. Young funds "
+            "are tested from 24 test months (since November 2, 2026); a window under 60 months is marked "
+            "short on the card, and counts as a pass only if you lower the test months.\n"
             "- **Flags:** read from fund names. Leveraged means more than 1x. Leveraged and inverse funds "
             "stay in, and get the quick test like any other fund, unless you leave them out; daily-reset "
             "decay should show up in their trend signal and quick test. Likely K-1 comes from issuer and "
