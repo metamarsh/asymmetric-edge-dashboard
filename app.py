@@ -12433,21 +12433,28 @@ SCR_GATES_OFF = {
 }
 SCR_SIGNALS_OFF = {
     "scr_fit_trend": False, "scr_ic": 0.05, "scr_fit_indep": False, "scr_indep_max": 0.70,
-    "scr_fit_down": False, "scr_qt": False, "scr_qt_months": 60, "scr_only_wl": False,
-    "scr_near": False,
+    "scr_fit_down": False, "scr_qt": False, "scr_qt_months": 60, "scr_swap": False,
+    "scr_swap_months": 60, "scr_only_wl": False, "scr_near": False,
 }
+# Replacement candidates (Tyler, November 2, 2026: show every quarter which funds
+# would do better in place of an incumbent, not only added to the basket). The
+# swap test is Replacement Screen.py's: each fund at 0.70 or more with an
+# incumbent, in that incumbent's slot. The copy gate stays off in this preset,
+# because a replacement is meant to resemble the fund it replaces.
 SCR_PRESETS = {
     "Hard gates": {**SCR_GATES_METHOD, **SCR_SIGNALS_OFF},
     "Gates + fit signals": {**SCR_GATES_METHOD, **SCR_SIGNALS_OFF,
                             "scr_fit_trend": True, "scr_fit_indep": True},
     "Quick-test passes": {**SCR_GATES_OFF, **SCR_SIGNALS_OFF, "scr_dv": 5e6, "scr_qt": True},
+    "Replacement candidates": {**SCR_GATES_OFF, **SCR_SIGNALS_OFF, "scr_dv": 5e6, "scr_swap": True},
     "Down-market helpers": {**SCR_GATES_METHOD, **SCR_SIGNALS_OFF, "scr_fit_down": True},
     "Basket and Watchlist": {**SCR_GATES_OFF, **SCR_SIGNALS_OFF, "scr_only_wl": True},
     "Everything": {**SCR_GATES_OFF, **SCR_SIGNALS_OFF},
 }
 SCR_PRESET_SORT = {
     "Hard gates": ("trend_ic", False), "Gates + fit signals": ("trend_ic", False),
-    "Quick-test passes": ("d_sortino", False), "Down-market helpers": ("losing_excess", False),
+    "Quick-test passes": ("d_sortino", False), "Replacement candidates": ("swap_d_sortino", False),
+    "Down-market helpers": ("losing_excess", False),
     "Basket and Watchlist": ("status_rank", True), "Everything": ("dollar_vol", False),
 }
 SCR_DEFAULTS = {"scr_preset": "Hard gates", **SCR_PRESETS["Hard gates"], "scr_search": "",
@@ -12464,6 +12471,9 @@ SCR_VIEWS = {
     "Quick test": ["ticker", "name", "placement_txt", "test_start", "test_months", "d_sortino",
                    "d_sortino_h1", "d_sortino_h2", "d_cagr_pts", "d_mdd_pts", "held_pct_pct",
                    "avg_w_held_pct", "quick_test_note"],
+    "Replacement test": ["ticker", "name", "swap_replaces_txt", "swap_test_start", "swap_test_months",
+                         "swap_d_sortino", "swap_d_sortino_h1", "swap_d_sortino_h2", "swap_d_cagr_pts",
+                         "swap_d_mdd_pts", "swap_held_pct_pct", "expense_ratio", "swap_note"],
     "Returns": ["ticker", "name", "first_price_month", "cagr_pct", "vol_pct", "sortino",
                 "max_dd_pct", "beta_spy", "corr_spy"],
 }
@@ -12472,7 +12482,8 @@ SCR_TEXT_COLS = ["ticker", "name", "issuer", "category", "asset_class", "exchang
                  "tax_note", "most_similar", "placement", "test_start", "first_price_month",
                  "quick_test_note", "wl_driver", "wl_verdict", "wl_reopen", "wl_shadow_start",
                  "wl_last_reviewed", "trading_since", "fund_inception", "first_trade", "price_date",
-                 "aum_prev_date", "details_as_of"]
+                 "aum_prev_date", "details_as_of", "swap_replaces", "swap_slot", "swap_test_start",
+                 "swap_note"]
 SCR_BOOL_COLS = ["leveraged", "inverse", "etn", "k1_likely", "above_floor", "listed"]
 SCR_NUM_COLS = ["expense_ratio", "aum", "aum_prev", "aum_change", "price", "dollar_vol",
                 "history_years", "price_months", "cagr", "vol", "sortino", "max_dd", "corr_spy",
@@ -12480,7 +12491,9 @@ SCR_NUM_COLS = ["expense_ratio", "aum", "aum_prev", "aum_change", "price", "doll
                 "both_down_excess", "both_down_n", "bear_excess", "bear_n", "spy_bad_excess",
                 "spy_bad_n", "trend_ic", "timing_gain", "trend_spread", "trend_on_frac",
                 "test_months", "d_sortino", "d_sortino_h1", "d_sortino_h2", "d_cagr", "d_mdd",
-                "held_pct", "avg_w_held", "eq_selected_pct"]
+                "held_pct", "avg_w_held", "eq_selected_pct", "swap_test_months", "swap_d_sortino",
+                "swap_d_sortino_h1", "swap_d_sortino_h2", "swap_d_cagr", "swap_d_mdd", "swap_held_pct",
+                "swap_inc_held_pct"]
 
 SCR_CSS = """
 <style>
@@ -12660,8 +12673,12 @@ def load_screener_data(path, mtime):
                      ("both_down_excess", "both_down_excess_pct"), ("bear_excess", "bear_excess_pct"),
                      ("d_cagr", "d_cagr_pts"), ("d_mdd", "d_mdd_pts"), ("held_pct", "held_pct_pct"),
                      ("avg_w_held", "avg_w_held_pct"), ("cagr", "cagr_pct"), ("vol", "vol_pct"),
-                     ("max_dd", "max_dd_pct")):
+                     ("max_dd", "max_dd_pct"), ("swap_d_cagr", "swap_d_cagr_pts"),
+                     ("swap_d_mdd", "swap_d_mdd_pts"), ("swap_held_pct", "swap_held_pct_pct"),
+                     ("swap_inc_held_pct", "swap_inc_held_pct_pct")):
         df[dst] = df[src] * 100
+    df["swap_replaces_txt"] = [f"{rep} {c:.2f}" if rep and pd.notna(c) else rep
+                               for rep, c in zip(df["swap_replaces"], df["max_corr"])]
     df["status_rank"] = df["status"].map(SCR_STATUS_RANK).fillna(99)
     return df
 
@@ -12798,6 +12815,10 @@ def _scr_signal_mask(df, s):
         mask &= ((df["d_sortino"] > 0) & (df["d_sortino_h1"] > 0) & (df["d_sortino_h2"] > 0)
                  & (df["test_months"] >= s["scr_qt_months"])
                  & ((df["placement"] != "fixed") | (df["max_corr"] <= s["scr_indep_max"])))
+    if s.get("scr_swap"):
+        # Replacement Screen.py's bar: better in the incumbent's place over the window and in both halves.
+        mask &= ((df["swap_d_sortino"] > 0) & (df["swap_d_sortino_h1"] > 0) & (df["swap_d_sortino_h2"] > 0)
+                 & (df["swap_test_months"] >= s["scr_swap_months"]))
     return mask.fillna(False).astype(bool)
 
 
@@ -12853,6 +12874,9 @@ def _scr_active_summary(s):
     if s["scr_qt"]:
         parts.append(f"stage 3 pass with {s['scr_qt_months']}+ test months (fixed-basket funds at or "
                      f"below {s['scr_indep_max']:.2f})")
+    if s.get("scr_swap"):
+        parts.append(f"better in place of its most similar incumbent, over the window and in both halves, "
+                     f"with {s['scr_swap_months']}+ test months")
     if s.get("scr_only_wl"):
         parts.append("basket and Watchlist only")
     if not parts:
@@ -12875,6 +12899,8 @@ def _scr_dates_html(meta):
         end_txt = f", windows ending {pd.Timestamp(end + '-01'):%B %Y}" if end else ""
         bits.append(f"fit statistics and quick test from the {_long_date(meta['screen_date'])} "
                     f"Universe Screen{end_txt}")
+    if meta.get("replacement_date"):
+        bits.append(f"replacement test from the {_long_date(meta['replacement_date'])} Replacement Screen")
     return f'<p class="ae-scr-dates">{_esc("; ".join(bits))}.</p>' if bits else ""
 
 
@@ -12931,6 +12957,23 @@ def _scr_column_config():
         "held_pct_pct": cc.NumberColumn("Months held", format="%.0f%%"),
         "avg_w_held_pct": cc.NumberColumn("Weight when held", format="%.0f%%"),
         "quick_test_note": cc.TextColumn("Quick test", width="medium"),
+        "swap_replaces_txt": cc.TextColumn("Replaces",
+                                           help="The incumbent the fund stands in for (its most similar, at "
+                                                "0.70 or more), with their monthly correlation"),
+        "swap_test_start": cc.TextColumn("Swap test from"),
+        "swap_test_months": cc.NumberColumn("Swap test months", format="%d",
+                                            help="Under 60 is a short window: noisy, and not a pass by default"),
+        "swap_d_sortino": cc.NumberColumn("Swap Sortino change", format="%+.2f",
+                                          help="Standing configuration with the fund in the incumbent's place, "
+                                               "minus the standing configuration"),
+        "swap_d_sortino_h1": cc.NumberColumn("Swap first half", format="%+.2f"),
+        "swap_d_sortino_h2": cc.NumberColumn("Swap second half", format="%+.2f"),
+        "swap_d_cagr_pts": cc.NumberColumn("Swap CAGR change (pts)", format="%+.2f"),
+        "swap_d_mdd_pts": cc.NumberColumn("Swap max drawdown change (pts)", format="%+.2f",
+                                          help="Positive means a shallower drawdown"),
+        "swap_held_pct_pct": cc.NumberColumn("Swap months held", format="%.0f%%",
+                                             help="Share of test months the fund was in the final four"),
+        "swap_note": cc.TextColumn("Replacement test", width="medium"),
         "first_price_month": cc.TextColumn("Prices from"),
         "cagr_pct": cc.NumberColumn("CAGR", format="%.1f%%"),
         "vol_pct": cc.NumberColumn("Volatility", format="%.1f%%"),
@@ -13046,7 +13089,27 @@ def _scr_detail_html(r, s, incumbents):
         ])
     else:
         qt = _scr_row("Result", _esc(r["quick_test_note"] or "Not tested"))
-    corr_bits = [f"{inc} {_scr_num(r.get(f'corr_{inc}'))}" for inc in incumbents
+    if pd.notna(r["swap_d_sortino"]):
+        inc_held = (f" ({_esc(r['swap_replaces'])} {r['swap_inc_held_pct_pct']:.0f}% before)"
+                    if pd.notna(r["swap_inc_held_pct_pct"]) else "")
+        swap = "".join([
+            _scr_row("In place of", _esc(r["swap_replaces_txt"] or "n/a")),
+            _scr_row("Window", _esc(f"{r['swap_test_start']} on, {r['swap_test_months']:.0f} months"
+                                    + (" (short window)" if r["swap_test_months"] < SCR_METHOD_TEST_MONTHS
+                                       else ""))),
+            _scr_row("Sortino change", _scr_num(r["swap_d_sortino"], signed=True),
+                     bool(r["swap_d_sortino"] > 0) if s.get("scr_swap") else None),
+            _scr_row("First half / second half",
+                     f"{_scr_num(r['swap_d_sortino_h1'], signed=True)} / "
+                     f"{_scr_num(r['swap_d_sortino_h2'], signed=True)}"),
+            _scr_row("CAGR change", _scr_num(r["swap_d_cagr_pts"], signed=True) + " pts"),
+            _scr_row("Max drawdown change", _scr_num(r["swap_d_mdd_pts"], signed=True) + " pts"),
+            _scr_row("Months held", (f"{r['swap_held_pct_pct']:.0f}%" if pd.notna(r["swap_held_pct_pct"])
+                                     else "n/a") + inc_held),
+        ])
+    else:
+        swap = _scr_row("Result", _esc(r["swap_note"] or "No replacement test in this file"))
+    corr_bits =[f"{inc} {_scr_num(r.get(f'corr_{inc}'))}" for inc in incumbents
                  if f"corr_{inc}" in r.index and pd.notna(r.get(f"corr_{inc}"))]
     corr_text = " · ".join(corr_bits)
     corr_line = f'<p>Correlation with each incumbent: {_esc(corr_text)}</p>' if corr_bits else ""
@@ -13065,6 +13128,7 @@ def _scr_detail_html(r, s, incumbents):
         f'<div><div class="ae-scr-sec">Gates</div>{gates}</div>'
         f'<div><div class="ae-scr-sec">Fit signals</div>{fit}</div>'
         f'<div><div class="ae-scr-sec">Quick strategy test</div>{qt}</div>'
+        f'<div><div class="ae-scr-sec">Replacement test</div>{swap}</div>'
         '</div>'
         f'{corr_line}{wl}</div>'
     )
@@ -13133,7 +13197,7 @@ def page_screener():
             st.checkbox("Leave out inverse funds", key="scr_ex_inv")
         st.checkbox("Also show near misses (funds that fail exactly one gate)", key="scr_near")
 
-    with st.expander("Fit signals and the quick strategy test"):
+    with st.expander("Fit signals, the quick strategy test and the replacement test"):
         f1, f2 = st.columns([3, 2])
         f1.checkbox("Trends well: trend IC at least the value at right, with a positive timing gain",
                     key="scr_fit_trend")
@@ -13150,6 +13214,12 @@ def page_screener():
                     "this many test months; fixed-basket funds also within the independence limit above",
                     key="scr_qt")
         f6.select_slider("Test months, at least", SCR_QT_MONTH_OPTIONS, key="scr_qt_months",
+                         label_visibility="collapsed")
+        f7, f8 = st.columns([3, 2])
+        f7.checkbox("Better as a replacement: in place of its most similar incumbent, a better Sortino over "
+                    "its window and in both halves, with at least this many test months", key="scr_swap",
+                    help="From Replacement Screen.py: only funds at 0.70 or more with an incumbent are swapped")
+        f8.select_slider("Swap test months, at least", SCR_QT_MONTH_OPTIONS, key="scr_swap_months",
                          label_visibility="collapsed")
         st.checkbox("Only the basket and the Watchlist", key="scr_only_wl")
 
@@ -13216,7 +13286,8 @@ def page_screener():
     if picked is not None:
         st.markdown(_scr_detail_html(picked, s, incumbents), unsafe_allow_html=True)
     else:
-        st.caption("Click a row to see the fund's gates, fit signals, quick test and Watchlist notes.")
+        st.caption("Click a row to see the fund's gates, fit signals, quick test, replacement test and "
+                   "Watchlist notes.")
 
     _footnote(
         "Expense ratio and AUM are Yahoo Finance's net figures; Vanguard ETFs report every share class "
@@ -13224,8 +13295,9 @@ def page_screener():
         "run, so funds below its liquidity floor ($2M a day, $8) have no fit statistics or quick test, "
         "and neither do funds with less than about a year of prices. Trend statistics and the quick test "
         "need about 2.75 years (24 test months); a quick test under 60 test months is a short window. "
-        "A fund with no data for an active gate or signal fails it. The quick test is an in-sample "
-        "backtest, a screen rather than a verdict, and the universe holds only funds that still trade."
+        "A fund with no data for an active gate or signal fails it. The quick test and the replacement "
+        "test are in-sample backtests, screens rather than verdicts, and the universe holds only funds "
+        "that still trade."
     )
     with st.expander("How the columns are measured"):
         st.markdown(
@@ -13259,14 +13331,24 @@ def page_screener():
             "funds. Young funds "
             "are tested from 24 test months (since November 2, 2026); a window under 60 months is marked "
             "short on the card, and counts as a pass only if you lower the test months.\n"
+            "- **Replacement test:** the standing configuration with the fund in place of its most "
+            "similar incumbent, in that incumbent's slot (the equity sub-basket still picks 3 of 4), "
+            "against the standing configuration, over the fund's own window, from Replacement Screen.py "
+            "(added November 2, 2026). Only funds at 0.70 or more with an incumbent are swapped. The "
+            "Replacement candidates preset asks for a better Sortino over the window and in both halves, "
+            "60 or more test months and $5M a day; it leaves the copy gate off, because a replacement is "
+            "meant to resemble what it replaces. With those settings it returns 82 swaps (35 for IWM, 24 "
+            "for EMXC, 15 for TLT, 5 for GLD, 2 for BIL, 1 for HGER). Many winners in one slot usually say "
+            "more about the incumbent's recent record than about any one replacement, so a swap that "
+            "clears this bar goes to the method's stage 4 like any other candidate.\n"
             "- **Flags:** read from fund names. Leveraged means more than 1x. Leveraged and inverse funds "
             "stay in, and get the quick test like any other fund, unless you leave them out; daily-reset "
             "decay should show up in their trend signal and quick test. Likely K-1 comes from issuer and "
             "name patterns and a list of "
             "known commodity pools, and the Watchlist's tax form overrides it. Check the issuer before "
             "relying on any tax flag.\n"
-            "- **Refresh:** run etf_screener\\make_etf_screener.py after each quarterly universe pull "
-            "and screen. It refetches expense ratio and AUM for every fund and keeps issuer, category "
+            "- **Refresh:** run etf_screener\\make_etf_screener.py after each quarterly universe pull, "
+            "Universe Screen and Replacement Screen. It refetches expense ratio and AUM for every fund and keeps issuer, category "
             "and inception for a year."
         )
     _scr_save_state()
