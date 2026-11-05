@@ -6903,8 +6903,9 @@ def render_underwater_section(combined, latest_date):
 # ===========================================================================
 # DRAWDOWNS IN CONTEXT (added November 5, 2026)
 # The live account's current decline beside every backtest drawdown of 10% or
-# more, the range of worst drawdowns across nine closely related versions of
-# the strategy, and the strategy's worst against the market's, on one scale.
+# more, the range of worst drawdowns when the strategy's settings change
+# slightly, and the strategy's worst against the market's, on one scale.
+# Public text never names the strategy's settings (Tyler, November 5, 2026).
 # The backtest figures are static outputs of the Strategy Backtesting System
 # (Basket Research\ETF Scouting\Drawdown Expectation 2026-11-05), stored in
 # drawdown_context.json beside app.py; the live figure comes from the
@@ -6916,7 +6917,7 @@ DDC_FILE = "drawdown_context.json"
 DDC_WINDOWS = {"Since 1995": "1995-06", "Since 2006": "2006-01", "Last 15 years": "2011-11"}
 DDC_LIVE = BRAND_PURPLE          # the live account: the hero color
 DDC_BACKTEST = "#AFA2DE"         # hypothetical backtest: a light Asymmetric Edge purple
-DDC_BAND = "#F1EEF8"             # worst drawdowns across the nine related versions
+DDC_BAND = "#F1EEF8"             # range of worst drawdowns with slightly different settings
 DDC_BAND_EDGE = "#C8BFE6"
 DDC_GRID = "#EDEDF1"
 DDC_ROW = 44                     # px per bar row
@@ -6977,7 +6978,7 @@ def build_drawdown_context_figure(win, live):
     from plotly.subplots import make_subplots
     live_depth, live_peak, live_end = live
     eps = win["episodes"]
-    band = [v * 100.0 for v in win["band"].values()]
+    band = [float(v) * 100.0 for v in win["band"]]
     band_lo, band_hi = -max(band), -min(band)            # magnitudes, e.g. 15.28 and 18.08
     band_avg = -sum(band) / len(band)
 
@@ -7056,7 +7057,7 @@ def build_drawdown_context_figure(win, live):
                      title=dict(text="Decline from peak", font=dict(size=13, color=TEXT_SECONDARY), standoff=8),
                      row=2, col=1)
 
-    # The band: worst drawdown across the nine closely related versions.
+    # The band: the range of worst drawdowns with slightly different settings.
     fig.add_shape(type="rect", xref="x", yref="y domain", x0=band_lo, x1=band_hi, y0=0, y1=1,
                   fillcolor=DDC_BAND, line=dict(width=0), layer="below")
     for xv in (band_lo, band_hi):
@@ -7065,9 +7066,9 @@ def build_drawdown_context_figure(win, live):
     fig.add_annotation(
         x=band_hi, y="r1_0", xref="x", yref="y", xanchor="left", xshift=10, yanchor="middle",
         align="left", showarrow=False,
-        text=(f"<b>Shaded:</b> worst drawdown across nine<br>closely related versions, "
-              f"{_ddc_pct(-band_lo)} to {_ddc_pct(-band_hi)}<br>"
-              f"<span style='color:{TEXT_MUTED}'>average {_ddc_pct(-band_avg)}</span>"),
+        text=(f"<b>Shaded:</b> worst drawdown with small<br>changes to the strategy's settings:<br>"
+              f"{_ddc_pct(-band_lo)} to {_ddc_pct(-band_hi)}, "
+              f"<span style='color:{TEXT_MUTED}'>typical {_ddc_pct(-band_avg)}</span>"),
         font=dict(size=12, color=TEXT_SECONDARY, family=ANALYTICS_FONT))
 
     # Panel titles, left-aligned with the row labels.
@@ -7083,8 +7084,7 @@ def build_drawdown_context_figure(win, live):
 
     # Key: solid purple is the live account, light purple the hypothetical backtest.
     for name, color, edge in (("Live account", DDC_LIVE, DDC_LIVE),
-                              ("Hypothetical backtest", DDC_BACKTEST, DDC_BACKTEST),
-                              ("Range across related versions", DDC_BAND, DDC_BAND_EDGE)):
+                              ("Hypothetical backtest", DDC_BACKTEST, DDC_BACKTEST)):
         fig.add_trace(go.Scatter(x=[None], y=[None], mode="markers", name=name + " ",
                                  marker=dict(symbol="square", size=14, color=color, line=dict(color=edge, width=1)),
                                  hoverinfo="skip"), row=1, col=1)
@@ -7139,15 +7139,14 @@ def render_drawdown_context_section(portfolio_series, latest_date):
     bt_end = pd.Timestamp(data.get("backtest_end", "2026-10-30"))
     start = pd.Timestamp(win["start"])
     _footnote(
-        f"Strategy history is a hypothetical backtest of the current rules (a blend of 2- and 8-month "
-        f"momentum, with Bitcoin), net of an assumed 0.05% trading cost a side, from {_long_date(start)} "
+        f"Strategy history is a hypothetical backtest of the strategy's current rules, including Bitcoin, "
+        f"net of an assumed 0.05% trading cost a side, from {_long_date(start)} "
         f"to {_long_date(bt_end)} on daily closes. It does not reflect actual trading and was built with "
         "the benefit of hindsight; Bitcoin enters in June 2015 on bitcoin's own price history. A drawdown "
         "runs from a peak until the portfolio closes at a new high, and months to recover count from the "
-        "peak to that new high. The shaded band spans the worst drawdown of nine closely related versions "
-        "of the strategy (a short momentum leg of 1 to 3 months and a long leg of 7 to 9 months). They "
-        "mostly hold the same funds, so they are not independent histories, and future drawdowns can be "
-        f"deeper than any shown. Now is the live account's decline from its {_long_date(live[1])} high to "
+        "peak to that new high. The shaded band shows the range of worst drawdowns when the strategy's "
+        "settings are changed slightly, a more cautious guide than any single backtest. Future drawdowns "
+        f"can be deeper than any shown. Now is the live account's decline from its {_long_date(live[1])} high to "
         f"the {_long_date(live[2])} close, from daily values reconstructed from closing prices and anchored "
         f"to Fidelity's monthly time-weighted returns, so it is approximate within a month. "
         f"{DDC_LIVE_AUG_2024} Benchmarks are total returns: S&amp;P 500 (SPY) and an 80/20 portfolio "
@@ -7158,7 +7157,7 @@ def render_drawdown_context_section(portfolio_series, latest_date):
         f"Asymmetric Edge drawdowns of 10% or more in a hypothetical backtest of the current rules, "
         f"{_cap_date(start)} to {_cap_date(bt_end)}, net of an assumed 0.05% trading cost a side, with the "
         f"live account's decline from its {_cap_date(live[1])} high through {_cap_date(live[2])}. Shaded: "
-        "worst drawdown across nine closely related versions of the strategy. Backtest results are "
+        "range of worst drawdowns with small changes to the strategy's settings. Backtest results are "
         "hypothetical, not actual trading. Benchmarks are total return: S&P 500 (SPY) and 80/20 (VASGX "
         "before June 2009, AOA after). Before taxes and fees. Past performance does not guarantee future results."
     )
