@@ -6915,6 +6915,8 @@ def render_underwater_section(combined, latest_date):
 # ===========================================================================
 DDC_FILE = "drawdown_context.json"
 DDC_WINDOWS = {"Since 1995": "1995-06", "Since 2006": "2006-01", "Last 15 years": "2011-11"}
+DDC_LIVE_PILL = "Live record"     # the live account since inception, no backtest (Tyler, November 5, 2026)
+DDC_LIVE_MIN = 0.05               # live drawdowns this deep or deeper get a bar
 DDC_LIVE = BRAND_PURPLE          # the live account: the hero color
 DDC_BACKTEST = "#AFA2DE"         # hypothetical backtest: a light Asymmetric Edge purple
 DDC_BAND = "#F1EEF8"             # range of worst drawdowns with slightly different settings
@@ -6974,53 +6976,25 @@ def _ddc_row_label(primary, secondary, live=False):
             f"<span style='font-size:12px;color:{TEXT_MUTED}'>{secondary}</span>")
 
 
-def build_drawdown_context_figure(win, live):
+def _ddc_recover_span(peak, recovered):
+    """'5 months', or weeks for a quick recovery."""
+    days = (pd.Timestamp(recovered) - pd.Timestamp(peak)).days
+    if days < 45:
+        weeks = max(1, int(np.floor(days / 7.0 + 0.5)))
+        return f"{weeks} week{'s' if weeks != 1 else ''}"
+    return f"{_ddc_months(days / 30.4375)} months"
+
+
+def _ddc_recover_text(peak, recovered):
+    return "back to peak in " + _ddc_recover_span(peak, recovered)
+
+
+def _ddc_draw(top, bottom, title_top, title_bottom, key_items, band=None):
+    """The two-panel ladder. top and bottom: rows of dicts (mag, color, text,
+    label, hover), already in display order. band: None, or (lo, hi, label)
+    as magnitudes in percent. One x scale for both panels, so the strategy's
+    declines and the market's read at their true size."""
     from plotly.subplots import make_subplots
-    live_depth, live_peak, live_end = live
-    eps = win["episodes"]
-    band = [float(v) * 100.0 for v in win["band"]]
-    band_lo, band_hi = -max(band), -min(band)            # magnitudes, e.g. 15.28 and 18.08
-    band_avg = -sum(band) / len(band)
-
-    def ep_hover(e, name):
-        return (f"<b>{name}</b> (backtest)<br>Peak {_ddc_short(e['peak'])}, low {_ddc_short(e['trough'])}<br>"
-                f"Back to peak {_ddc_short(e['recovered'])}, {_ddc_months(e['months_underwater'])} months<br>"
-                f"Depth {_ddc_pct(e['depth'] * 100.0, 2)}")
-
-    # Top panel: every backtest episode plus today's live decline, shallowest first.
-    top = []
-    for e in eps:
-        mag = -e["depth"] * 100.0
-        name = _ddc_years(e["peak"], e["trough"])
-        top.append(dict(mag=mag, color=DDC_BACKTEST, text=_ddc_pct(-mag), hover=ep_hover(e, name),
-                        label=_ddc_row_label(name, f"back to peak in {_ddc_months(e['months_underwater'])} months")))
-    live_mag = max(0.0, -live_depth)
-    live_sub = ("at a new high" if live_mag < 0.005 else f"from the {_ddc_short(live_peak)} high, still open")
-    top.append(dict(mag=live_mag, color=DDC_LIVE, text=f"<b>{_ddc_pct(-live_mag)}</b>",
-                    label=_ddc_row_label("Now (live)", live_sub, live=True),
-                    hover=(f"<b>Now</b> (live account)<br>High {_ddc_short(live_peak)}<br>"
-                           f"Close {_ddc_short(live_end)}<br>Depth {_ddc_pct(-live_mag, 2)}")))
-    top.sort(key=lambda r: r["mag"])
-
-    # Bottom panel: the strategy's worst against the benchmarks' worst, on the same scale.
-    worst = min(eps, key=lambda e: e["depth"])
-    w_name = _ddc_years(worst["peak"], worst["trough"])
-    bottom = [dict(mag=-worst["depth"] * 100.0, color=DDC_BACKTEST, text=_ddc_pct(worst["depth"] * 100.0),
-                   hover=ep_hover(worst, "Asymmetric Edge, " + w_name),
-                   label=_ddc_row_label("Asymmetric Edge (backtest)",
-                                        f"{w_name}, back to peak in {_ddc_months(worst['months_underwater'])} months"))]
-    for key, name in DDC_BENCH:
-        b = win["bench"][key]
-        yrs = _ddc_years(b["peak"], b["trough"])
-        bottom.append(dict(
-            mag=-b["depth"] * 100.0, color=BAR_SERIES_COLORS[key], text=_ddc_pct(b["depth"] * 100.0),
-            label=_ddc_row_label(name, f"{yrs}, back to peak in {_ddc_months(b['months_underwater'])} months"),
-            hover=(f"<b>{name.replace('&', '&amp;')}</b><br>Peak {_ddc_short(b['peak'])}, low {_ddc_short(b['trough'])}<br>"
-                   f"Back to peak {_ddc_short(b['recovered'])}, {_ddc_months(b['months_underwater'])} months<br>"
-                   f"Depth {_ddc_pct(b['depth'] * 100.0, 2)}")))
-    for r in bottom:
-        r["label"] = r["label"].replace("S&P", "S&amp;P")
-
     n1, n2 = len(top), len(bottom)
     M_T, GAP, M_B, M_L, M_R = 58, 76, 104, 232, 28
     plot_h = (n1 + n2) * DDC_ROW + GAP
@@ -7033,8 +7007,7 @@ def build_drawdown_context_figure(win, live):
             x=[r["mag"] for r in rows], y=ys, orientation="h", width=0.58,
             marker=dict(color=[r["color"] for r in rows], cornerradius=6),
             text=[r["text"] for r in rows], textposition="outside", cliponaxis=False,
-            textfont=dict(size=14, color=[BRAND_PURPLE if r["color"] == DDC_LIVE else TEXT_PRIMARY
-                                          for r in rows]),
+            textfont=dict(size=14, color=[BRAND_PURPLE if r.get("now") else TEXT_PRIMARY for r in rows]),
             hovertext=[r["hover"] for r in rows], hovertemplate="%{hovertext}<extra></extra>",
             showlegend=False,
         ), row=row, col=1)
@@ -7043,11 +7016,10 @@ def build_drawdown_context_figure(win, live):
                          tickfont=dict(size=15, color=ANALYTICS_CELL_TEXT), fixedrange=True,
                          row=row, col=1)
 
-    # One scale for both panels, so the strategy's declines and the market's read at their true size.
-    deepest = max([r["mag"] for r in top + bottom] + [band_hi])
+    deepest = max([r["mag"] for r in top + bottom] + ([band[1]] if band else []))
     step = 10 if deepest > 25 else 5
     xmax = int(np.ceil((deepest + 2.0) / step)) * step
-    ticks = list(range(0, int(xmax) + 1, step))
+    ticks = list(range(0, xmax + 1, step))
     for row in (1, 2):
         fig.update_xaxes(range=[0, xmax], tickvals=ticks, showgrid=True, gridcolor=DDC_GRID,
                          zeroline=True, zerolinecolor="#C9C9D3", zerolinewidth=1.5, fixedrange=True,
@@ -7057,36 +7029,27 @@ def build_drawdown_context_figure(win, live):
                      title=dict(text="Decline from peak", font=dict(size=13, color=TEXT_SECONDARY), standoff=8),
                      row=2, col=1)
 
-    # The band: the range of worst drawdowns with slightly different settings.
-    fig.add_shape(type="rect", xref="x", yref="y domain", x0=band_lo, x1=band_hi, y0=0, y1=1,
-                  fillcolor=DDC_BAND, line=dict(width=0), layer="below")
-    for xv in (band_lo, band_hi):
-        fig.add_shape(type="line", xref="x", yref="y domain", x0=xv, x1=xv, y0=0, y1=1,
-                      line=dict(color=DDC_BAND_EDGE, width=1, dash="3px,3px"), layer="below")
-    fig.add_annotation(
-        x=band_hi, y="r1_0", xref="x", yref="y", xanchor="left", xshift=10, yanchor="middle",
-        align="left", showarrow=False,
-        text=(f"<b>Shaded:</b> worst drawdown with small<br>changes to the strategy's settings:<br>"
-              f"{_ddc_pct(-band_lo)} to {_ddc_pct(-band_hi)}, "
-              f"<span style='color:{TEXT_MUTED}'>typical {_ddc_pct(-band_avg)}</span>"),
-        font=dict(size=12, color=TEXT_SECONDARY, family=ANALYTICS_FONT))
+    if band:
+        lo, hi, text = band
+        fig.add_shape(type="rect", xref="x", yref="y domain", x0=lo, x1=hi, y0=0, y1=1,
+                      fillcolor=DDC_BAND, line=dict(width=0), layer="below")
+        for xv in (lo, hi):
+            fig.add_shape(type="line", xref="x", yref="y domain", x0=xv, x1=xv, y0=0, y1=1,
+                          line=dict(color=DDC_BAND_EDGE, width=1, dash="3px,3px"), layer="below")
+        fig.add_annotation(x=hi, y="r1_0", xref="x", yref="y", xanchor="left", xshift=10, yanchor="middle",
+                           align="left", showarrow=False, text=text,
+                           font=dict(size=12, color=TEXT_SECONDARY, family=ANALYTICS_FONT))
 
     # Panel titles, left-aligned with the row labels.
     x_left = -(M_L - 4) / (ANALYTICS_WIDTH - M_L - M_R)
-    start_txt = f"{pd.Timestamp(win['start']):%B %Y}"
-    for y, text in ((fig.layout.yaxis.domain[1],
-                     f"Every backtest drawdown of 10% or more since {start_txt}, and today's"),
-                    (fig.layout.yaxis2.domain[1],
-                     f"Worst drawdown since {start_txt}: the strategy and the market")):
+    for y, text in ((fig.layout.yaxis.domain[1], title_top), (fig.layout.yaxis2.domain[1], title_bottom)):
         fig.add_annotation(x=x_left, y=y, xref="paper", yref="paper", xanchor="left", yanchor="bottom",
                            yshift=14, showarrow=False, text=f"<b>{text}</b>",
                            font=dict(size=15, color=TEXT_PRIMARY, family=ANALYTICS_FONT))
 
-    # Key: solid purple is the live account, light purple the hypothetical backtest.
-    for name, color, edge in (("Live account", DDC_LIVE, DDC_LIVE),
-                              ("Hypothetical backtest", DDC_BACKTEST, DDC_BACKTEST)):
+    for name, color in key_items:
         fig.add_trace(go.Scatter(x=[None], y=[None], mode="markers", name=name + " ",
-                                 marker=dict(symbol="square", size=14, color=color, line=dict(color=edge, width=1)),
+                                 marker=dict(symbol="square", size=14, color=color, line=dict(color=color, width=1)),
                                  hoverinfo="skip"), row=1, col=1)
 
     fig.update_layout(
@@ -7099,6 +7062,126 @@ def build_drawdown_context_figure(win, live):
         hoverlabel=dict(font=dict(family=ANALYTICS_FONT, size=13)),
     )
     return fig
+
+
+def _ddc_now_row(live):
+    depth, peak, end = live
+    mag = max(0.0, -depth)
+    sub = "at a new high" if mag < 0.005 else f"from the {_ddc_short(peak)} high, still open"
+    return dict(mag=mag, color=DDC_LIVE, now=True, text=f"<b>{_ddc_pct(-mag)}</b>",
+                label=_ddc_row_label("Now (live)", sub, live=True),
+                hover=(f"<b>Now</b> (live account)<br>High {_ddc_short(peak)}<br>"
+                       f"Close {_ddc_short(end)}<br>Depth {_ddc_pct(-mag, 2)}"))
+
+
+def build_drawdown_context_figure(win, live):
+    """A backtest view: every backtest drawdown of 10% or more with today's
+    live decline, the band, and the strategy's worst against the market's."""
+    eps = win["episodes"]
+    band = [float(v) * 100.0 for v in win["band"]]
+    band_lo, band_hi = -max(band), -min(band)            # magnitudes, e.g. 15.28 and 18.08
+    band_avg = -sum(band) / len(band)
+
+    def ep_hover(e, name):
+        return (f"<b>{name}</b> (backtest)<br>Peak {_ddc_short(e['peak'])}, low {_ddc_short(e['trough'])}<br>"
+                f"Back to peak {_ddc_short(e['recovered'])}, {_ddc_months(e['months_underwater'])} months<br>"
+                f"Depth {_ddc_pct(e['depth'] * 100.0, 2)}")
+
+    top = []
+    for e in eps:
+        mag = -e["depth"] * 100.0
+        name = _ddc_years(e["peak"], e["trough"])
+        top.append(dict(mag=mag, color=DDC_BACKTEST, text=_ddc_pct(-mag), hover=ep_hover(e, name),
+                        label=_ddc_row_label(name, f"back to peak in {_ddc_months(e['months_underwater'])} months")))
+    top.append(_ddc_now_row(live))
+    top.sort(key=lambda r: r["mag"])
+
+    worst = min(eps, key=lambda e: e["depth"])
+    w_name = _ddc_years(worst["peak"], worst["trough"])
+    bottom = [dict(mag=-worst["depth"] * 100.0, color=DDC_BACKTEST, text=_ddc_pct(worst["depth"] * 100.0),
+                   hover=ep_hover(worst, "Asymmetric Edge, " + w_name),
+                   label=_ddc_row_label("Asymmetric Edge (backtest)",
+                                        f"{w_name}, back to peak in {_ddc_months(worst['months_underwater'])} months"))]
+    for key, name in DDC_BENCH:
+        b = win["bench"][key]
+        yrs = _ddc_years(b["peak"], b["trough"])
+        bottom.append(dict(
+            mag=-b["depth"] * 100.0, color=BAR_SERIES_COLORS[key], text=_ddc_pct(b["depth"] * 100.0),
+            label=_ddc_row_label(name.replace("&", "&amp;"),
+                                 f"{yrs}, back to peak in {_ddc_months(b['months_underwater'])} months"),
+            hover=(f"<b>{name.replace('&', '&amp;')}</b><br>Peak {_ddc_short(b['peak'])}, low {_ddc_short(b['trough'])}<br>"
+                   f"Back to peak {_ddc_short(b['recovered'])}, {_ddc_months(b['months_underwater'])} months<br>"
+                   f"Depth {_ddc_pct(b['depth'] * 100.0, 2)}")))
+
+    start_txt = f"{pd.Timestamp(win['start']):%B %Y}"
+    band_text = (f"<b>Shaded:</b> worst drawdown with small<br>changes to the strategy's settings:<br>"
+                 f"{_ddc_pct(-band_lo)} to {_ddc_pct(-band_hi)}, "
+                 f"<span style='color:{TEXT_MUTED}'>typical {_ddc_pct(-band_avg)}</span>")
+    return _ddc_draw(top, bottom,
+                     f"Every backtest drawdown of 10% or more since {start_txt}, and today's",
+                     f"Worst drawdown since {start_txt}: the strategy and the market",
+                     [("Live account", DDC_LIVE), ("Hypothetical backtest", DDC_BACKTEST)],
+                     band=(band_lo, band_hi, band_text))
+
+
+def _ddc_live_view(combined, latest_date, inception_date):
+    """Everything the live-record view needs, from the same daily data the
+    rest of the dashboard uses: the live account's drawdowns of DDC_LIVE_MIN or
+    more since inception, today's open decline, and each portfolio's worst."""
+    end = pd.Timestamp(latest_date)
+    start = pd.Timestamp(inception_date)
+    window = combined[(combined.index >= start) & (combined.index <= end)]
+    eps = find_drawdown_episodes(window["AsymEdge"])
+    earlier = [e for e in eps if e["recovered"] is not None and e["depth"] <= -DDC_LIVE_MIN]
+    bench = {}
+    for key, _name in DDC_BENCH:
+        if key in window.columns:
+            b_eps = find_drawdown_episodes(window[key])
+            if b_eps:
+                bench[key] = b_eps[0]
+    return dict(start=start, end=end, earlier=earlier, worst=eps[0] if eps else None, bench=bench)
+
+
+def build_drawdown_context_live_figure(view, live):
+    """The live-record view: every live drawdown of 5% or more since inception
+    with today's, and each portfolio's worst over the same span. All live data,
+    so there is no band."""
+    top = []
+    for e in view["earlier"]:
+        mag = -e["depth"] * 100.0
+        name = f"{pd.Timestamp(e['trough']):%b %Y}"
+        top.append(dict(mag=mag, color=DDC_BACKTEST, text=_ddc_pct(-mag),
+                        label=_ddc_row_label(name, _ddc_recover_text(e["peak"], e["recovered"])),
+                        hover=(f"<b>{name}</b> (live account)<br>Peak {_ddc_short(e['peak'])}, "
+                               f"low {_ddc_short(e['trough'])}<br>Back to peak {_ddc_short(e['recovered'])}<br>"
+                               f"Depth {_ddc_pct(e['depth'] * 100.0, 2)}")))
+    top.append(_ddc_now_row(live))
+    top.sort(key=lambda r: r["mag"])
+
+    def worst_row(e, name, color, live_row=False):
+        if e is None:
+            return None
+        if e["recovered"] is None:
+            sub = f"{pd.Timestamp(e['trough']):%b %Y}, still open"
+        else:
+            sub = f"{pd.Timestamp(e['trough']):%b %Y}, {_ddc_recover_text(e['peak'], e['recovered'])}"
+        rec = (f"Back to peak {_ddc_short(e['recovered'])}" if e["recovered"] is not None else "Not yet recovered")
+        return dict(mag=-e["depth"] * 100.0, color=color, now=live_row,
+                    text=(f"<b>{_ddc_pct(e['depth'] * 100.0)}</b>" if live_row else _ddc_pct(e["depth"] * 100.0)),
+                    label=_ddc_row_label(name.replace("&", "&amp;"), sub, live=live_row),
+                    hover=(f"<b>{name.replace('&', '&amp;')}</b><br>Peak {_ddc_short(e['peak'])}, "
+                           f"low {_ddc_short(e['trough'])}<br>{rec}<br>Depth {_ddc_pct(e['depth'] * 100.0, 2)}"))
+
+    bottom = [worst_row(view["worst"], "Asymmetric Edge (live)", DDC_LIVE, live_row=True)]
+    for key, name in DDC_BENCH:
+        bottom.append(worst_row(view["bench"].get(key), name, BAR_SERIES_COLORS[key]))
+    bottom = [r for r in bottom if r is not None]
+
+    since = _long_date(view["start"])
+    return _ddc_draw(top, bottom,
+                     f"Every live drawdown of {DDC_LIVE_MIN:.0%} or more since {since}",
+                     f"Worst drawdown since {since}: the strategy and the market",
+                     [("Now", DDC_LIVE), ("Earlier drawdowns", DDC_BACKTEST)])
 
 
 def _ddc_takeaway(win, live):
@@ -7118,21 +7201,70 @@ def _ddc_takeaway(win, live):
             f"went deeper, and all {n} recovered, the longest in {longest} months.")
 
 
-def render_drawdown_context_section(portfolio_series, latest_date):
+def _ddc_live_takeaway(view, live):
+    depth, peak, _end = live
+    mag = -depth
+    if mag < 0.005:
+        return f"The live account is at a new high. Since {_long_date(view['start'])} its deepest drawdown was {_ddc_pct(view['worst']['depth'] * 100.0)}." if view["worst"] else "The live account is at a new high."
+    head = f"The live account is {mag:.1f}% below its {_long_date(peak)} high"
+    earlier = view["earlier"]
+    deeper = [e for e in earlier if -e["depth"] * 100.0 > mag]
+    if not deeper:
+        head += f", its deepest drawdown since the strategy went live on {_long_date(view['start'])}."
+    else:
+        head += (f". {len(deeper)} of its {len(earlier)} earlier drawdowns of {DDC_LIVE_MIN:.0%} or more "
+                 f"since {_long_date(view['start'])} went deeper.")
+    parts = [head]
+    if earlier:
+        longest = max(earlier, key=lambda e: pd.Timestamp(e["recovered"]) - pd.Timestamp(e["peak"]))
+        parts.append(f"Its earlier drawdowns of {DDC_LIVE_MIN:.0%} or more all recovered, the slowest in "
+                     f"{_ddc_recover_span(longest['peak'], longest['recovered'])}.")
+    bench = [(name, view["bench"][k]) for k, name in DDC_BENCH if k in view["bench"]]
+    if bench:
+        parts.append("Over the same span the worst drawdown was " +
+                     " and ".join(f"{_ddc_pct(b['depth'] * 100.0)} for the {name.replace(' (SPY)', '')}"
+                                  for name, b in bench) + ".")
+    return " ".join(parts).replace("&", "&amp;")
+
+
+def render_drawdown_context_section(portfolio_series, combined, latest_date, inception_date):
     data = load_drawdown_context()
-    if not data or not data.get("windows"):
-        st.info("Drawdowns in Context needs drawdown_context.json beside app.py.")
-        return
-    labels = [k for k, v in DDC_WINDOWS.items() if v in data["windows"]]
-    choice = st.pills("Backtest period", labels, selection_mode="single", default=labels[0],
+    windows = (data or {}).get("windows", {})
+    labels = [k for k, v in DDC_WINDOWS.items() if v in windows] + [DDC_LIVE_PILL]
+    choice = st.pills("Period", labels, selection_mode="single", default=labels[0],
                       key="ddc_window") or labels[0]
-    win = data["windows"][DDC_WINDOWS[choice]]
     s = portfolio_series.dropna()
     s = s[s.index <= pd.Timestamp(latest_date)]
     live = _ddc_live(s)
+    lead = f'<p style="font-size:1.0rem; color:{TEXT_PRIMARY}; margin:0.2rem 0 0.7rem 0;">'
 
-    st.markdown(f'<p style="font-size:1.0rem; color:{TEXT_PRIMARY}; margin:0.2rem 0 0.7rem 0;">'
-                f'{_ddc_takeaway(win, live)}</p>', unsafe_allow_html=True)
+    if choice == DDC_LIVE_PILL:
+        view = _ddc_live_view(combined, latest_date, inception_date)
+        st.markdown(lead + _ddc_live_takeaway(view, live) + "</p>", unsafe_allow_html=True)
+        st.plotly_chart(build_drawdown_context_live_figure(view, live), use_container_width=False,
+                        config=chart_config("Drawdowns in Context Live Record"), key="ddc_fig_live")
+        _footnote(
+            f"Asymmetric Edge figures are the live account's daily values from {_long_date(view['start'])} "
+            f"to {_long_date(view['end'])}, reconstructed from closing prices and anchored to Fidelity's "
+            "monthly time-weighted returns, so depths within a month are approximate. A drawdown runs from "
+            "a peak until the portfolio closes at a new high, and time to recover counts from the peak to "
+            f"that new high. The top panel shows every live drawdown of {DDC_LIVE_MIN:.0%} or more. Benchmarks "
+            "are 80/20 (AOA) and S&amp;P 500 (SPY) total returns from Yahoo Finance adjusted closes, dividends "
+            "reinvested. Before taxes and advisory fees. Past performance does not guarantee future results."
+        )
+        newsletter_caption(
+            f"Asymmetric Edge live account drawdowns of {DDC_LIVE_MIN:.0%} or more since "
+            f"{_cap_date(view['start'])}, including the current decline from its {_cap_date(live[1])} high, "
+            f"and each portfolio's worst drawdown over the same span, Asymmetric Edge vs. 80/20 (AOA) and "
+            f"S&P 500 (SPY), data through {_cap_date(view['end'])}. " + NEWSLETTER_RETURNS_SENTENCES
+        )
+        return
+
+    if not windows:
+        st.info("The backtest views need drawdown_context.json beside app.py.")
+        return
+    win = windows[DDC_WINDOWS[choice]]
+    st.markdown(lead + _ddc_takeaway(win, live) + "</p>", unsafe_allow_html=True)
     st.plotly_chart(build_drawdown_context_figure(win, live), use_container_width=False,
                     config=chart_config("Drawdowns in Context"), key=f"ddc_fig_{DDC_WINDOWS[choice]}")
 
@@ -7161,7 +7293,6 @@ def render_drawdown_context_section(portfolio_series, latest_date):
         "hypothetical, not actual trading. Benchmarks are total return: S&P 500 (SPY) and 80/20 (VASGX "
         "before June 2009, AOA after). Before taxes and fees. Past performance does not guarantee future results."
     )
-
 
 # ===========================================================================
 # 5. THE ASYMMETRY (upside / downside capture)
@@ -12543,7 +12674,7 @@ def page_risk():
 
     section_anchor("context")
     _render_guarded("Drawdowns in Context", render_drawdown_context_section,
-                    ctx.portfolio_series, ctx.latest_date)
+                    ctx.portfolio_series, ctx.combined, ctx.latest_date, ctx.inception_date)
 
     st.divider()
 
