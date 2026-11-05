@@ -6901,6 +6901,270 @@ def render_underwater_section(combined, latest_date):
 
 
 # ===========================================================================
+# DRAWDOWNS IN CONTEXT (added November 5, 2026)
+# The live account's current decline beside every backtest drawdown of 10% or
+# more, the range of worst drawdowns across nine closely related versions of
+# the strategy, and the strategy's worst against the market's, on one scale.
+# The backtest figures are static outputs of the Strategy Backtesting System
+# (Basket Research\ETF Scouting\Drawdown Expectation 2026-11-05), stored in
+# drawdown_context.json beside app.py; the live figure comes from the
+# published series every rerun. Refresh the JSON when the reference baseline
+# changes or at the quarterly review. Tyler, November 5, 2026: public, on the
+# Risk page after Drawdowns Over Time.
+# ===========================================================================
+DDC_FILE = "drawdown_context.json"
+DDC_WINDOWS = {"Since 1995": "1995-06", "Since 2006": "2006-01", "Last 15 years": "2011-11"}
+DDC_LIVE = BRAND_PURPLE          # the live account: the hero color
+DDC_BACKTEST = "#AFA2DE"         # hypothetical backtest: a light Asymmetric Edge purple
+DDC_BAND = "#F1EEF8"             # worst drawdowns across the nine related versions
+DDC_BAND_EDGE = "#C8BFE6"
+DDC_GRID = "#EDEDF1"
+DDC_ROW = 44                     # px per bar row
+DDC_BENCH = [("80/20", "80/20 portfolio"), ("S&P 500", "S&P 500 (SPY)")]
+DDC_LIVE_AUG_2024 = "In August 2024 the live account fell 9.2%, against the backtest's 11.0%."
+
+
+@st.cache_data(show_spinner=False)
+def _ddc_read(path, mtime):
+    with open(path, encoding="utf-8-sig") as fh:
+        return json.load(fh)
+
+
+def load_drawdown_context():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), DDC_FILE)
+    if not os.path.exists(path):
+        return None
+    return _ddc_read(path, os.path.getmtime(path))
+
+
+def _ddc_pct(v, digits=1):
+    """-15.28 -> '−15.3%' with a true minus sign."""
+    s = f"{abs(v):.{digits}f}%"
+    return s if round(v, digits) == 0 else (MINUS + s if v < 0 else s)
+
+
+def _ddc_months(m):
+    """Half-up, so 52.5 months reads 53 (Python's round() gives 52)."""
+    return int(np.floor(float(m) + 0.5))
+
+
+def _ddc_years(peak, trough):
+    p, t = pd.Timestamp(peak).year, pd.Timestamp(trough).year
+    return str(p) if p == t else f"{p}–{str(t)[-2:]}"
+
+
+def _ddc_short(d):
+    d = pd.Timestamp(d)
+    return f"{d:%b} {d.day}, {d.year}"
+
+
+def _ddc_live(series):
+    """Current decline from the running high: (depth in %, peak date, last date)."""
+    s = series.dropna()
+    top = s.cummax().iloc[-1]
+    depth = (s.iloc[-1] / top - 1.0) * 100.0
+    return float(depth), s[s >= top].index[-1], s.index[-1]
+
+
+def _ddc_row_label(primary, secondary, live=False):
+    color = BRAND_PURPLE if live else ANALYTICS_CELL_TEXT
+    p = f"<b>{primary}</b>" if live else primary
+    return (f"<span style='color:{color}'>{p}</span><br>"
+            f"<span style='font-size:12px;color:{TEXT_MUTED}'>{secondary}</span>")
+
+
+def build_drawdown_context_figure(win, live):
+    from plotly.subplots import make_subplots
+    live_depth, live_peak, live_end = live
+    eps = win["episodes"]
+    band = [v * 100.0 for v in win["band"].values()]
+    band_lo, band_hi = -max(band), -min(band)            # magnitudes, e.g. 15.28 and 18.08
+    band_avg = -sum(band) / len(band)
+
+    def ep_hover(e, name):
+        return (f"<b>{name}</b> (backtest)<br>Peak {_ddc_short(e['peak'])}, low {_ddc_short(e['trough'])}<br>"
+                f"Back to peak {_ddc_short(e['recovered'])}, {_ddc_months(e['months_underwater'])} months<br>"
+                f"Depth {_ddc_pct(e['depth'] * 100.0, 2)}")
+
+    # Top panel: every backtest episode plus today's live decline, shallowest first.
+    top = []
+    for e in eps:
+        mag = -e["depth"] * 100.0
+        name = _ddc_years(e["peak"], e["trough"])
+        top.append(dict(mag=mag, color=DDC_BACKTEST, text=_ddc_pct(-mag), hover=ep_hover(e, name),
+                        label=_ddc_row_label(name, f"back to peak in {_ddc_months(e['months_underwater'])} months")))
+    live_mag = max(0.0, -live_depth)
+    live_sub = ("at a new high" if live_mag < 0.005 else f"from the {_ddc_short(live_peak)} high, still open")
+    top.append(dict(mag=live_mag, color=DDC_LIVE, text=f"<b>{_ddc_pct(-live_mag)}</b>",
+                    label=_ddc_row_label("Now (live)", live_sub, live=True),
+                    hover=(f"<b>Now</b> (live account)<br>High {_ddc_short(live_peak)}<br>"
+                           f"Close {_ddc_short(live_end)}<br>Depth {_ddc_pct(-live_mag, 2)}")))
+    top.sort(key=lambda r: r["mag"])
+
+    # Bottom panel: the strategy's worst against the benchmarks' worst, on the same scale.
+    worst = min(eps, key=lambda e: e["depth"])
+    w_name = _ddc_years(worst["peak"], worst["trough"])
+    bottom = [dict(mag=-worst["depth"] * 100.0, color=DDC_BACKTEST, text=_ddc_pct(worst["depth"] * 100.0),
+                   hover=ep_hover(worst, "Asymmetric Edge, " + w_name),
+                   label=_ddc_row_label("Asymmetric Edge (backtest)",
+                                        f"{w_name}, back to peak in {_ddc_months(worst['months_underwater'])} months"))]
+    for key, name in DDC_BENCH:
+        b = win["bench"][key]
+        yrs = _ddc_years(b["peak"], b["trough"])
+        bottom.append(dict(
+            mag=-b["depth"] * 100.0, color=BAR_SERIES_COLORS[key], text=_ddc_pct(b["depth"] * 100.0),
+            label=_ddc_row_label(name, f"{yrs}, back to peak in {_ddc_months(b['months_underwater'])} months"),
+            hover=(f"<b>{name.replace('&', '&amp;')}</b><br>Peak {_ddc_short(b['peak'])}, low {_ddc_short(b['trough'])}<br>"
+                   f"Back to peak {_ddc_short(b['recovered'])}, {_ddc_months(b['months_underwater'])} months<br>"
+                   f"Depth {_ddc_pct(b['depth'] * 100.0, 2)}")))
+    for r in bottom:
+        r["label"] = r["label"].replace("S&P", "S&amp;P")
+
+    n1, n2 = len(top), len(bottom)
+    M_T, GAP, M_B, M_L, M_R = 58, 76, 104, 232, 28
+    plot_h = (n1 + n2) * DDC_ROW + GAP
+    height = M_T + plot_h + M_B
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[n1, n2],
+                        vertical_spacing=GAP / plot_h)
+    for row, rows in ((1, top), (2, bottom)):
+        ys = [f"r{row}_{i}" for i in range(len(rows))]
+        fig.add_trace(go.Bar(
+            x=[r["mag"] for r in rows], y=ys, orientation="h", width=0.58,
+            marker=dict(color=[r["color"] for r in rows], cornerradius=6),
+            text=[r["text"] for r in rows], textposition="outside", cliponaxis=False,
+            textfont=dict(size=14, color=[BRAND_PURPLE if r["color"] == DDC_LIVE else TEXT_PRIMARY
+                                          for r in rows]),
+            hovertext=[r["hover"] for r in rows], hovertemplate="%{hovertext}<extra></extra>",
+            showlegend=False,
+        ), row=row, col=1)
+        fig.update_yaxes(tickmode="array", tickvals=ys, ticktext=[r["label"] for r in rows],
+                         autorange="reversed", showgrid=False, ticks="", ticklabelstandoff=12,
+                         tickfont=dict(size=15, color=ANALYTICS_CELL_TEXT), fixedrange=True,
+                         row=row, col=1)
+
+    # One scale for both panels, so the strategy's declines and the market's read at their true size.
+    deepest = max([r["mag"] for r in top + bottom] + [band_hi])
+    step = 10 if deepest > 25 else 5
+    xmax = int(np.ceil((deepest + 2.0) / step)) * step
+    ticks = list(range(0, int(xmax) + 1, step))
+    for row in (1, 2):
+        fig.update_xaxes(range=[0, xmax], tickvals=ticks, showgrid=True, gridcolor=DDC_GRID,
+                         zeroline=True, zerolinecolor="#C9C9D3", zerolinewidth=1.5, fixedrange=True,
+                         row=row, col=1)
+    fig.update_xaxes(ticktext=[_ddc_pct(-t, 0) if t else "0%" for t in ticks],
+                     tickfont=dict(size=13, color=TEXT_MUTED),
+                     title=dict(text="Decline from peak", font=dict(size=13, color=TEXT_SECONDARY), standoff=8),
+                     row=2, col=1)
+
+    # The band: worst drawdown across the nine closely related versions.
+    fig.add_shape(type="rect", xref="x", yref="y domain", x0=band_lo, x1=band_hi, y0=0, y1=1,
+                  fillcolor=DDC_BAND, line=dict(width=0), layer="below")
+    for xv in (band_lo, band_hi):
+        fig.add_shape(type="line", xref="x", yref="y domain", x0=xv, x1=xv, y0=0, y1=1,
+                      line=dict(color=DDC_BAND_EDGE, width=1, dash="3px,3px"), layer="below")
+    fig.add_annotation(
+        x=band_hi, y="r1_0", xref="x", yref="y", xanchor="left", xshift=10, yanchor="middle",
+        align="left", showarrow=False,
+        text=(f"<b>Shaded:</b> worst drawdown across nine<br>closely related versions, "
+              f"{_ddc_pct(-band_lo)} to {_ddc_pct(-band_hi)}<br>"
+              f"<span style='color:{TEXT_MUTED}'>average {_ddc_pct(-band_avg)}</span>"),
+        font=dict(size=12, color=TEXT_SECONDARY, family=ANALYTICS_FONT))
+
+    # Panel titles, left-aligned with the row labels.
+    x_left = -(M_L - 4) / (ANALYTICS_WIDTH - M_L - M_R)
+    start_txt = f"{pd.Timestamp(win['start']):%B %Y}"
+    for y, text in ((fig.layout.yaxis.domain[1],
+                     f"Every backtest drawdown of 10% or more since {start_txt}, and today's"),
+                    (fig.layout.yaxis2.domain[1],
+                     f"Worst drawdown since {start_txt}: the strategy and the market")):
+        fig.add_annotation(x=x_left, y=y, xref="paper", yref="paper", xanchor="left", yanchor="bottom",
+                           yshift=14, showarrow=False, text=f"<b>{text}</b>",
+                           font=dict(size=15, color=TEXT_PRIMARY, family=ANALYTICS_FONT))
+
+    # Key: solid purple is the live account, light purple the hypothetical backtest.
+    for name, color, edge in (("Live account", DDC_LIVE, DDC_LIVE),
+                              ("Hypothetical backtest", DDC_BACKTEST, DDC_BACKTEST),
+                              ("Range across related versions", DDC_BAND, DDC_BAND_EDGE)):
+        fig.add_trace(go.Scatter(x=[None], y=[None], mode="markers", name=name + " ",
+                                 marker=dict(symbol="square", size=14, color=color, line=dict(color=edge, width=1)),
+                                 hoverinfo="skip"), row=1, col=1)
+
+    fig.update_layout(
+        **DARK_LAYOUT,
+        width=ANALYTICS_WIDTH, height=height,
+        margin=dict(t=M_T, b=M_B, l=M_L, r=M_R),
+        legend=dict(orientation="h", xref="container", yref="container", x=0.5, xanchor="center",
+                    y=14 / height, yanchor="bottom", font=dict(size=13, color=TEXT_SECONDARY),
+                    itemsizing="constant", itemclick=False, itemdoubleclick=False),
+        hoverlabel=dict(font=dict(family=ANALYTICS_FONT, size=13)),
+    )
+    return fig
+
+
+def _ddc_takeaway(win, live):
+    depth, peak, _end = live
+    mag = -depth
+    eps = win["episodes"]
+    n = len(eps)
+    deeper = sum(1 for e in eps if -e["depth"] * 100.0 > mag)
+    longest = max(_ddc_months(e["months_underwater"]) for e in eps)
+    since = f"{pd.Timestamp(win['start']):%B %Y}"
+    if mag < 0.005:
+        return "The live account is at a new high."
+    head = f"The live account is {mag:.1f}% below its {_long_date(peak)} high."
+    if deeper == 0:
+        return f"{head} That is deeper than every backtest drawdown since {since}."
+    return (f"{head} In the backtest since {since}, {deeper} of the {n} drawdowns of 10% or more "
+            f"went deeper, and all {n} recovered, the longest in {longest} months.")
+
+
+def render_drawdown_context_section(portfolio_series, latest_date):
+    data = load_drawdown_context()
+    if not data or not data.get("windows"):
+        st.info("Drawdowns in Context needs drawdown_context.json beside app.py.")
+        return
+    labels = [k for k, v in DDC_WINDOWS.items() if v in data["windows"]]
+    choice = st.pills("Backtest period", labels, selection_mode="single", default=labels[0],
+                      key="ddc_window") or labels[0]
+    win = data["windows"][DDC_WINDOWS[choice]]
+    s = portfolio_series.dropna()
+    s = s[s.index <= pd.Timestamp(latest_date)]
+    live = _ddc_live(s)
+
+    st.markdown(f'<p style="font-size:1.0rem; color:{TEXT_PRIMARY}; margin:0.2rem 0 0.7rem 0;">'
+                f'{_ddc_takeaway(win, live)}</p>', unsafe_allow_html=True)
+    st.plotly_chart(build_drawdown_context_figure(win, live), use_container_width=False,
+                    config=chart_config("Drawdowns in Context"), key=f"ddc_fig_{DDC_WINDOWS[choice]}")
+
+    bt_end = pd.Timestamp(data.get("backtest_end", "2026-10-30"))
+    start = pd.Timestamp(win["start"])
+    _footnote(
+        f"Strategy history is a hypothetical backtest of the current rules (a blend of 2- and 8-month "
+        f"momentum, with Bitcoin), net of an assumed 0.05% trading cost a side, from {_long_date(start)} "
+        f"to {_long_date(bt_end)} on daily closes. It does not reflect actual trading and was built with "
+        "the benefit of hindsight; Bitcoin enters in June 2015 on bitcoin's own price history. A drawdown "
+        "runs from a peak until the portfolio closes at a new high, and months to recover count from the "
+        "peak to that new high. The shaded band spans the worst drawdown of nine closely related versions "
+        "of the strategy (a short momentum leg of 1 to 3 months and a long leg of 7 to 9 months). They "
+        "mostly hold the same funds, so they are not independent histories, and future drawdowns can be "
+        f"deeper than any shown. Now is the live account's decline from its {_long_date(live[1])} high to "
+        f"the {_long_date(live[2])} close, from daily values reconstructed from closing prices and anchored "
+        f"to Fidelity's monthly time-weighted returns, so it is approximate within a month. "
+        f"{DDC_LIVE_AUG_2024} Benchmarks are total returns: S&amp;P 500 (SPY) and an 80/20 portfolio "
+        "(Vanguard LifeStrategy Growth, VASGX, before June 2009 and AOA after). Before taxes and advisory "
+        "fees. Past performance does not guarantee future results."
+    )
+    newsletter_caption(
+        f"Asymmetric Edge drawdowns of 10% or more in a hypothetical backtest of the current rules, "
+        f"{_cap_date(start)} to {_cap_date(bt_end)}, net of an assumed 0.05% trading cost a side, with the "
+        f"live account's decline from its {_cap_date(live[1])} high through {_cap_date(live[2])}. Shaded: "
+        "worst drawdown across nine closely related versions of the strategy. Backtest results are "
+        "hypothetical, not actual trading. Benchmarks are total return: S&P 500 (SPY) and 80/20 (VASGX "
+        "before June 2009, AOA after). Before taxes and fees. Past performance does not guarantee future results."
+    )
+
+
+# ===========================================================================
 # 5. THE ASYMMETRY (upside / downside capture)
 # ===========================================================================
 
@@ -12258,6 +12522,7 @@ def page_performance():
 RISK_SECTIONS = [
     ("drawdown", "Maximum Drawdown"),
     ("underwater", "Drawdowns Over Time"),
+    ("context", "Drawdowns in Context"),
     ("asymmetry", "The Asymmetry"),
     ("risk-return", "Risk vs. Return"),
 ]
@@ -12274,6 +12539,12 @@ def page_risk():
 
     section_anchor("underwater")
     _render_guarded("Drawdowns Over Time", render_underwater_section, ctx.combined, ctx.latest_date)
+
+    st.divider()
+
+    section_anchor("context")
+    _render_guarded("Drawdowns in Context", render_drawdown_context_section,
+                    ctx.portfolio_series, ctx.latest_date)
 
     st.divider()
 

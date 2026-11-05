@@ -1,0 +1,51 @@
+{
+ "note": "Draft assembled November 5, 2026 from the Drawdown Expectation 2026-11-05 outputs (Strategy Backtesting System). 2/8 with IBIT, net of 0.05% a side, std+real history. 1995-06 window: episodes from Drawdown Episodes.csv, band from Drawdown Expectation Output.txt, benchmarks equal to the 2006-01 window (the 2007-09 crash is the worst in both). 2006-01 and 2011-11 windows: Drawdown Windows <start>.json as written.",
+ "backtest_end": "2026-10-30",
+ "windows": {
+  "1995-06": {
+   "start": "1995-06-01",
+   "episodes": [
+    {"peak": "2000-03-09", "trough": "2000-04-14", "recovered": "2002-04-17", "depth": -0.152802, "months_underwater": 25.3},
+    {"peak": "2006-05-10", "trough": "2006-09-20", "recovered": "2007-10-18", "depth": -0.128428, "months_underwater": 17.3},
+    {"peak": "2015-04-24", "trough": "2016-05-24", "recovered": "2017-01-04", "depth": -0.116407, "months_underwater": 20.4},
+    {"peak": "2020-02-19", "trough": "2020-03-19", "recovered": "2020-07-08", "depth": -0.119106, "months_underwater": 4.6},
+    {"peak": "2021-03-11", "trough": "2021-07-19", "recovered": "2021-10-15", "depth": -0.105288, "months_underwater": 7.2},
+    {"peak": "2024-07-16", "trough": "2024-08-07", "recovered": "2024-10-29", "depth": -0.110196, "months_underwater": 3.4}
+   ],
+   "band": {"2/8": -0.152802, "1/7": -0.1528, "1/8": -0.1727, "1/9": -0.1528, "2/7": -0.174855, "2/9": -0.158419, "3/7": -0.176618, "3/8": -0.1528, "3/9": -0.180791},
+   "bench": {
+    "S&P 500": {"peak": "2007-10-09", "trough": "2009-03-09", "recovered": "2012-08-16", "depth": -0.551894, "months_underwater": 58.3},
+    "80/20": {"peak": "2007-10-31", "trough": "2009-03-09", "recovered": "2012-03-16", "depth": -0.511636, "months_underwater": 52.5}
+   }
+  },
+  "2006-01": {
+   "start": "2006-01-01",
+   "episodes": [
+    {"peak": "2006-05-10", "trough": "2006-09-20", "recovered": "2007-10-18", "depth": -0.128428, "months_underwater": 17.3},
+    {"peak": "2015-04-24", "trough": "2016-05-24", "recovered": "2017-01-04", "depth": -0.116407, "months_underwater": 20.4},
+    {"peak": "2020-02-19", "trough": "2020-03-19", "recovered": "2020-07-08", "depth": -0.119106, "months_underwater": 4.6},
+    {"peak": "2021-03-11", "trough": "2021-07-19", "recovered": "2021-10-15", "depth": -0.105288, "months_underwater": 7.2},
+    {"peak": "2024-07-16", "trough": "2024-08-07", "recovered": "2024-10-29", "depth": -0.110196, "months_underwater": 3.4}
+   ],
+   "band": {"2/8": -0.128428, "1/7": -0.124765, "1/8": -0.143891, "1/9": -0.132487, "2/7": -0.174855, "2/9": -0.158419, "3/7": -0.176618, "3/8": -0.140015, "3/9": -0.180791},
+   "bench": {
+    "S&P 500": {"peak": "2007-10-09", "trough": "2009-03-09", "recovered": "2012-08-16", "depth": -0.551894, "months_underwater": 58.3},
+    "80/20": {"peak": "2007-10-31", "trough": "2009-03-09", "recovered": "2012-03-16", "depth": -0.511636, "months_underwater": 52.5}
+   }
+  },
+  "2011-11": {
+   "start": "2011-11-01",
+   "episodes": [
+    {"peak": "2015-04-24", "trough": "2016-05-24", "recovered": "2017-01-04", "depth": -0.116407, "months_underwater": 20.4},
+    {"peak": "2020-02-19", "trough": "2020-03-19", "recovered": "2020-07-08", "depth": -0.119106, "months_underwater": 4.6},
+    {"peak": "2021-03-11", "trough": "2021-07-19", "recovered": "2021-10-15", "depth": -0.105288, "months_underwater": 7.2},
+    {"peak": "2024-07-16", "trough": "2024-08-07", "recovered": "2024-10-29", "depth": -0.110196, "months_underwater": 3.4}
+   ],
+   "band": {"2/8": -0.119106, "1/7": -0.106566, "1/8": -0.135502, "1/9": -0.115157, "2/7": -0.174855, "2/9": -0.158419, "3/7": -0.176618, "3/8": -0.140015, "3/9": -0.180791},
+   "bench": {
+    "S&P 500": {"peak": "2020-02-19", "trough": "2020-03-23", "recovered": "2020-08-10", "depth": -0.337173, "months_underwater": 5.7},
+    "80/20": {"peak": "2020-02-12", "trough": "2020-03-23", "recovered": "2020-08-24", "depth": -0.283791, "months_underwater": 6.4}
+   }
+  }
+ }
+}
