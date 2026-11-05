@@ -7069,7 +7069,7 @@ def _ddc_now_row(live):
     mag = max(0.0, -depth)
     sub = "at a new high" if mag < 0.005 else f"from the {_ddc_short(peak)} high, still open"
     return dict(mag=mag, color=DDC_LIVE, now=True, text=f"<b>{_ddc_pct(-mag)}</b>",
-                label=_ddc_row_label("Now (live)", sub, live=True),
+                label=_ddc_row_label("Now", sub, live=True),
                 hover=(f"<b>Now</b> (live account)<br>High {_ddc_short(peak)}<br>"
                        f"Close {_ddc_short(end)}<br>Depth {_ddc_pct(-mag, 2)}"))
 
@@ -7172,7 +7172,7 @@ def build_drawdown_context_live_figure(view, live):
                     hover=(f"<b>{name.replace('&', '&amp;')}</b><br>Peak {_ddc_short(e['peak'])}, "
                            f"low {_ddc_short(e['trough'])}<br>{rec}<br>Depth {_ddc_pct(e['depth'] * 100.0, 2)}"))
 
-    bottom = [worst_row(view["worst"], "Asymmetric Edge (live)", DDC_LIVE, live_row=True)]
+    bottom = [worst_row(view["worst"], "Asymmetric Edge", DDC_LIVE, live_row=True)]
     for key, name in DDC_BENCH:
         bottom.append(worst_row(view["bench"].get(key), name, BAR_SERIES_COLORS[key]))
     bottom = [r for r in bottom if r is not None]
