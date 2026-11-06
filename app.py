@@ -7114,9 +7114,8 @@ def build_drawdown_context_figure(win, live):
                    f"Depth {_ddc_pct(b['depth'] * 100.0, 2)}")))
 
     start_txt = f"{pd.Timestamp(win['start']):%B %Y}"
-    band_text = (f"<b>Shaded:</b> worst drawdown with small<br>changes to the strategy's settings:<br>"
-                 f"{_ddc_pct(-band_lo)} to {_ddc_pct(-band_hi)}, "
-                 f"<span style='color:{TEXT_MUTED}'>typical {_ddc_pct(-band_avg)}</span>")
+    band_text = (f"<b>Shaded:</b> the drawdown range I'm watching,<br>"
+                 f"{_ddc_pct(-band_lo)} to {_ddc_pct(-band_hi)}")
     return _ddc_draw(top, bottom,
                      f"Every backtest drawdown of 10% or more since {start_txt}, and today's",
                      f"Worst drawdown since {start_txt}: the strategy and the market",
@@ -7276,9 +7275,11 @@ def render_drawdown_context_section(portfolio_series, combined, latest_date, inc
         f"to {_long_date(bt_end)} on daily closes. It does not reflect actual trading and was built with "
         "the benefit of hindsight; Bitcoin enters in June 2015 on bitcoin's own price history. A drawdown "
         "runs from a peak until the portfolio closes at a new high, and months to recover count from the "
-        "peak to that new high. The shaded band shows the range of worst drawdowns when the strategy's "
-        "settings are changed slightly, a more cautious guide than any single backtest. Future drawdowns "
-        f"can be deeper than any shown. Now is the live account's decline from its {_long_date(live[1])} high to "
+        "peak to that new high. The shaded zone shows the deepest drawdowns the strategy reached in "
+        "backtests over the period shown when its parameters were varied slightly. Backtests run on tuned "
+        "parameters tend to understate future losses, so this range is a more cautious guide than any "
+        "single backtest. It is not a limit, and future drawdowns can be deeper. "
+        f"Now is the live account's decline from its {_long_date(live[1])} high to "
         f"the {_long_date(live[2])} close, from daily values reconstructed from closing prices and anchored "
         f"to Fidelity's monthly time-weighted returns, so it is approximate within a month. "
         f"{DDC_LIVE_AUG_2024} Benchmarks are total returns: S&amp;P 500 (SPY) and an 80/20 portfolio "
@@ -7289,7 +7290,8 @@ def render_drawdown_context_section(portfolio_series, combined, latest_date, inc
         f"Asymmetric Edge drawdowns of 10% or more in a hypothetical backtest of the current rules, "
         f"{_cap_date(start)} to {_cap_date(bt_end)}, net of an assumed 0.05% trading cost a side, with the "
         f"live account's decline from its {_cap_date(live[1])} high through {_cap_date(live[2])}. Shaded: "
-        "range of worst drawdowns with small changes to the strategy's settings. Backtest results are "
+        "the drawdown range I'm watching, from backtests with the strategy's parameters varied slightly. "
+        "It is not a limit; future drawdowns can be deeper. Backtest results are "
         "hypothetical, not actual trading. Benchmarks are total return: S&P 500 (SPY) and 80/20 (VASGX "
         "before June 2009, AOA after). Before taxes and fees. Past performance does not guarantee future results."
     )
