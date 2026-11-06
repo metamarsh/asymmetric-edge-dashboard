@@ -7405,56 +7405,49 @@ def _vsp_tile_shapes(tiles, width, M_L, M_R, M_T, M_B, height, top_px):
     return shapes, notes
 
 
-VSP_RANGE_FILL = "#EFEBF8"       # every spike's path, low to high
-VSP_MID_FILL = "#D2C8EF"         # the middle half (25th to 75th percentile)
-VSP_NOW = "#2E2E38"              # the spike in progress
+VSP_UP_LINE = "rgba(79,45,184,0.28)"     # spikes that ended the month higher: light Asymmetric Edge purple
+VSP_DOWN_LINE = "rgba(110,112,128,0.38)"  # spikes that ended the month lower: gray
+VSP_NOW = "#2E2E38"                       # the spike in progress
 
 
-def build_vol_spike_figure(cfg, past, current, since, show_current=False, show_all=False):
-    """A fan chart (November 5, 2026 redesign): the full range of every past
-    spike's path as a pale band, the middle half as a deeper band, and the
-    median as a Deep Purple line, with each one's month-end value at the right
-    edge. Individual spikes and the spike in progress are optional overlays."""
+def build_vol_spike_figure(cfg, past, current, since, show_current=False):
+    """Every past spike as a thin line, light purple if the index ended the
+    month higher and gray if lower, all the same weight, under a Deep Purple
+    median (Tyler chose this, concept D, November 5, 2026). The best, median
+    and worst month-end values sit at the right edge."""
     paths = np.vstack([p["path"] for p in past])
-    q0, q25, q50, q75, q100 = (np.percentile(paths, q, axis=0) for q in (0, 25, 50, 75, 100))
+    q50 = np.percentile(paths, 50, axis=0)
     ends = paths[:, -1]
     worst = past[int(np.argmin(ends))]
     best = past[int(np.argmax(ends))]
     days = np.arange(VSP_HORIZON + 1)
-    xs = np.concatenate([days, days[::-1]])
 
     def lbl_date(d):
         return f"{pd.Timestamp(d):%b} {pd.Timestamp(d).day}, {pd.Timestamp(d).year}"
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=xs, y=np.concatenate([q100, q0[::-1]]), fill="toself", fillcolor=VSP_RANGE_FILL,
-                             line=dict(width=0), mode="lines", hoverinfo="skip",
-                             name=f"Range of all {len(past)}", legendrank=3))
-    fig.add_trace(go.Scatter(x=xs, y=np.concatenate([q75, q25[::-1]]), fill="toself", fillcolor=VSP_MID_FILL,
-                             line=dict(width=0), mode="lines", hoverinfo="skip",
-                             name="Middle half", legendrank=2))
-    if show_all:
-        for i, p in enumerate(past):
-            fig.add_trace(go.Scatter(
-                x=days, y=p["path"], mode="lines", line=dict(color="rgba(72,72,90,0.35)", width=1),
-                name="Each spike", legendgroup="each", showlegend=i == 0, legendrank=4,
-                hovertemplate=f"<b>{lbl_date(p['date'])}</b><br>Day %{{x}}: %{{y:+.1f}}%<extra></extra>"))
-    custom = np.column_stack([q25, q75, q0, q100])
+    seen = set()
+    for p in past:
+        up = p["path"][-1] > 0
+        name = "Higher a month later" if up else "Lower a month later"
+        fig.add_trace(go.Scatter(
+            x=days, y=p["path"], mode="lines",
+            line=dict(color=VSP_UP_LINE if up else VSP_DOWN_LINE, width=1.5),
+            name=name, legendgroup=name, showlegend=name not in seen, legendrank=2 if up else 3,
+            hovertemplate=f"<b>{lbl_date(p['date'])}</b><br>Day %{{x}}: %{{y:+.1f}}%<extra></extra>"))
+        seen.add(name)
     fig.add_trace(go.Scatter(
         x=days, y=q50, mode="lines", line=dict(color=BRAND_PURPLE, width=3.5), name="Median", legendrank=1,
-        customdata=custom,
-        hovertemplate=("<b>Day %{x}</b><br>Median %{y:+.1f}%<br>Middle half %{customdata[0]:+.1f}% to "
-                       "%{customdata[1]:+.1f}%<br>Range %{customdata[2]:+.1f}% to %{customdata[3]:+.1f}%"
-                       "<extra></extra>")))
+        hovertemplate=f"<b>Median of {len(past)}</b><br>Day %{{x}}: %{{y:+.1f}}%<extra></extra>"))
     if current is not None and show_current:
         n = len(current["path"])
         fig.add_trace(go.Scatter(
             x=days[:n], y=current["path"], mode="lines+markers", line=dict(color=VSP_NOW, width=2.5),
             marker=dict(size=[0] * (n - 1) + [10], color=VSP_NOW, line=dict(color="#ffffff", width=2)),
-            name=f"This spike ({lbl_date(current['date'])})", legendrank=5,
+            name=f"This spike ({lbl_date(current['date'])})", legendrank=4,
             hovertemplate=f"<b>This spike, {lbl_date(current['date'])}</b><br>Day %{{x}}: %{{y:+.1f}}%<extra></extra>"))
 
-    ys = list(q0) + list(q100) + (list(current["path"]) if current is not None and show_current else [])
+    ys = list(paths.ravel()) + (list(current["path"]) if current is not None and show_current else [])
     lo, hi = min(ys + [0.0]), max(ys + [0.0])
     step = 10 if hi - lo > 40 else 5
     pad = 0.04 * (hi - lo)
@@ -7466,9 +7459,9 @@ def build_vol_spike_figure(cfg, past, current, since, show_current=False, show_a
     plot_w = W - M_L - M_R
 
     # Month-end values at the right edge: best, median, worst, nudged apart.
-    marks = [dict(y=q100[-1], text=_fmt_pct(q100[-1]), color=TEXT_MUTED, bold=False),
+    marks = [dict(y=ends.max(), text=_fmt_pct(ends.max()), color=TEXT_MUTED, bold=False),
              dict(y=q50[-1], text=_fmt_pct(q50[-1]), color=BRAND_PURPLE, bold=True),
-             dict(y=q0[-1], text=_fmt_pct(q0[-1]), color=TEXT_MUTED, bold=False)]
+             dict(y=ends.min(), text=_fmt_pct(ends.min()), color=TEXT_MUTED, bold=False)]
     px_per = H_PLOT / (y1 - y0)
     for m in marks:
         m["py"] = (y1 - m["y"]) * px_per
@@ -7529,12 +7522,8 @@ def render_vol_spike_section(latest_date):
     cfg = VSP_SETS[choice]
     past, current = find_vol_spikes(df[cfg["vol"]], df[cfg["idx"]], cfg["threshold"])
     # Off by default so the chart stays clean for newsletter screenshots (Tyler, November 5, 2026).
-    c1, c2 = st.columns(2)
-    with c1:
-        show_all = st.toggle("Show every spike", value=False, key="vsp_show_all")
-    with c2:
-        show_current = current is not None and st.toggle(
-            "Show the current spike's path", value=False, key="vsp_show_current")
+    show_current = current is not None and st.toggle(
+        "Show the current spike's path", value=False, key="vsp_show_current")
     if len(past) < 3:
         st.info("Not enough spikes in the data to draw this chart.")
         return
@@ -7547,9 +7536,9 @@ def render_vol_spike_section(latest_date):
         lead = (f"The {cfg['vol_name']} jumped {current['jump']:.1f}% on {_long_date(current['date'])}. " + lead)
     st.markdown(f'<p style="font-size:1.0rem; color:{TEXT_PRIMARY}; margin:0.2rem 0 0.7rem 0;">'
                 f'{lead.replace("&", "&amp;")}</p>', unsafe_allow_html=True)
-    st.plotly_chart(build_vol_spike_figure(cfg, past, current, first.year, show_current, show_all),
+    st.plotly_chart(build_vol_spike_figure(cfg, past, current, first.year, show_current),
                     use_container_width=False, config=chart_config(f"After a {cfg['vol_name']} Spike"),
-                    key=f"vsp_fig_{cfg['vol']}_{int(show_current)}{int(show_all)}")
+                    key=f"vsp_fig_{cfg['vol']}_{int(show_current)}")
     end = df[[cfg["vol"], cfg["idx"]]].dropna().index[-1]
     thr = f"{cfg['threshold']:.0%}"
     _footnote(
@@ -7557,9 +7546,9 @@ def render_vol_spike_section(latest_date):
         f"A spike within {VSP_GAP} trading days of the last one counted is not counted again. For each of the "
         f"{len(past)} completed spikes since the data begin on {_long_date(first)}, the chart tracks the "
         f"{cfg['idx_name']}'s price change from the spike day's close over the next {VSP_HORIZON} trading days, "
-        "about one month; index prices exclude dividends. The purple line is the median on each day, the darker "
-        "band the middle half of outcomes, and the pale band the full range from worst to best. The numbers at "
-        "the right are the best, median and worst after a month."
+        "about one month; index prices exclude dividends. Each thin line is one spike: light purple if the "
+        "index ended the month higher, gray if lower. The thick purple line is the median on each day, and the "
+        "numbers at the right are the best, median and worst after a month."
         + (f" The dark line is the spike of {_long_date(current['date'])}, still within its first month."
            if show_current else "")
         + f" Index data from Yahoo Finance through {_long_date(end)}. Past performance does not guarantee "
