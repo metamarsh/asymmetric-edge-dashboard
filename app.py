@@ -7297,6 +7297,273 @@ def render_drawdown_context_section(portfolio_series, combined, latest_date, inc
     )
 
 # ===========================================================================
+# AFTER A VOLATILITY SPIKE (added November 5, 2026)
+# Each day the volatility index jumped VSP_THRESHOLD or more in one session,
+# the index's price change over the next 21 trading days (about one month),
+# one line per spike, with the median, the best, the worst (red) and the
+# spike in progress. A spike within VSP_GAP sessions of the last counted one
+# is not counted again. History comes from vol_spike_snapshot.csv
+# (make_vol_spike_snapshot.py in ae-dashboard-deploy); recent sessions are
+# topped up from Yahoo, never past the dashboard's latest close.
+# ===========================================================================
+VSP_FILE = "vol_spike_snapshot.csv"
+VSP_SETS = {
+    "S&P 500 and VIX": dict(vol="^VIX", idx="^GSPC", vol_name="VIX", idx_name="S&P 500",
+                            threshold=0.40, vol_long="Cboe Volatility Index (VIX)"),
+    "Nasdaq-100 and VXN": dict(vol="^VXN", idx="^NDX", vol_name="VXN", idx_name="Nasdaq-100",
+                               threshold=0.30, vol_long="Cboe Nasdaq-100 Volatility Index (VXN)"),
+}
+VSP_HORIZON = 21                 # trading days, about one month
+VSP_GAP = 21                     # a new spike counts only after this many sessions
+VSP_BAD = -10.0                  # a month this bad or worse is drawn in loss red
+VSP_PAST = "#CBCED8"
+VSP_MEDIAN = "#484848"
+VSP_TICKS = [(0, "Spike day"), (5, "1 week"), (10, "2 weeks"), (15, "3 weeks"), (21, "1 month")]
+
+
+@st.cache_data(show_spinner=False)
+def _vsp_read(path, mtime):
+    df = pd.read_csv(path, parse_dates=["date"]).set_index("date").sort_index()
+    return df
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_vol_spike_data(latest_date_str):
+    """Snapshot history plus Yahoo's newest sessions, cut at the dashboard's
+    latest close so a live intraday bar never enters the chart."""
+    # Beside app.py (the cloud), or the deploy folder on Tyler's PC; the newest copy wins.
+    spots = [os.path.join(os.path.dirname(os.path.abspath(__file__)), VSP_FILE),
+             os.path.join(os.path.expanduser("~"), "Claude", "Projects", "Asymmetric Edge Chart Dashboard",
+                          "ae-dashboard-deploy", VSP_FILE)]
+    spots = [p for p in spots if os.path.exists(p)]
+    if not spots:
+        return None
+    path = max(spots, key=os.path.getmtime)
+    df = _vsp_read(path, os.path.getmtime(path)).copy()
+    latest = pd.Timestamp(latest_date_str)
+    if df.index[-1] < latest:
+        try:
+            recent = _fetch_closes(["^VIX", "^GSPC", "^VXN", "^NDX"],
+                                   (df.index[-1] - timedelta(days=10)).strftime("%Y-%m-%d"), latest_date_str)
+            if recent is not None and not recent.empty:
+                recent = recent[(recent.index > df.index[-1]) & (recent.index <= latest)]
+                recent = recent[[c for c in df.columns if c in recent.columns]].dropna(how="all")
+                if len(recent):
+                    df = pd.concat([df, recent]).sort_index()
+        except Exception:  # noqa: BLE001 - the snapshot alone still draws the chart
+            pass
+    return df[df.index <= latest]
+
+
+def find_vol_spikes(vol, idx, threshold):
+    """(past, current): past spikes with full paths, as dicts of date, jump and
+    path (percent change by trading day 0..VSP_HORIZON); current is the newest
+    spike when its month is still unfolding, else None."""
+    x = pd.concat([vol, idx], axis=1, keys=["vol", "idx"]).dropna()
+    jump = x["vol"].pct_change()
+    pos, last = [], None
+    for i in np.flatnonzero((jump >= threshold).to_numpy()):
+        if last is None or i - last > VSP_GAP:
+            pos.append(i)
+            last = i
+    past, current = [], None
+    for i in pos:
+        seg = x["idx"].iloc[i:i + VSP_HORIZON + 1]
+        rec = dict(date=x.index[i], jump=float(jump.iloc[i]) * 100.0,
+                   path=((seg / seg.iloc[0] - 1.0) * 100.0).to_numpy())
+        if len(seg) == VSP_HORIZON + 1:
+            past.append(rec)
+        elif i == pos[-1]:
+            current = rec
+    return past, current
+
+
+def _vsp_tile_shapes(tiles, width, M_L, M_R, M_T, M_B, height, top_px):
+    """Lavender stat tiles drawn in paper coordinates across the top margin."""
+    plot_w, plot_h = width - M_L - M_R, height - M_T - M_B
+    px = lambda v: (v - M_L) / plot_w
+    py = lambda v: (height - v - M_B) / plot_h       # v measured down from the figure top
+    gap, x0 = 12, 0
+    tile_w = (width - (len(tiles) - 1) * gap) / len(tiles)
+    shapes, notes = [], []
+    for value, label in tiles:
+        x1 = x0 + tile_w
+        y0, y1, r = top_px, top_px + 64, 10
+        rx, ry = r / plot_w, r / plot_h
+        a, b, c, d = px(x0), px(x1), py(y1), py(y0)
+        path = (f"M {a + rx},{c} L {b - rx},{c} Q {b},{c} {b},{c + ry} L {b},{d - ry} Q {b},{d} {b - rx},{d} "
+                f"L {a + rx},{d} Q {a},{d} {a},{d - ry} L {a},{c + ry} Q {a},{c} {a + rx},{c} Z")
+        shapes.append(dict(type="path", xref="paper", yref="paper", path=path,
+                           fillcolor=ANALYTICS_TINT, line=dict(width=0), layer="below"))
+        notes.append(dict(x=px(x0 + 14), y=py(y0 + 22), xref="paper", yref="paper", xanchor="left",
+                          yanchor="middle", showarrow=False, text=f"<b>{value}</b>",
+                          font=dict(family=ANALYTICS_FONT, size=21, color=BRAND_PURPLE)))
+        notes.append(dict(x=px(x0 + 14), y=py(y0 + 47), xref="paper", yref="paper", xanchor="left",
+                          yanchor="middle", showarrow=False, text=label,
+                          font=dict(family=ANALYTICS_FONT, size=12, color="#555566")))
+        x0 = x1 + gap
+    return shapes, notes
+
+
+def build_vol_spike_figure(cfg, past, current, since):
+    ends = np.array([p["path"][-1] for p in past])
+    median_path = np.median(np.vstack([p["path"] for p in past]), axis=0)
+    best = past[int(np.argmax(ends))]
+    bad = [p for p in past if p["path"][-1] <= VSP_BAD]
+    if not bad:
+        bad = [past[int(np.argmin(ends))]]
+    days = np.arange(VSP_HORIZON + 1)
+
+    def lbl_date(d):
+        return f"{pd.Timestamp(d):%b} {pd.Timestamp(d).day}, {pd.Timestamp(d).year}"
+
+    fig = go.Figure()
+    for p in past:
+        if p in bad or p is best:
+            continue
+        fig.add_trace(go.Scatter(
+            x=days, y=p["path"], mode="lines", line=dict(color=VSP_PAST, width=1.6), showlegend=False,
+            hovertemplate=f"<b>{lbl_date(p['date'])}</b><br>Day %{{x}}: %{{y:+.1f}}%<extra></extra>"))
+    fig.add_trace(go.Scatter(
+        x=days, y=best["path"], mode="lines", line=dict(color=GAIN_GREEN, width=2.2), showlegend=False,
+        hovertemplate=f"<b>{lbl_date(best['date'])}</b><br>Day %{{x}}: %{{y:+.1f}}%<extra></extra>"))
+    for p in bad:
+        fig.add_trace(go.Scatter(
+            x=days, y=p["path"], mode="lines", line=dict(color=LOSS_RED, width=2.4), showlegend=False,
+            hovertemplate=f"<b>{lbl_date(p['date'])}</b><br>Day %{{x}}: %{{y:+.1f}}%<extra></extra>"))
+    fig.add_trace(go.Scatter(
+        x=days, y=median_path, mode="lines", line=dict(color=VSP_MEDIAN, width=3, dash="6px,4px"),
+        showlegend=False, hovertemplate=f"<b>Median of {len(past)}</b><br>Day %{{x}}: %{{y:+.1f}}%<extra></extra>"))
+    if current is not None:
+        n = len(current["path"])
+        fig.add_trace(go.Scatter(
+            x=days[:n], y=current["path"], mode="lines+markers", line=dict(color=BRAND_PURPLE, width=4),
+            marker=dict(size=[0] * (n - 1) + [11], color=BRAND_PURPLE, line=dict(color="#ffffff", width=2)),
+            showlegend=False,
+            hovertemplate=f"<b>This spike, {lbl_date(current['date'])}</b><br>Day %{{x}}: %{{y:+.1f}}%<extra></extra>"))
+
+    # Value range and axis steps.
+    ys = [v for p in past for v in p["path"]] + ([v for v in current["path"]] if current else [])
+    lo, hi = min(ys + [0.0]), max(ys + [0.0])
+    step = 10 if hi - lo > 40 else 5
+    pad = 0.06 * (hi - lo)
+    y0, y1 = lo - pad, hi + pad
+    yticks = list(np.arange(np.ceil(y0 / step) * step, y1 + 1e-9, step))
+
+    W, M_L, M_R, M_B, H_PLOT = ANALYTICS_WIDTH, 58, 182, 54, 380
+    M_T = 132
+    H = M_T + H_PLOT + M_B
+
+    # End labels on the right, nudged apart so none overlap.
+    labels = [dict(y=median_path[-1], text=f"<b>Median of all {len(past)}: {_fmt_pct(median_path[-1])}</b>",
+                   color=VSP_MEDIAN),
+              dict(y=best["path"][-1], text=f"{lbl_date(best['date'])}: {_fmt_pct(best['path'][-1])}",
+                   color=GAIN_GREEN)]
+    for p in bad:
+        labels.append(dict(y=p["path"][-1], text=f"{lbl_date(p['date'])}: {_fmt_pct(p['path'][-1])}",
+                           color=LOSS_RED))
+    px_per = H_PLOT / (y1 - y0)
+    for d in labels:
+        d["py"] = (y1 - d["y"]) * px_per
+    labels.sort(key=lambda d: d["py"])
+    for i in range(1, len(labels)):
+        if labels[i]["py"] - labels[i - 1]["py"] < 19:
+            labels[i]["py"] = labels[i - 1]["py"] + 19
+    annotations = []
+    for d in labels:
+        annotations.append(dict(x=VSP_HORIZON, y=d["y"], xref="x", yref="y", xanchor="left", xshift=10,
+                                yanchor="middle", yshift=-(d["py"] - (y1 - d["y"]) * px_per), showarrow=False,
+                                text=d["text"], font=dict(family=ANALYTICS_FONT, size=13, color=d["color"])))
+    if current is not None:
+        n = len(current["path"])
+        now_txt = (f"({lbl_date(current['date'])})" if n == 1
+                   else f"day {n - 1}: {_fmt_pct(current['path'][-1])}")
+        annotations.append(dict(x=n - 1, y=current["path"][-1], xref="x", yref="y", xanchor="left",
+                                xshift=12, yshift=14, yanchor="bottom", showarrow=False,
+                                text=f"<b>This spike</b> {now_txt}",
+                                align="left", bgcolor="rgba(255,255,255,0.88)", borderpad=3,
+                                font=dict(family=ANALYTICS_FONT, size=13, color=BRAND_PURPLE)))
+
+    # Title and tiles in the top margin, so the PNG stands on its own.
+    up = int((ends > 0).sum())
+    plot_w, plot_h = W - M_L - M_R, H_PLOT
+    annotations.append(dict(x=-(M_L - 2) / plot_w, y=(H - 18 - M_B) / plot_h, xref="paper", yref="paper",
+                            xanchor="left", yanchor="middle", showarrow=False,
+                            text=(f"<b>The {cfg['idx_name']} in the month after each big {cfg['vol_name']} "
+                                  f"spike since {since}</b>"),
+                            font=dict(family=ANALYTICS_FONT, size=15, color=TEXT_PRIMARY)))
+    tiles = [(f"{up} of {len(past)}", "higher a month later"),
+             (_fmt_pct(float(np.median(ends))), "median change after a month"),
+             (f"{_fmt_pct(float(ends.min()))} to {_fmt_pct(float(ends.max()))}", "worst and best month")]
+    if current is not None:
+        tiles.append((f"{_fmt_pct(current['jump'])}", f"{cfg['vol_name']} jump, {lbl_date(current['date'])}"))
+    shapes, notes = _vsp_tile_shapes(tiles, W, M_L, M_R, M_T, M_B, H, 38)
+    annotations += notes
+
+    fig.update_layout(
+        **DARK_LAYOUT,
+        width=W, height=H, margin=dict(t=M_T, b=M_B, l=M_L, r=M_R),
+        xaxis=dict(range=[-0.3, VSP_HORIZON + 0.3], tickvals=[t for t, _ in VSP_TICKS],
+                   ticktext=[s for _, s in VSP_TICKS], showgrid=False, zeroline=False, fixedrange=True,
+                   tickfont=dict(size=13, color=TEXT_MUTED), showline=True, linecolor="#E5E7EB"),
+        yaxis=dict(range=[y0, y1], gridcolor="#EDEDF1", zeroline=True, zerolinecolor="#A9ABB8",
+                   zerolinewidth=1.2, fixedrange=True, tickvals=yticks,
+                   ticktext=[_fmt_pct(v, 0) if v else "0%" for v in yticks],
+                   tickfont=dict(size=13, color=TEXT_MUTED)),
+        hovermode="closest", hoverlabel=dict(font=dict(family=ANALYTICS_FONT, size=13)),
+        shapes=shapes, annotations=annotations,
+    )
+    return fig
+
+
+def render_vol_spike_section(latest_date):
+    st.markdown("## After a Volatility Spike")
+    df = load_vol_spike_data(pd.Timestamp(latest_date).strftime("%Y-%m-%d"))
+    if df is None or df.empty:
+        st.info("After a Volatility Spike needs vol_spike_snapshot.csv beside app.py.")
+        return
+    labels = [k for k, c in VSP_SETS.items() if c["vol"] in df.columns and c["idx"] in df.columns]
+    choice = st.pills("Index", labels, selection_mode="single", default=labels[0], key="vsp_set") or labels[0]
+    cfg = VSP_SETS[choice]
+    past, current = find_vol_spikes(df[cfg["vol"]], df[cfg["idx"]], cfg["threshold"])
+    if len(past) < 3:
+        st.info("Not enough spikes in the data to draw this chart.")
+        return
+    ends = np.array([p["path"][-1] for p in past])
+    first = df[cfg["vol"]].first_valid_index()
+    lead = (f"After the {len(past)} big {cfg['vol_name']} spikes since {first.year}, the {cfg['idx_name']} "
+            f"was higher a month later {int((ends > 0).sum())} times, with a median change of "
+            f"{_fmt_pct(float(np.median(ends)))}.")
+    if current is not None:
+        lead = (f"The {cfg['vol_name']} jumped {current['jump']:.1f}% on {_long_date(current['date'])}. " + lead)
+    st.markdown(f'<p style="font-size:1.0rem; color:{TEXT_PRIMARY}; margin:0.2rem 0 0.7rem 0;">'
+                f'{lead.replace("&", "&amp;")}</p>', unsafe_allow_html=True)
+    st.plotly_chart(build_vol_spike_figure(cfg, past, current, first.year), use_container_width=False,
+                    config=chart_config(f"After a {cfg['vol_name']} Spike"), key=f"vsp_fig_{cfg['vol']}")
+    end = df[[cfg["vol"], cfg["idx"]]].dropna().index[-1]
+    thr = f"{cfg['threshold']:.0%}"
+    _footnote(
+        f"A spike is a session in which the {cfg['vol_long']} closed at least {thr} above its previous close. "
+        f"A spike within {VSP_GAP} trading days of the last one counted is not counted again. Each line is the "
+        f"{cfg['idx_name']}'s price change from the spike day's close over the next {VSP_HORIZON} trading days, "
+        f"about one month; index prices exclude dividends. The dashed line is the median of the "
+        f"{len(past)} completed spikes since the data begin on {_long_date(first)}; red lines fell {abs(VSP_BAD):.0f}% or more, and "
+        "the green line is the best month."
+        + (f" The purple line is the spike of {_long_date(current['date'])}, still within its first month."
+           if current is not None else "")
+        + f" Index data from Yahoo Finance through {_long_date(end)}. Past performance does not guarantee "
+        "future results."
+    )
+    newsletter_caption(
+        f"{cfg['idx_name']} price change in the {VSP_HORIZON} trading days after each day the "
+        f"{cfg['vol_name']} jumped {thr} or more, since {first.year} ({len(past)} spikes before "
+        f"{_cap_date(current['date']) if current is not None else _cap_date(end)}; a spike within a month of "
+        "the previous one is not counted). Index data from Yahoo Finance, price only. Past performance does "
+        "not guarantee future results."
+    )
+
+
+# ===========================================================================
 # 5. THE ASYMMETRY (upside / downside capture)
 # ===========================================================================
 
@@ -12766,12 +13033,21 @@ def page_markets():
 
     st.divider()
 
+    section_anchor("vol-spikes")
+    try:
+        render_vol_spike_section(ctx.latest_date)
+    except Exception as exc:  # noqa: BLE001 - a section must never take the page down
+        st.info(f"After a Volatility Spike could not be computed ({type(exc).__name__}: {exc}).")
+
+    st.divider()
+
     render_total_return_section(ctx)
 
 
 MARKETS_SECTIONS = [
     ("universe", "Asset Universe"),
     ("asset-classes", "Asset Class Returns"),
+    ("vol-spikes", "After a Volatility Spike"),
     ("total-return", "Total Return Comparison"),
 ]
 
