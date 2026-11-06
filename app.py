@@ -7455,7 +7455,7 @@ def build_vol_spike_figure(cfg, past, current, since, show_current=False):
     y0, y1 = lo - pad, hi + pad
     yticks = list(np.arange(np.ceil(y0 / step) * step, y1 + 1e-9, step))
 
-    W, M_L, M_R, M_B, H_PLOT, M_T = ANALYTICS_WIDTH, 52, 32, 46, 390, 158
+    W, M_L, M_R, M_B, H_PLOT, M_T = ANALYTICS_WIDTH, 52, 32, 92, 390, 124
     H = M_T + H_PLOT + M_B
     plot_w = W - M_L - M_R
     annotations = [dict(x=-(M_L - 2) / plot_w, y=(H - 18 - M_B) / H_PLOT, xref="paper", yref="paper",
@@ -7482,9 +7482,9 @@ def build_vol_spike_figure(cfg, past, current, since, show_current=False):
                    zerolinewidth=1.2, fixedrange=True, tickvals=yticks,
                    ticktext=[_fmt_pct(v, 0) if v else "0%" for v in yticks],
                    tickfont=dict(size=13, color=TEXT_MUTED)),
-        legend=dict(orientation="h", x=0, xanchor="left", y=1.0, yanchor="bottom", xref="paper",
-                    font=dict(size=13, color=TEXT_SECONDARY), itemclick=False, itemdoubleclick=False,
-                    traceorder="normal"),
+        legend=dict(orientation="h", xref="container", yref="container", x=0.5, xanchor="center",
+                    y=12 / H, yanchor="bottom", font=dict(size=13, color=TEXT_SECONDARY),
+                    itemclick=False, itemdoubleclick=False, traceorder="normal"),
         hovermode="closest", hoverlabel=dict(font=dict(family=ANALYTICS_FONT, size=13)),
         shapes=shapes, annotations=annotations,
     )
