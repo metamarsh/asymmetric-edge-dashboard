@@ -7114,7 +7114,7 @@ def build_drawdown_context_figure(win, live):
                    f"Depth {_ddc_pct(b['depth'] * 100.0, 2)}")))
 
     start_txt = f"{pd.Timestamp(win['start']):%B %Y}"
-    band_text = (f"<b>Shaded:</b> the drawdown range I'm watching,<br>"
+    band_text = (f"<b>Shaded:</b> maximum drawdown range<br>from backtesting, "
                  f"{_ddc_pct(-band_lo)} to {_ddc_pct(-band_hi)}")
     return _ddc_draw(top, bottom,
                      f"Every backtest drawdown of 10% or more since {start_txt}, and today's",
@@ -7290,7 +7290,7 @@ def render_drawdown_context_section(portfolio_series, combined, latest_date, inc
         f"Asymmetric Edge drawdowns of 10% or more in a hypothetical backtest of the current rules, "
         f"{_cap_date(start)} to {_cap_date(bt_end)}, net of an assumed 0.05% trading cost a side, with the "
         f"live account's decline from its {_cap_date(live[1])} high through {_cap_date(live[2])}. Shaded: "
-        "the drawdown range I'm watching, from backtests with the strategy's parameters varied slightly. "
+        "maximum drawdown range from backtesting, with the strategy's parameters varied slightly. "
         "It is not a limit; future drawdowns can be deeper. Backtest results are "
         "hypothetical, not actual trading. Benchmarks are total return: S&P 500 (SPY) and 80/20 (VASGX "
         "before June 2009, AOA after). Before taxes and fees. Past performance does not guarantee future results."
