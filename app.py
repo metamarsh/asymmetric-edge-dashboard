@@ -7019,6 +7019,9 @@ def _ddc_draw(top, bottom, title_top, title_bottom, key_items, band=None):
     deepest = max([r["mag"] for r in top + bottom] + ([band[1]] if band else []))
     step = 10 if deepest > 25 else 5
     xmax = int(np.ceil((deepest + 2.0) / step)) * step
+    if band:
+        # Leave room right of the band for its label (about 240 px of the 520 px plot).
+        xmax = max(xmax, int(np.ceil(band[1] / 0.54 / step)) * step)
     ticks = list(range(0, xmax + 1, step))
     for row in (1, 2):
         fig.update_xaxes(range=[0, xmax], tickvals=ticks, showgrid=True, gridcolor=DDC_GRID,
@@ -7074,13 +7077,25 @@ def _ddc_now_row(live):
                        f"Close {_ddc_short(end)}<br>Depth {_ddc_pct(-mag, 2)}"))
 
 
-def build_drawdown_context_figure(win, live):
+def _ddc_watch_band(data):
+    """The drawdown range to watch: the full-history (since June 1995) worst
+    drawdowns with the parameters varied slightly. Tyler, November 5, 2026: the
+    same band on every period, the live record included."""
+    windows = (data or {}).get("windows", {})
+    win = windows.get("1995-06") or (next(iter(windows.values())) if windows else None)
+    if not win:
+        return None
+    band = [float(v) * 100.0 for v in win["band"]]
+    lo, hi = -max(band), -min(band)                   # magnitudes, e.g. 15.28 and 18.08
+    text = (f"<b>Shaded:</b> maximum drawdown range<br>from backtesting, "
+            f"{_ddc_pct(-lo)} to {_ddc_pct(-hi)}")
+    return lo, hi, text
+
+
+def build_drawdown_context_figure(win, live, band=None):
     """A backtest view: every backtest drawdown of 10% or more with today's
     live decline, the band, and the strategy's worst against the market's."""
     eps = win["episodes"]
-    band = [float(v) * 100.0 for v in win["band"]]
-    band_lo, band_hi = -max(band), -min(band)            # magnitudes, e.g. 15.28 and 18.08
-    band_avg = -sum(band) / len(band)
 
     def ep_hover(e, name):
         return (f"<b>{name}</b> (backtest)<br>Peak {_ddc_short(e['peak'])}, low {_ddc_short(e['trough'])}<br>"
@@ -7114,13 +7129,11 @@ def build_drawdown_context_figure(win, live):
                    f"Depth {_ddc_pct(b['depth'] * 100.0, 2)}")))
 
     start_txt = f"{pd.Timestamp(win['start']):%B %Y}"
-    band_text = (f"<b>Shaded:</b> maximum drawdown range<br>from backtesting, "
-                 f"{_ddc_pct(-band_lo)} to {_ddc_pct(-band_hi)}")
     return _ddc_draw(top, bottom,
                      f"Every backtest drawdown of 10% or more since {start_txt}, and today's",
                      f"Worst drawdown since {start_txt}: the strategy and the market",
                      [("Live account", DDC_LIVE), ("Hypothetical backtest", DDC_BACKTEST)],
-                     band=(band_lo, band_hi, band_text))
+                     band=band)
 
 
 def _ddc_live_view(combined, latest_date, inception_date):
@@ -7141,7 +7154,7 @@ def _ddc_live_view(combined, latest_date, inception_date):
     return dict(start=start, end=end, earlier=earlier, worst=eps[0] if eps else None, bench=bench)
 
 
-def build_drawdown_context_live_figure(view, live):
+def build_drawdown_context_live_figure(view, live, band=None):
     """The live-record view: every live drawdown of 5% or more since inception
     with today's, and each portfolio's worst over the same span. All live data,
     so there is no band."""
@@ -7180,7 +7193,7 @@ def build_drawdown_context_live_figure(view, live):
     return _ddc_draw(top, bottom,
                      f"Every live drawdown of {DDC_LIVE_MIN:.0%} or more since {since}",
                      f"Worst drawdown since {since}: the strategy and the market",
-                     [("Now", DDC_LIVE), ("Earlier drawdowns", DDC_BACKTEST)])
+                     [("Now", DDC_LIVE), ("Earlier drawdowns", DDC_BACKTEST)], band=band)
 
 
 def _ddc_takeaway(win, live):
@@ -7235,19 +7248,24 @@ def render_drawdown_context_section(portfolio_series, combined, latest_date, inc
     s = portfolio_series.dropna()
     s = s[s.index <= pd.Timestamp(latest_date)]
     live = _ddc_live(s)
+    band = _ddc_watch_band(data)
     lead = f'<p style="font-size:1.0rem; color:{TEXT_PRIMARY}; margin:0.2rem 0 0.7rem 0;">'
 
     if choice == DDC_LIVE_PILL:
         view = _ddc_live_view(combined, latest_date, inception_date)
         st.markdown(lead + _ddc_live_takeaway(view, live) + "</p>", unsafe_allow_html=True)
-        st.plotly_chart(build_drawdown_context_live_figure(view, live), use_container_width=False,
+        st.plotly_chart(build_drawdown_context_live_figure(view, live, band), use_container_width=False,
                         config=chart_config("Drawdowns in Context Live Record"), key="ddc_fig_live")
         _footnote(
             f"Asymmetric Edge figures are the live account's daily values from {_long_date(view['start'])} "
             f"to {_long_date(view['end'])}, reconstructed from closing prices and anchored to Fidelity's "
             "monthly time-weighted returns, so depths within a month are approximate. A drawdown runs from "
             "a peak until the portfolio closes at a new high, and time to recover counts from the peak to "
-            f"that new high. The top panel shows every live drawdown of {DDC_LIVE_MIN:.0%} or more. Benchmarks "
+            f"that new high. The top panel shows every live drawdown of {DDC_LIVE_MIN:.0%} or more. "
+            + ("The shaded zone is the maximum drawdown range from hypothetical backtests of the strategy since "
+               "June 1995 with its parameters varied slightly; backtests do not reflect actual trading, the range "
+               "is not a limit, and future drawdowns can be deeper. " if band else "")
+            + "Benchmarks "
             "are 80/20 (AOA) and S&amp;P 500 (SPY) total returns from Yahoo Finance adjusted closes, dividends "
             "reinvested. Before taxes and advisory fees. Past performance does not guarantee future results."
         )
@@ -7255,7 +7273,9 @@ def render_drawdown_context_section(portfolio_series, combined, latest_date, inc
             f"Asymmetric Edge live account drawdowns of {DDC_LIVE_MIN:.0%} or more since "
             f"{_cap_date(view['start'])}, including the current decline from its {_cap_date(live[1])} high, "
             f"and each portfolio's worst drawdown over the same span, Asymmetric Edge vs. 80/20 (AOA) and "
-            f"S&P 500 (SPY), data through {_cap_date(view['end'])}. " + NEWSLETTER_RETURNS_SENTENCES
+            f"S&P 500 (SPY), data through {_cap_date(view['end'])}. "
+            + ("Shaded: maximum drawdown range from hypothetical backtests since 1995, not a limit. " if band else "")
+            + NEWSLETTER_RETURNS_SENTENCES
         )
         return
 
@@ -7264,7 +7284,7 @@ def render_drawdown_context_section(portfolio_series, combined, latest_date, inc
         return
     win = windows[DDC_WINDOWS[choice]]
     st.markdown(lead + _ddc_takeaway(win, live) + "</p>", unsafe_allow_html=True)
-    st.plotly_chart(build_drawdown_context_figure(win, live), use_container_width=False,
+    st.plotly_chart(build_drawdown_context_figure(win, live, band), use_container_width=False,
                     config=chart_config("Drawdowns in Context"), key=f"ddc_fig_{DDC_WINDOWS[choice]}")
 
     bt_end = pd.Timestamp(data.get("backtest_end", "2026-10-30"))
@@ -7276,7 +7296,8 @@ def render_drawdown_context_section(portfolio_series, combined, latest_date, inc
         "the benefit of hindsight; Bitcoin enters in June 2015 on bitcoin's own price history. A drawdown "
         "runs from a peak until the portfolio closes at a new high, and months to recover count from the "
         "peak to that new high. The shaded zone shows the deepest drawdowns the strategy reached in "
-        "backtests over the period shown when its parameters were varied slightly. Backtests run on tuned "
+        "backtests since June 1995 when its parameters were varied slightly, the same range on every "
+        "period. Backtests run on tuned "
         "parameters tend to understate future losses, so this range is a more cautious guide than any "
         "single backtest. It is not a limit, and future drawdowns can be deeper. "
         f"Now is the live account's decline from its {_long_date(live[1])} high to "
@@ -7290,7 +7311,7 @@ def render_drawdown_context_section(portfolio_series, combined, latest_date, inc
         f"Asymmetric Edge drawdowns of 10% or more in a hypothetical backtest of the current rules, "
         f"{_cap_date(start)} to {_cap_date(bt_end)}, net of an assumed 0.05% trading cost a side, with the "
         f"live account's decline from its {_cap_date(live[1])} high through {_cap_date(live[2])}. Shaded: "
-        "maximum drawdown range from backtesting, with the strategy's parameters varied slightly. "
+        "maximum drawdown range from backtesting since 1995, with the strategy's parameters varied slightly. "
         "It is not a limit; future drawdowns can be deeper. Backtest results are "
         "hypothetical, not actual trading. Benchmarks are total return: S&P 500 (SPY) and 80/20 (VASGX "
         "before June 2009, AOA after). Before taxes and fees. Past performance does not guarantee future results."
