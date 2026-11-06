@@ -7405,79 +7405,106 @@ def _vsp_tile_shapes(tiles, width, M_L, M_R, M_T, M_B, height, top_px):
     return shapes, notes
 
 
-def build_vol_spike_figure(cfg, past, current, since, show_current=False):
-    """Every past spike as a quiet gray line, the ones that fell VSP_BAD or more
-    in loss red, the median dashed, and the spike in progress in Deep Purple.
-    A key above the plot names the lines, so the plot runs the full width
-    (November 5, 2026: end labels in a wide right margin looked cut off)."""
-    ends = np.array([p["path"][-1] for p in past])
-    median_path = np.median(np.vstack([p["path"] for p in past]), axis=0)
+VSP_RANGE_FILL = "#EFEBF8"       # every spike's path, low to high
+VSP_MID_FILL = "#D2C8EF"         # the middle half (25th to 75th percentile)
+VSP_NOW = "#2E2E38"              # the spike in progress
+
+
+def build_vol_spike_figure(cfg, past, current, since, show_current=False, show_all=False):
+    """A fan chart (November 5, 2026 redesign): the full range of every past
+    spike's path as a pale band, the middle half as a deeper band, and the
+    median as a Deep Purple line, with each one's month-end value at the right
+    edge. Individual spikes and the spike in progress are optional overlays."""
+    paths = np.vstack([p["path"] for p in past])
+    q0, q25, q50, q75, q100 = (np.percentile(paths, q, axis=0) for q in (0, 25, 50, 75, 100))
+    ends = paths[:, -1]
     worst = past[int(np.argmin(ends))]
-    bad = [p for p in past if p["path"][-1] <= VSP_BAD] or [worst]
+    best = past[int(np.argmax(ends))]
     days = np.arange(VSP_HORIZON + 1)
+    xs = np.concatenate([days, days[::-1]])
 
     def lbl_date(d):
         return f"{pd.Timestamp(d):%b} {pd.Timestamp(d).day}, {pd.Timestamp(d).year}"
 
-    def hover(name):
-        return f"<b>{name}</b><br>Day %{{x}}: %{{y:+.1f}}%<extra></extra>"
-
     fig = go.Figure()
-    first_gray = True
-    for p in past:
-        if any(p is b for b in bad):
-            continue
-        fig.add_trace(go.Scatter(
-            x=days, y=p["path"], mode="lines", line=dict(color=VSP_PAST, width=1.5),
-            name="Other spikes", legendgroup="other", showlegend=first_gray, legendrank=4,
-            hovertemplate=hover(lbl_date(p["date"]))))
-        first_gray = False
-    for i, p in enumerate(bad):
-        fig.add_trace(go.Scatter(
-            x=days, y=p["path"], mode="lines", line=dict(color=LOSS_RED, width=2.4),
-            name=f"Down {abs(VSP_BAD):.0f}% or more", legendgroup="bad", showlegend=i == 0, legendrank=3,
-            hovertemplate=hover(lbl_date(p["date"]))))
+    fig.add_trace(go.Scatter(x=xs, y=np.concatenate([q100, q0[::-1]]), fill="toself", fillcolor=VSP_RANGE_FILL,
+                             line=dict(width=0), mode="lines", hoverinfo="skip",
+                             name=f"Range of all {len(past)}", legendrank=3))
+    fig.add_trace(go.Scatter(x=xs, y=np.concatenate([q75, q25[::-1]]), fill="toself", fillcolor=VSP_MID_FILL,
+                             line=dict(width=0), mode="lines", hoverinfo="skip",
+                             name="Middle half", legendrank=2))
+    if show_all:
+        for i, p in enumerate(past):
+            fig.add_trace(go.Scatter(
+                x=days, y=p["path"], mode="lines", line=dict(color="rgba(72,72,90,0.35)", width=1),
+                name="Each spike", legendgroup="each", showlegend=i == 0, legendrank=4,
+                hovertemplate=f"<b>{lbl_date(p['date'])}</b><br>Day %{{x}}: %{{y:+.1f}}%<extra></extra>"))
+    custom = np.column_stack([q25, q75, q0, q100])
     fig.add_trace(go.Scatter(
-        x=days, y=median_path, mode="lines", line=dict(color=VSP_MEDIAN, width=3, dash="6px,4px"),
-        name=f"Median of {len(past)}", legendrank=2, hovertemplate=hover(f"Median of {len(past)}")))
+        x=days, y=q50, mode="lines", line=dict(color=BRAND_PURPLE, width=3.5), name="Median", legendrank=1,
+        customdata=custom,
+        hovertemplate=("<b>Day %{x}</b><br>Median %{y:+.1f}%<br>Middle half %{customdata[0]:+.1f}% to "
+                       "%{customdata[1]:+.1f}%<br>Range %{customdata[2]:+.1f}% to %{customdata[3]:+.1f}%"
+                       "<extra></extra>")))
     if current is not None and show_current:
         n = len(current["path"])
         fig.add_trace(go.Scatter(
-            x=days[:n], y=current["path"], mode="lines+markers", line=dict(color=BRAND_PURPLE, width=4),
-            marker=dict(size=[0] * (n - 1) + [11], color=BRAND_PURPLE, line=dict(color="#ffffff", width=2)),
-            name=f"This spike ({lbl_date(current['date'])})", legendrank=1,
-            hovertemplate=hover(f"This spike, {lbl_date(current['date'])}")))
+            x=days[:n], y=current["path"], mode="lines+markers", line=dict(color=VSP_NOW, width=2.5),
+            marker=dict(size=[0] * (n - 1) + [10], color=VSP_NOW, line=dict(color="#ffffff", width=2)),
+            name=f"This spike ({lbl_date(current['date'])})", legendrank=5,
+            hovertemplate=f"<b>This spike, {lbl_date(current['date'])}</b><br>Day %{{x}}: %{{y:+.1f}}%<extra></extra>"))
 
-    ys = [v for p in past for v in p["path"]] + (list(current["path"]) if current and show_current else [])
+    ys = list(q0) + list(q100) + (list(current["path"]) if current is not None and show_current else [])
     lo, hi = min(ys + [0.0]), max(ys + [0.0])
     step = 10 if hi - lo > 40 else 5
-    pad = 0.05 * (hi - lo)
+    pad = 0.04 * (hi - lo)
     y0, y1 = lo - pad, hi + pad
     yticks = list(np.arange(np.ceil(y0 / step) * step, y1 + 1e-9, step))
 
-    W, M_L, M_R, M_B, H_PLOT, M_T = ANALYTICS_WIDTH, 52, 32, 92, 390, 124
+    W, M_L, M_R, M_B, H_PLOT, M_T = ANALYTICS_WIDTH, 52, 66, 84, 380, 120
     H = M_T + H_PLOT + M_B
     plot_w = W - M_L - M_R
-    annotations = [dict(x=-(M_L - 2) / plot_w, y=(H - 18 - M_B) / H_PLOT, xref="paper", yref="paper",
-                        xanchor="left", yanchor="middle", showarrow=False,
-                        text=(f"<b>The {cfg['idx_name']} in the month after each big {cfg['vol_name']} "
-                              f"spike since {since}</b>"),
-                        font=dict(family=ANALYTICS_FONT, size=15, color=TEXT_PRIMARY))]
+
+    # Month-end values at the right edge: best, median, worst, nudged apart.
+    marks = [dict(y=q100[-1], text=_fmt_pct(q100[-1]), color=TEXT_MUTED, bold=False),
+             dict(y=q50[-1], text=_fmt_pct(q50[-1]), color=BRAND_PURPLE, bold=True),
+             dict(y=q0[-1], text=_fmt_pct(q0[-1]), color=TEXT_MUTED, bold=False)]
+    px_per = H_PLOT / (y1 - y0)
+    for m in marks:
+        m["py"] = (y1 - m["y"]) * px_per
+    marks.sort(key=lambda m: m["py"])
+    for i in range(1, len(marks)):
+        if marks[i]["py"] - marks[i - 1]["py"] < 17:
+            marks[i]["py"] = marks[i - 1]["py"] + 17
+    annotations = []
+    for m in marks:
+        annotations.append(dict(x=VSP_HORIZON, y=m["y"], xref="x", yref="y", xanchor="left", xshift=8,
+                                yanchor="middle", yshift=-(m["py"] - (y1 - m["y"]) * px_per), showarrow=False,
+                                text=f"<b>{m['text']}</b>" if m["bold"] else m["text"],
+                                font=dict(family=ANALYTICS_FONT, size=13, color=m["color"])))
+
+    annotations.append(dict(x=-(M_L - 2) / plot_w, y=(H - 18 - M_B) / H_PLOT, xref="paper", yref="paper",
+                            xanchor="left", yanchor="middle", showarrow=False,
+                            text=(f"<b>The {cfg['idx_name']} in the month after each big {cfg['vol_name']} "
+                                  f"spike since {since}</b>"),
+                            font=dict(family=ANALYTICS_FONT, size=15, color=TEXT_PRIMARY)))
     up = int((ends > 0).sum())
     tiles = [(f"{up} of {len(past)}", "higher a month later"),
              (_fmt_pct(float(np.median(ends))), "median after a month"),
              (_fmt_pct(float(worst["path"][-1])), f"worst month, {lbl_date(worst['date'])}")]
     if current is not None:
         tiles.append((_fmt_pct(current["jump"]), f"{cfg['vol_name']} jump, {lbl_date(current['date'])}"))
+    else:
+        tiles.append((_fmt_pct(float(best["path"][-1])), f"best month, {lbl_date(best['date'])}"))
     shapes, notes = _vsp_tile_shapes(tiles, W, M_L, M_R, M_T, M_B, H, 36)
     annotations += notes
 
     fig.update_layout(
         **DARK_LAYOUT,
         width=W, height=H, margin=dict(t=M_T, b=M_B, l=M_L, r=M_R),
-        xaxis=dict(range=[-0.3, VSP_HORIZON + 0.3], tickvals=[t for t, _ in VSP_TICKS],
+        xaxis=dict(range=[0, VSP_HORIZON], tickvals=[t for t, _ in VSP_TICKS],
                    ticktext=[s for _, s in VSP_TICKS], showgrid=False, zeroline=False, fixedrange=True,
-                   tickfont=dict(size=13, color=TEXT_MUTED), showline=True, linecolor="#E5E7EB"),
+                   tickfont=dict(size=13, color=TEXT_MUTED), ticklabelstandoff=6),
         yaxis=dict(range=[y0, y1], gridcolor="#EDEDF1", zeroline=True, zerolinecolor="#A9ABB8",
                    zerolinewidth=1.2, fixedrange=True, tickvals=yticks,
                    ticktext=[_fmt_pct(v, 0) if v else "0%" for v in yticks],
@@ -7502,8 +7529,12 @@ def render_vol_spike_section(latest_date):
     cfg = VSP_SETS[choice]
     past, current = find_vol_spikes(df[cfg["vol"]], df[cfg["idx"]], cfg["threshold"])
     # Off by default so the chart stays clean for newsletter screenshots (Tyler, November 5, 2026).
-    show_current = current is not None and st.toggle(
-        "Show the current spike's path", value=False, key="vsp_show_current")
+    c1, c2 = st.columns(2)
+    with c1:
+        show_all = st.toggle("Show every spike", value=False, key="vsp_show_all")
+    with c2:
+        show_current = current is not None and st.toggle(
+            "Show the current spike's path", value=False, key="vsp_show_current")
     if len(past) < 3:
         st.info("Not enough spikes in the data to draw this chart.")
         return
@@ -7516,19 +7547,20 @@ def render_vol_spike_section(latest_date):
         lead = (f"The {cfg['vol_name']} jumped {current['jump']:.1f}% on {_long_date(current['date'])}. " + lead)
     st.markdown(f'<p style="font-size:1.0rem; color:{TEXT_PRIMARY}; margin:0.2rem 0 0.7rem 0;">'
                 f'{lead.replace("&", "&amp;")}</p>', unsafe_allow_html=True)
-    st.plotly_chart(build_vol_spike_figure(cfg, past, current, first.year, show_current),
+    st.plotly_chart(build_vol_spike_figure(cfg, past, current, first.year, show_current, show_all),
                     use_container_width=False, config=chart_config(f"After a {cfg['vol_name']} Spike"),
-                    key=f"vsp_fig_{cfg['vol']}_{int(show_current)}")
+                    key=f"vsp_fig_{cfg['vol']}_{int(show_current)}{int(show_all)}")
     end = df[[cfg["vol"], cfg["idx"]]].dropna().index[-1]
     thr = f"{cfg['threshold']:.0%}"
     _footnote(
         f"A spike is a session in which the {cfg['vol_long']} closed at least {thr} above its previous close. "
-        f"A spike within {VSP_GAP} trading days of the last one counted is not counted again. Each line is the "
+        f"A spike within {VSP_GAP} trading days of the last one counted is not counted again. For each of the "
+        f"{len(past)} completed spikes since the data begin on {_long_date(first)}, the chart tracks the "
         f"{cfg['idx_name']}'s price change from the spike day's close over the next {VSP_HORIZON} trading days, "
-        f"about one month; index prices exclude dividends. The dashed line is the median of the "
-        f"{len(past)} completed spikes since the data begin on {_long_date(first)}, and red lines fell "
-        f"{abs(VSP_BAD):.0f}% or more."
-        + (f" The purple line is the spike of {_long_date(current['date'])}, still within its first month."
+        "about one month; index prices exclude dividends. The purple line is the median on each day, the darker "
+        "band the middle half of outcomes, and the pale band the full range from worst to best. The numbers at "
+        "the right are the best, median and worst after a month."
+        + (f" The dark line is the spike of {_long_date(current['date'])}, still within its first month."
            if show_current else "")
         + f" Index data from Yahoo Finance through {_long_date(end)}. Past performance does not guarantee "
         "future results."
