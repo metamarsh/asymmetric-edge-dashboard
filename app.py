@@ -7405,7 +7405,7 @@ def _vsp_tile_shapes(tiles, width, M_L, M_R, M_T, M_B, height, top_px):
     return shapes, notes
 
 
-def build_vol_spike_figure(cfg, past, current, since):
+def build_vol_spike_figure(cfg, past, current, since, show_current=False):
     """Every past spike as a quiet gray line, the ones that fell VSP_BAD or more
     in loss red, the median dashed, and the spike in progress in Deep Purple.
     A key above the plot names the lines, so the plot runs the full width
@@ -7440,7 +7440,7 @@ def build_vol_spike_figure(cfg, past, current, since):
     fig.add_trace(go.Scatter(
         x=days, y=median_path, mode="lines", line=dict(color=VSP_MEDIAN, width=3, dash="6px,4px"),
         name=f"Median of {len(past)}", legendrank=2, hovertemplate=hover(f"Median of {len(past)}")))
-    if current is not None:
+    if current is not None and show_current:
         n = len(current["path"])
         fig.add_trace(go.Scatter(
             x=days[:n], y=current["path"], mode="lines+markers", line=dict(color=BRAND_PURPLE, width=4),
@@ -7448,7 +7448,7 @@ def build_vol_spike_figure(cfg, past, current, since):
             name=f"This spike ({lbl_date(current['date'])})", legendrank=1,
             hovertemplate=hover(f"This spike, {lbl_date(current['date'])}")))
 
-    ys = [v for p in past for v in p["path"]] + (list(current["path"]) if current else [])
+    ys = [v for p in past for v in p["path"]] + (list(current["path"]) if current and show_current else [])
     lo, hi = min(ys + [0.0]), max(ys + [0.0])
     step = 10 if hi - lo > 40 else 5
     pad = 0.05 * (hi - lo)
@@ -7501,6 +7501,9 @@ def render_vol_spike_section(latest_date):
     choice = st.pills("Index", labels, selection_mode="single", default=labels[0], key="vsp_set") or labels[0]
     cfg = VSP_SETS[choice]
     past, current = find_vol_spikes(df[cfg["vol"]], df[cfg["idx"]], cfg["threshold"])
+    # Off by default so the chart stays clean for newsletter screenshots (Tyler, November 5, 2026).
+    show_current = current is not None and st.toggle(
+        "Show the current spike's path", value=False, key="vsp_show_current")
     if len(past) < 3:
         st.info("Not enough spikes in the data to draw this chart.")
         return
@@ -7513,8 +7516,9 @@ def render_vol_spike_section(latest_date):
         lead = (f"The {cfg['vol_name']} jumped {current['jump']:.1f}% on {_long_date(current['date'])}. " + lead)
     st.markdown(f'<p style="font-size:1.0rem; color:{TEXT_PRIMARY}; margin:0.2rem 0 0.7rem 0;">'
                 f'{lead.replace("&", "&amp;")}</p>', unsafe_allow_html=True)
-    st.plotly_chart(build_vol_spike_figure(cfg, past, current, first.year), use_container_width=False,
-                    config=chart_config(f"After a {cfg['vol_name']} Spike"), key=f"vsp_fig_{cfg['vol']}")
+    st.plotly_chart(build_vol_spike_figure(cfg, past, current, first.year, show_current),
+                    use_container_width=False, config=chart_config(f"After a {cfg['vol_name']} Spike"),
+                    key=f"vsp_fig_{cfg['vol']}_{int(show_current)}")
     end = df[[cfg["vol"], cfg["idx"]]].dropna().index[-1]
     thr = f"{cfg['threshold']:.0%}"
     _footnote(
@@ -7525,7 +7529,7 @@ def render_vol_spike_section(latest_date):
         f"{len(past)} completed spikes since the data begin on {_long_date(first)}, and red lines fell "
         f"{abs(VSP_BAD):.0f}% or more."
         + (f" The purple line is the spike of {_long_date(current['date'])}, still within its first month."
-           if current is not None else "")
+           if show_current else "")
         + f" Index data from Yahoo Finance through {_long_date(end)}. Past performance does not guarantee "
         "future results."
     )
