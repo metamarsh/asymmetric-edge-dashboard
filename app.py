@@ -1391,6 +1391,56 @@ def compute_summary_metrics(daily_series, rf_monthly=None, start_date=None, end_
     }
 
 
+# ---------- Correlation with the S&P 500 (added November 6, 2026) ----------
+# Two Performance Summary rows. Daily: Pearson correlation of daily returns
+# over the literal selected range (for Asymmetric Edge the within-month daily
+# shape is the close-only reconstruction, so this is approximate). Monthly:
+# the same prior-month-end anchoring as compute_summary_metrics, closed months
+# only, so for Asymmetric Edge it uses returns that tie to Fidelity exactly.
+SPX_CORR_MIN_DAYS = 20
+SPX_CORR_MIN_MONTHS = 6
+
+
+def _anchored_monthly_returns(s, start_ts, end_ts):
+    """Monthly returns anchored on the prior month-end (or the first value at
+    inception), complete months only, as compute_summary_metrics builds them."""
+    month_ends = s.resample("ME").last().dropna()
+    begin = pd.Timestamp(start_ts.year, start_ts.month, 1)
+    prior = month_ends[month_ends.index < begin]
+    if len(prior):
+        anchor = prior.iloc[[-1]]
+    else:
+        in_range = s[(s.index >= start_ts) & (s.index <= end_ts)]
+        if not len(in_range):
+            return pd.Series(dtype="float64")
+        anchor = in_range.iloc[[0]]
+    inside = month_ends[(month_ends.index >= begin) & (month_ends.index <= end_ts)
+                        & (month_ends.index > anchor.index[0])]
+    return pd.concat([anchor, inside]).pct_change().dropna()
+
+
+def compute_spx_correlation(series, spx, start_date, end_date):
+    """{"Corr SPX Daily": r, "Corr SPX Monthly": r} for one series against the
+    S&P 500 (SPY adjusted closes) over the selected period; NaN when too short."""
+    out = {"Corr SPX Daily": np.nan, "Corr SPX Monthly": np.nan}
+    if series is None or spx is None:
+        return out
+    pair = pd.concat([series.rename("a"), spx.rename("b")], axis=1).dropna()
+    if len(pair) < 2:
+        return out
+    start_ts, end_ts = pd.Timestamp(start_date), pd.Timestamp(end_date)
+    seg = pair[(pair.index >= start_ts) & (pair.index <= end_ts)]
+    daily = seg.pct_change().dropna()
+    if len(daily) >= SPX_CORR_MIN_DAYS:
+        out["Corr SPX Daily"] = float(daily["a"].corr(daily["b"]))
+    ma = _anchored_monthly_returns(pair["a"], start_ts, end_ts)
+    mb = _anchored_monthly_returns(pair["b"], start_ts, end_ts)
+    monthly = pd.concat([ma.rename("a"), mb.rename("b")], axis=1).dropna()
+    if len(monthly) >= SPX_CORR_MIN_MONTHS:
+        out["Corr SPX Monthly"] = float(monthly["a"].corr(monthly["b"]))
+    return out
+
+
 def get_period_dates(latest_date, period_key, inception_date=None):
     end = pd.Timestamp(latest_date)
     if period_key == "YTD":
@@ -11663,6 +11713,11 @@ def render_performance_summary_section(ctx):
                     start_date=summary_start_ts,
                     end_date=summary_end_ts,
                 )
+        _spx = combined["S&P 500"] if "S&P 500" in combined.columns else None
+        for name, _m in summary_metrics_by_series.items():
+            if _m:
+                _m.update(compute_spx_correlation(combined[name], _spx,
+                                                  summary_start_ts, summary_end_ts))
 
         show_all = bool(st.session_state.get(PS_ALL_KEY, False))
         if any(summary_metrics_by_series.values()):
@@ -11670,7 +11725,7 @@ def render_performance_summary_section(ctx):
             with st.container(key="ae_ps_tools", horizontal=True, horizontal_alignment="distribute",
                               vertical_alignment="center", gap="small"):
                 st.button(
-                    "Show fewer metrics" if show_all else "Show all 18 metrics, with dates",
+                    "Show fewer metrics" if show_all else "Show all 20 metrics, with dates",
                     key="perf_summary_more",
                     on_click=_ps_toggle_all,
                     icon=":material/keyboard_arrow_up:" if show_all else ":material/keyboard_arrow_down:",
@@ -11694,6 +11749,10 @@ def render_performance_summary_section(ctx):
             f"time-weighted returns and tie exactly, so Worst/Best Month are exact for Asymmetric Edge. Within-month "
             f"daily and weekly values (including Max DD Daily and Worst/Best Single Day and Week) are approximations "
             f"derived from a close-only reconstruction. The most recent month may be partial when the end date falls mid-month. "
+            f"Correlation with the S&P 500 is the Pearson correlation of each series' returns with SPY's over the "
+            f"selected period: daily returns over the literal range, and monthly returns on the same prior-month-end "
+            f"anchoring, complete months only (at least {SPX_CORR_MIN_MONTHS}). For Asymmetric Edge the monthly "
+            f"figure uses returns that tie to Fidelity; the daily figure uses the reconstruction and is approximate. "
             f"S&P 500 (SPY), 60/40 (AOR), and 80/20 (AOA) total return data sourced from Yahoo Finance (adjusted close, dividends reinvested). "
             f"All figures are pre-tax and pre-fee."
         )
@@ -12480,8 +12539,13 @@ PS_GROUPS = [
     ("Consistency", [
         ("Months with a gain", "Win Rate", "pct", "higher", None, None),
     ]),
+    # No vs chip: a lower correlation is not better or worse on its own.
+    ("Correlation with the S&P 500", [
+        ("Daily returns", "Corr SPX Daily", "ratio", None, None, None),
+        ("Monthly returns", "Corr SPX Monthly", "ratio", None, None, None),
+    ]),
 ]
-# Revealed by "Show all 18 metrics, with dates".
+# Revealed by "Show all 20 metrics, with dates".
 PS_MORE_GROUPS = [
     ("Best and worst periods", [
         ("Worst single day", "Worst Day", "pct", "higher", "Worst Day Date", "day"),
