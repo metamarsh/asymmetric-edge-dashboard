@@ -9858,21 +9858,27 @@ SPXR_STYLE = {"12 months": (4.0, 1.0), "6 months": (2.5, 0.6), "3 months": (2.0,
 SPXR_SHORT = {"3 months": "3 mo", "6 months": "6 mo", "12 months": "12 mo"}
 SPXR_PURPLE = (58, 12, 163)   # #3A0CA3
 SPXR_REF_COLOR = "#9CA3AF"
+# Balanced benchmarks (November 6, 2026): optional, off by default. Each follows
+# the windows shown, in its chart color with the same per-window opacity, a
+# little thinner than Asymmetric Edge; only its longest window gets an end label.
+SPXR_BENCHMARKS = ["80/20", "60/40"]
+SPXR_BENCH_LABEL_COLOR = {"80/20": "#4361EE", "60/40": "#1C8FB3"}   # 60/40 text darkened, as on Rolling 12-Month
+SPXR_BENCH_WIDTH = 0.7   # share of the Asymmetric Edge line width
 
 
 def _spxr_num(v):
     return f"{v:.2f}".replace("-", MINUS) if np.isfinite(v) else "n/a"
 
 
-def compute_spx_rolling_corr(combined, latest_date):
-    """(frame, since-inception daily correlation): one column per window,
-    indexed by close, NaN until the window is full."""
-    pair = combined[["AsymEdge", "S&P 500"]].dropna()
+def compute_spx_rolling_corr(combined, latest_date, name="AsymEdge"):
+    """(frame, since-inception daily correlation) for one series against the
+    S&P 500: one column per window, indexed by close, NaN until the window is full."""
+    pair = combined[[name, "S&P 500"]].dropna()
     pair = pair[pair.index <= pd.Timestamp(latest_date)]
     d = pair.pct_change().dropna()
-    frame = pd.DataFrame({label: d["AsymEdge"].rolling(n, min_periods=n).corr(d["S&P 500"])
+    frame = pd.DataFrame({label: d[name].rolling(n, min_periods=n).corr(d["S&P 500"])
                           for label, n in SPXR_WINDOWS})
-    full = float(d["AsymEdge"].corr(d["S&P 500"])) if len(d) >= SPX_CORR_MIN_DAYS else np.nan
+    full = float(d[name].corr(d["S&P 500"])) if len(d) >= SPX_CORR_MIN_DAYS else np.nan
     return frame.dropna(how="all"), full
 
 
@@ -9888,18 +9894,70 @@ def _spxr_solid(opacity):
     return "#" + "".join(f"{int(round(255 - (255 - c) * k)):02X}" for c in SPXR_PURPLE)
 
 
-def build_spx_rolling_figure(frame, shown, full_corr):
+def _hex_rgba(hex_color, opacity):
+    r, g, b = int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
+    return f"rgba({r},{g},{b},{opacity})"
+
+
+def _spxr_spread(items, y_range, min_gap_frac=0.06):
+    """Like _spread_end_labels, but keeps the stack inside the plot: labels are
+    nudged apart upward, then pushed back down from the top if they overflow."""
+    if not items:
+        return items
+    gap = (y_range[1] - y_range[0]) * min_gap_frac
+    items = sorted(items, key=lambda it: it["y"])
+    for i in range(1, len(items)):
+        items[i]["y_label"] = max(items[i]["y_label"], items[i - 1]["y_label"] + gap)
+    ceiling = y_range[1] - gap * 0.4
+    if items[-1]["y_label"] > ceiling:
+        items[-1]["y_label"] = ceiling
+        for i in range(len(items) - 2, -1, -1):
+            items[i]["y_label"] = min(items[i]["y_label"], items[i + 1]["y_label"] - gap)
+    return items
+
+
+def build_spx_rolling_figure(frame, shown, full_corr, bench_frames=None):
+    """bench_frames: {"80/20": frame, ...} for the benchmarks toggled on."""
     fig = go.Figure()
+    bench_frames = bench_frames or {}
     sub = frame[shown].dropna(how="all")
     if sub.empty:
         return fig
     start, end = sub.index[0], sub.index[-1]
     tick_dates, tick_labels = make_x_axis_labels(start, end)
-    vmin = float(np.nanmin(sub.values))
+    vmin = min([float(np.nanmin(sub.values))] +
+               [float(np.nanmin(b[shown].values)) for b in bench_frames.values()
+                if not b[shown].dropna(how="all").empty])
     y_lo = -1.0 if vmin < -0.5 else -0.5
     y_range = [y_lo - 0.03, 1.03]
     ticks = [round(y_lo + 0.25 * i, 2) for i in range(int(round((1.0 - y_lo) / 0.25)) + 1)]
     ends = []
+    longest = [label for label, _n in SPXR_WINDOWS if label in shown][-1]
+    # Benchmarks first, so Asymmetric Edge draws on top; 60/40 before 80/20 so the
+    # primary benchmark draws over it and leads the (reversed) legend.
+    for bname in reversed(SPXR_BENCHMARKS):
+        if bname not in bench_frames:
+            continue
+        color = SERIES_COLORS.get(bname, "#999999")
+        for label, _n in SPXR_WINDOWS:
+            if label not in shown:
+                continue
+            s = bench_frames[bname][label].dropna()
+            s = s[(s.index >= start) & (s.index <= end)]
+            if s.empty:
+                continue
+            width, opacity = SPXR_STYLE[label]
+            # One legend entry per benchmark (its longest window); the others share its group.
+            fig.add_trace(go.Scatter(
+                x=s.index, y=s.values, mode="lines", name=bname if label == longest else f"{bname}, {label}",
+                legendgroup=bname, showlegend=label == longest,
+                line=dict(color=_hex_rgba(color, opacity), width=round(width * SPXR_BENCH_WIDTH, 2)),
+                hovertemplate="%{y:.2f}<extra>" + f"{bname}, {label}" + "</extra>",
+            ))
+            if label == longest:
+                ends.append({"x": s.index[-1], "y": float(s.iloc[-1]), "y_label": float(s.iloc[-1]),
+                             "text": f"{bname} {_spxr_num(float(s.iloc[-1]))}",
+                             "color": SPXR_BENCH_LABEL_COLOR.get(bname, color)})
     for label, _n in SPXR_WINDOWS:          # 3 months first, so 12 months draws on top
         if label not in shown:
             continue
@@ -9915,7 +9973,7 @@ def build_spx_rolling_figure(frame, shown, full_corr):
         ends.append({"x": s.index[-1], "y": float(s.iloc[-1]), "y_label": float(s.iloc[-1]),
                      "text": f"{SPXR_SHORT[label]} {_spxr_num(float(s.iloc[-1]))}",
                      "color": _spxr_solid(opacity)})
-    ends = _spread_end_labels(ends, y_range, min_gap_frac=0.06)
+    ends = _spxr_spread(ends, y_range, min_gap_frac=0.06)
     annotations = [dict(x=e["x"], y=e["y_label"], xref="x", yref="y", text=f"<b>{e['text']}</b>",
                         showarrow=False, xanchor="left", xshift=10, yanchor="middle",
                         font=dict(size=14, color=e["color"], family=ANALYTICS_FONT))
@@ -9980,6 +10038,11 @@ def render_spx_rolling_section(combined, latest_date):
     picked = st.pills("Rolling windows", labels, selection_mode="multi", default=SPXR_DEFAULT,
                       key="spxr_windows")
     shown = [label for label in labels if label in (picked or [])] or ["12 months"]
+    avail = [b for b in SPXR_BENCHMARKS if b in combined.columns]
+    benches = st.pills("Also show", avail, selection_mode="multi", default=[],
+                       key="spxr_benchmarks",
+                       help="Each balanced portfolio's own correlation with the S&P 500, for the same windows.")
+    benches = [b for b in avail if b in (benches or [])]
     frame, full_daily = compute_spx_rolling_corr(combined, latest_date)
     if frame.empty:
         st.info("Rolling correlation needs at least three months of daily returns.")
@@ -9988,9 +10051,11 @@ def render_spx_rolling_section(combined, latest_date):
                                            combined.index[0], latest_date)["Corr SPX Monthly"]
     lead = f'<p style="font-size:1.0rem; color:{TEXT_PRIMARY}; margin:0.2rem 0 0.7rem 0;">'
     st.markdown(lead + _spxr_takeaway(frame, full_daily, full_monthly) + "</p>", unsafe_allow_html=True)
-    st.plotly_chart(build_spx_rolling_figure(frame, shown, full_daily), use_container_width=True,
+    bench_frames = {b: compute_spx_rolling_corr(combined, latest_date, name=b)[0] for b in benches}
+    st.plotly_chart(build_spx_rolling_figure(frame, shown, full_daily, bench_frames), use_container_width=True,
                     config=chart_config("Rolling Correlation with the S&P 500"),
-                    key="spxr_fig_" + "_".join(SPXR_SHORT[s].replace(" ", "") for s in shown))
+                    key="spxr_fig_" + "_".join(SPXR_SHORT[s].replace(" ", "") for s in shown)
+                    + "".join("_" + b.replace("/", "") for b in benches))
     sub = frame[shown].dropna(how="all")
     _footnote(
         "Each line is the correlation of Asymmetric Edge&#8217;s daily returns with the S&amp;P 500&#8217;s "
@@ -10001,14 +10066,24 @@ def render_spx_rolling_section(combined, latest_date):
         f"live record ({_spxr_num(full_daily)}). Asymmetric Edge&#8217;s daily values within each month come "
         "from a close-only reconstruction anchored to Fidelity&#8217;s monthly returns, so these readings "
         "are approximate; the Performance Summary also gives the correlation of monthly returns, which tie "
-        "to Fidelity. SPY is Yahoo Finance adjusted closes with dividends reinvested."
+        "to Fidelity. "
+        + ("The " + _cap_join([f"{b} ({'AOA' if b == '80/20' else 'AOR'})" for b in benches])
+           + (" lines show that portfolio&#8217;s" if len(benches) == 1 else " lines show each portfolio&#8217;s")
+           + " own correlation with the S&amp;P 500 over the same windows, thinner and in its chart color. "
+           if benches else "")
+        + ("SPY, AOA and AOR are" if benches else "SPY is")
+        + " Yahoo Finance adjusted closes with dividends reinvested."
     )
     windows = _cap_join([w for w in labels if w in shown])
     newsletter_caption(
         f"Rolling correlation of Asymmetric Edge's daily returns with the S&P 500 (SPY) over trailing "
         f"{windows} windows, {_cap_date(sub.index[0])} through {_cap_date(sub.index[-1])}. The dotted line "
         f"is the correlation since the strategy went live on {_cap_date(combined.index[0])}. "
-        "Asymmetric Edge uses my account's time-weighted returns. S&P 500 data "
+        + (f"{_cap_join([CAPTION_SERIES[b] for b in benches])} "
+           + ("is" if len(benches) == 1 else "are")
+           + " shown for comparison, each against the S&P 500. " if benches else "")
+        + "Asymmetric Edge uses my account's time-weighted returns. "
+        + ("Benchmark" if benches else "S&P 500") + " data "
         f"{NEWSLETTER_YAHOO}. Past performance does not guarantee future results."
     )
 
