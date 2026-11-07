@@ -9836,6 +9836,176 @@ def corr_load_context(baskets):
     return corr_section_context(baskets, prices, next_rows), prices
 
 
+# ---------- Rolling correlation with the S&P 500 (added November 6, 2026) ----------
+# Diversification page, first section. Asymmetric Edge's daily returns against
+# SPY's over trailing 63, 126 and 252 trading days (3, 6 and 12 months), one
+# reading per close once a full window exists. The 12-month line leads; the
+# shorter windows sit behind it in the same Deep Purple. The dotted line is the
+# full live record. Daily values within a month are the close-only
+# reconstruction, so these readings are approximate; the monthly-return
+# figure in the Performance Summary is the one that ties to Fidelity.
+SPXR_TITLE = "Correlation with the S&P 500"
+SPXR_WINDOWS = [("3 months", 63), ("6 months", 126), ("12 months", 252)]
+SPXR_DEFAULT = ["3 months", "6 months", "12 months"]
+SPXR_STYLE = {"12 months": (4.0, 1.0), "6 months": (2.5, 0.6), "3 months": (2.0, 0.38)}  # width, opacity
+SPXR_SHORT = {"3 months": "3 mo", "6 months": "6 mo", "12 months": "12 mo"}
+SPXR_PURPLE = (58, 12, 163)   # #3A0CA3
+SPXR_REF_COLOR = "#9CA3AF"
+
+
+def _spxr_num(v):
+    return f"{v:.2f}".replace("-", MINUS) if np.isfinite(v) else "n/a"
+
+
+def compute_spx_rolling_corr(combined, latest_date):
+    """(frame, since-inception daily correlation): one column per window,
+    indexed by close, NaN until the window is full."""
+    pair = combined[["AsymEdge", "S&P 500"]].dropna()
+    pair = pair[pair.index <= pd.Timestamp(latest_date)]
+    d = pair.pct_change().dropna()
+    frame = pd.DataFrame({label: d["AsymEdge"].rolling(n, min_periods=n).corr(d["S&P 500"])
+                          for label, n in SPXR_WINDOWS})
+    full = float(d["AsymEdge"].corr(d["S&P 500"])) if len(d) >= SPX_CORR_MIN_DAYS else np.nan
+    return frame.dropna(how="all"), full
+
+
+def _spxr_color(opacity, floor=0.0):
+    r, g, b = SPXR_PURPLE
+    return f"rgba({r},{g},{b},{max(opacity, floor)})"
+
+
+def _spxr_solid(opacity):
+    """Opaque text color for an end label: the line color over white, kept
+    dark enough to read (at least 70% strength)."""
+    k = max(opacity, 0.7)
+    return "#" + "".join(f"{int(round(255 - (255 - c) * k)):02X}" for c in SPXR_PURPLE)
+
+
+def build_spx_rolling_figure(frame, shown, full_corr):
+    fig = go.Figure()
+    sub = frame[shown].dropna(how="all")
+    if sub.empty:
+        return fig
+    start, end = sub.index[0], sub.index[-1]
+    tick_dates, tick_labels = make_x_axis_labels(start, end)
+    vmin = float(np.nanmin(sub.values))
+    y_lo = -1.0 if vmin < -0.5 else -0.5
+    y_range = [y_lo - 0.03, 1.03]
+    ticks = [round(y_lo + 0.25 * i, 2) for i in range(int(round((1.0 - y_lo) / 0.25)) + 1)]
+    ends = []
+    for label, _n in SPXR_WINDOWS:          # 3 months first, so 12 months draws on top
+        if label not in shown:
+            continue
+        s = sub[label].dropna()
+        if s.empty:
+            continue
+        width, opacity = SPXR_STYLE[label]
+        fig.add_trace(go.Scatter(
+            x=s.index, y=s.values, mode="lines", name=f"{label}",
+            line=dict(color=_spxr_color(opacity), width=width),
+            hovertemplate="%{y:.2f}<extra>" + label + "</extra>",
+        ))
+        ends.append({"x": s.index[-1], "y": float(s.iloc[-1]), "y_label": float(s.iloc[-1]),
+                     "text": f"{SPXR_SHORT[label]} {_spxr_num(float(s.iloc[-1]))}",
+                     "color": _spxr_solid(opacity)})
+    ends = _spread_end_labels(ends, y_range, min_gap_frac=0.06)
+    annotations = [dict(x=e["x"], y=e["y_label"], xref="x", yref="y", text=f"<b>{e['text']}</b>",
+                        showarrow=False, xanchor="left", xshift=10, yanchor="middle",
+                        font=dict(size=14, color=e["color"], family=ANALYTICS_FONT))
+                   for e in ends]
+    shapes = []
+    if np.isfinite(full_corr):
+        shapes.append(dict(type="line", xref="x", yref="y", x0=start, x1=end, y0=full_corr, y1=full_corr,
+                           line=dict(color=SPXR_REF_COLOR, width=1.5, dash="dot"), layer="below"))
+        # Bottom right, under the line: the readings are well above it at the latest close.
+        annotations.append(dict(x=end, y=full_corr, xref="x", yref="y", xanchor="right", yanchor="top",
+                                yshift=-4, showarrow=False,
+                                text=f"Since inception {_spxr_num(full_corr)}",
+                                font=dict(size=12, color=TEXT_MUTED, family=ANALYTICS_FONT)))
+    fig.update_layout(
+        **DARK_LAYOUT,
+        yaxis=dict(range=y_range, tickmode="array", tickvals=ticks, ticktext=[_spxr_num(t) for t in ticks],
+                   gridcolor=GRID_COLOR, zeroline=True, zerolinecolor="#c9c9d3",
+                   tickfont=dict(size=16, color=TEXT_MUTED)),
+        xaxis=dict(tickmode="array", tickvals=tick_dates, ticktext=tick_labels,
+                   gridcolor="rgba(0,0,0,0)", tickfont=dict(size=16, color=TEXT_MUTED),
+                   ticklabelstandoff=10, hoverformat="%b %-d, %Y",
+                   range=[start - timedelta(days=12), end + timedelta(days=125)]),
+        legend=dict(orientation="h", yanchor="top", y=-0.12, xanchor="center", x=0.5,
+                    traceorder="reversed", font=dict(size=16, color=TEXT_SECONDARY, weight=500)),
+        hovermode="x unified",
+        margin=dict(t=15, b=80, l=60, r=30),
+        height=440,
+        shapes=shapes,
+        annotations=annotations,
+    )
+    return fig
+
+
+def _spxr_takeaway(frame, full_daily, full_monthly):
+    s = frame["12 months"].dropna()
+    out = ""
+    if len(s):
+        now, lo, hi = float(s.iloc[-1]), float(s.min()), float(s.max())
+        lo_when, hi_when = f"{s.idxmin():%B %Y}", f"{s.idxmax():%B %Y}"
+        if round(now, 2) >= round(hi, 2):
+            where = f"the highest reading of the live record (the low was {_spxr_num(lo)} in {lo_when})"
+        elif round(now, 2) <= round(lo, 2):
+            where = f"the lowest reading of the live record (the high was {_spxr_num(hi)} in {hi_when})"
+        else:
+            where = (f"between a low of {_spxr_num(lo)} in {lo_when} and a high of "
+                     f"{_spxr_num(hi)} in {hi_when}")
+        out += f"Over the last 12 months the correlation is <b>{_spxr_num(now)}</b>, {where}. "
+    s3 = frame["3 months"].dropna()
+    if len(s3):
+        out += f"The 3-month reading is {_spxr_num(float(s3.iloc[-1]))}. "
+    if np.isfinite(full_daily):
+        out += f"Since inception it is {_spxr_num(full_daily)} on daily returns"
+        out += (f" and {_spxr_num(full_monthly)} on monthly returns." if np.isfinite(full_monthly) else ".")
+    return out
+
+
+def render_spx_rolling_section(combined, latest_date):
+    if "AsymEdge" not in combined.columns or "S&P 500" not in combined.columns:
+        st.info("Correlation with the S&P 500 needs the portfolio series and SPY prices, which did not load.")
+        return
+    labels = [label for label, _n in SPXR_WINDOWS]
+    picked = st.pills("Rolling windows", labels, selection_mode="multi", default=SPXR_DEFAULT,
+                      key="spxr_windows")
+    shown = [label for label in labels if label in (picked or [])] or ["12 months"]
+    frame, full_daily = compute_spx_rolling_corr(combined, latest_date)
+    if frame.empty:
+        st.info("Rolling correlation needs at least three months of daily returns.")
+        return
+    full_monthly = compute_spx_correlation(combined["AsymEdge"], combined["S&P 500"],
+                                           combined.index[0], latest_date)["Corr SPX Monthly"]
+    lead = f'<p style="font-size:1.0rem; color:{TEXT_PRIMARY}; margin:0.2rem 0 0.7rem 0;">'
+    st.markdown(lead + _spxr_takeaway(frame, full_daily, full_monthly) + "</p>", unsafe_allow_html=True)
+    st.plotly_chart(build_spx_rolling_figure(frame, shown, full_daily), use_container_width=True,
+                    config=chart_config("Rolling Correlation with the S&P 500"),
+                    key="spxr_fig_" + "_".join(SPXR_SHORT[s].replace(" ", "") for s in shown))
+    sub = frame[shown].dropna(how="all")
+    _footnote(
+        "Each line is the correlation of Asymmetric Edge&#8217;s daily returns with the S&amp;P 500&#8217;s "
+        "(SPY) over the trailing 63, 126 or 252 trading days (3, 6 or 12 months), plotted at every close "
+        "once a full window exists, so the 12-month line starts a year after the January 2, 2024 "
+        "inception. 1.00 means the two moved in lockstep, 0 means unrelated, and below 0 means they tended "
+        "to move in opposite directions. The dotted line is the correlation of daily returns over the whole "
+        f"live record ({_spxr_num(full_daily)}). Asymmetric Edge&#8217;s daily values within each month come "
+        "from a close-only reconstruction anchored to Fidelity&#8217;s monthly returns, so these readings "
+        "are approximate; the Performance Summary also gives the correlation of monthly returns, which tie "
+        "to Fidelity. SPY is Yahoo Finance adjusted closes with dividends reinvested."
+    )
+    windows = _cap_join([w for w in labels if w in shown])
+    newsletter_caption(
+        f"Rolling correlation of Asymmetric Edge's daily returns with the S&P 500 (SPY) over trailing "
+        f"{windows} windows, {_cap_date(sub.index[0])} through {_cap_date(sub.index[-1])}. The dotted line "
+        f"is the correlation since the strategy went live on {_cap_date(combined.index[0])}. "
+        "Asymmetric Edge uses my account's time-weighted returns. S&P 500 data "
+        f"{NEWSLETTER_YAHOO}. Past performance does not guarantee future results."
+    )
+
+
 def render_correlation_section(holdings_values, totals):
     """Correlation and Diversification: Ideas 1, 2 and 4, each guarded so a
     data problem in one view leaves the others standing."""
@@ -13042,6 +13212,7 @@ def page_risk():
 
 
 DIVERSIFICATION_SECTIONS = [
+    ("spx-correlation", "Correlation with the S&P 500"),
     ("correlation", "Correlation and Diversification"),
     ("exposure", "Look-Through Exposure"),
 ]
@@ -13050,6 +13221,11 @@ DIVERSIFICATION_SECTIONS = [
 def page_diversification():
     ctx = AE_CTX
     render_page_header("diversification", DIVERSIFICATION_SECTIONS)
+
+    section_anchor("spx-correlation")
+    _render_guarded(SPXR_TITLE, render_spx_rolling_section, ctx.combined, ctx.latest_date)
+
+    st.divider()
 
     section_anchor("correlation")
     _render_guarded(CORR_SECTION_TITLE, render_correlation_section,
