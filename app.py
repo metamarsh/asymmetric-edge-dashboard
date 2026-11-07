@@ -1422,7 +1422,14 @@ def _anchored_monthly_returns(s, start_ts, end_ts):
 def compute_spx_correlation(series, spx, start_date, end_date):
     """{"Corr SPX Daily": r, "Corr SPX Monthly": r} for one series against the
     S&P 500 (SPY adjusted closes) over the selected period; NaN when too short."""
-    out = {"Corr SPX Daily": np.nan, "Corr SPX Monthly": np.nan}
+    return compute_pair_correlation(series, spx, start_date, end_date, prefix="Corr SPX")
+
+
+def compute_pair_correlation(series, other, start_date, end_date, prefix):
+    """{prefix + " Daily": r, prefix + " Monthly": r}: one series against another
+    over the selected period, daily and monthly as described above."""
+    spx = other
+    out = {f"{prefix} Daily": np.nan, f"{prefix} Monthly": np.nan}
     if series is None or spx is None:
         return out
     pair = pd.concat([series.rename("a"), spx.rename("b")], axis=1).dropna()
@@ -1432,12 +1439,12 @@ def compute_spx_correlation(series, spx, start_date, end_date):
     seg = pair[(pair.index >= start_ts) & (pair.index <= end_ts)]
     daily = seg.pct_change().dropna()
     if len(daily) >= SPX_CORR_MIN_DAYS:
-        out["Corr SPX Daily"] = float(daily["a"].corr(daily["b"]))
+        out[f"{prefix} Daily"] = float(daily["a"].corr(daily["b"]))
     ma = _anchored_monthly_returns(pair["a"], start_ts, end_ts)
     mb = _anchored_monthly_returns(pair["b"], start_ts, end_ts)
     monthly = pd.concat([ma.rename("a"), mb.rename("b")], axis=1).dropna()
     if len(monthly) >= SPX_CORR_MIN_MONTHS:
-        out["Corr SPX Monthly"] = float(monthly["a"].corr(monthly["b"]))
+        out[f"{prefix} Monthly"] = float(monthly["a"].corr(monthly["b"]))
     return out
 
 
@@ -11888,6 +11895,8 @@ def render_performance_summary_section(ctx):
             if _m:
                 _m.update(compute_spx_correlation(combined[name], _spx,
                                                   summary_start_ts, summary_end_ts))
+                _m.update(compute_pair_correlation(combined[name], combined["AsymEdge"],
+                                                   summary_start_ts, summary_end_ts, prefix="Corr AE"))
 
         show_all = bool(st.session_state.get(PS_ALL_KEY, False))
         if any(summary_metrics_by_series.values()):
@@ -11895,7 +11904,7 @@ def render_performance_summary_section(ctx):
             with st.container(key="ae_ps_tools", horizontal=True, horizontal_alignment="distribute",
                               vertical_alignment="center", gap="small"):
                 st.button(
-                    "Show fewer metrics" if show_all else "Show all 20 metrics, with dates",
+                    "Show fewer metrics" if show_all else "Show all 22 metrics, with dates",
                     key="perf_summary_more",
                     on_click=_ps_toggle_all,
                     icon=":material/keyboard_arrow_up:" if show_all else ":material/keyboard_arrow_down:",
@@ -11919,7 +11928,8 @@ def render_performance_summary_section(ctx):
             f"time-weighted returns and tie exactly, so Worst/Best Month are exact for Asymmetric Edge. Within-month "
             f"daily and weekly values (including Max DD Daily and Worst/Best Single Day and Week) are approximations "
             f"derived from a close-only reconstruction. The most recent month may be partial when the end date falls mid-month. "
-            f"Correlation with the S&P 500 is the Pearson correlation of each series' returns with SPY's over the "
+            f"Correlation rows give the Pearson correlation of each column's returns with SPY's (vs. S&P 500) or with "
+            f"Asymmetric Edge's (vs. Asymmetric Edge) over the "
             f"selected period: daily returns over the literal range, and monthly returns on the same prior-month-end "
             f"anchoring, complete months only (at least {SPX_CORR_MIN_MONTHS}). For Asymmetric Edge the monthly "
             f"figure uses returns that tie to Fidelity; the daily figure uses the reconstruction and is approximate. "
@@ -12709,13 +12719,24 @@ PS_GROUPS = [
     ("Consistency", [
         ("Months with a gain", "Win Rate", "pct", "higher", None, None),
     ]),
-    # No vs chip: a lower correlation is not better or worse on its own.
-    ("Correlation with the S&P 500", [
-        ("Daily returns", "Corr SPX Daily", "ratio", None, None, None),
-        ("Monthly returns", "Corr SPX Monthly", "ratio", None, None, None),
+    # Each column's own portfolio against the S&P 500, then against Asymmetric
+    # Edge (November 6, 2026), so a portfolio against itself reads 1.00. No vs
+    # chip: a lower correlation is not better or worse on its own.
+    ("Correlation", [
+        ("vs. S&P 500, daily", "Corr SPX Daily", "ratio", None, None, None),
+        ("vs. S&P 500, monthly", "Corr SPX Monthly", "ratio", None, None, None),
+        ("vs. Asymmetric Edge, daily", "Corr AE Daily", "ratio", None, None, None),
+        ("vs. Asymmetric Edge, monthly", "Corr AE Monthly", "ratio", None, None, None),
     ]),
 ]
-# Revealed by "Show all 20 metrics, with dates".
+# Hover text for row labels that need it (the th's title).
+PS_ROW_HELP = {
+    "vs. S&P 500, daily": "Each column's portfolio against the S&P 500 (SPY), correlation of daily returns",
+    "vs. S&P 500, monthly": "Each column's portfolio against the S&P 500 (SPY), correlation of monthly returns",
+    "vs. Asymmetric Edge, daily": "Each column's portfolio against Asymmetric Edge, correlation of daily returns",
+    "vs. Asymmetric Edge, monthly": "Each column's portfolio against Asymmetric Edge, correlation of monthly returns",
+}
+# Revealed by "Show all 22 metrics, with dates".
 PS_MORE_GROUPS = [
     ("Best and worst periods", [
         ("Worst single day", "Worst Day", "pct", "higher", "Worst Day Date", "day"),
@@ -12734,7 +12755,8 @@ PS_NOTE = (
     "Asymmetric Edge’s monthly figures tie to Fidelity’s reported returns. Its daily "
     "figures come from a close-only reconstruction and are approximate. Benchmarks are Yahoo "
     "Finance adjusted closes with dividends reinvested. Sortino uses BIL as the risk-free rate. "
-    "Before taxes and fees."
+    "Correlation rows read down each column: that portfolio against the S&amp;P 500 or against "
+    "Asymmetric Edge, so a portfolio against itself reads 1.00. Before taxes and fees."
 )
 # (tile label, metric key, format, better, chip style, hover text)
 OVERVIEW_TILES = [
@@ -12833,7 +12855,8 @@ def build_perf_summary_table(metrics_by_series, show_all):
                     cells.append(f'<td class="{col_class[s]}">{value}</td>')
             chip = _ps_chip(ae.get(key), bench.get(key), fmt, better) if (ae and bench) else ""
             text_row = ' class="ae-ps-text"' if fmt == "text" else ""
-            body.append(f'<tr{text_row}><th scope="row">{_esc(label)}</th>{"".join(cells)}'
+            help_attr = f' title="{_esc(PS_ROW_HELP[label])}"' if label in PS_ROW_HELP else ""
+            body.append(f'<tr{text_row}><th scope="row"{help_attr}>{_esc(label)}</th>{"".join(cells)}'
                         f'<td class="ae-ps-vs">{chip}</td></tr>')
     return ('<div class="ae-ps-wrap"><table class="ae-ps"><thead><tr>' + "".join(head)
             + "</tr></thead><tbody>" + "".join(body) + "</tbody></table></div>")
