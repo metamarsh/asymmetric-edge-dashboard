@@ -472,6 +472,13 @@ st.markdown("""
         font-weight: 500;
         color: """ + TEXT_PRIMARY + """;
     }
+    /* Row labels with hover text (PS_ROW_HELP) get a dotted underline so
+       readers know to hover (November 8, 2026). */
+    [data-testid="stMarkdownContainer"] table.ae-ps tbody th[title] {
+        cursor: help;
+        text-decoration: underline dotted #A8A2BF;
+        text-underline-offset: 3px;
+    }
     [data-testid="stMarkdownContainer"] table.ae-ps tbody td.ae-ps-ae {
         background: #F7F5FC;
         font-weight: 700;
@@ -1300,6 +1307,13 @@ def compute_summary_metrics(daily_series, rf_monthly=None, start_date=None, end_
     max_dd = drawdown.min()
     calmar = cagr / abs(max_dd) if max_dd != 0 else 0.0
 
+    # Ulcer Index and Martin ratio (November 8, 2026), from the same month-end
+    # drawdowns as Calmar: the root mean square of the drawdown at every
+    # month-end, and the return above T-bills divided by it (Peter Martin's
+    # Ulcer Performance Index, the backtest engine's definition too).
+    ulcer_index = float(np.sqrt(np.mean(drawdown.values ** 2))) if len(drawdown) else np.nan
+    martin = (cagr - rf_annual) / ulcer_index if ulcer_index > 0 else np.nan
+
     # ---- Daily and weekly metrics over user's literal range ----
     # Day and week extremes come from the daily reconstruction within the
     # selected range. For AsymEdge these are approximations (the daily shape
@@ -1380,6 +1394,8 @@ def compute_summary_metrics(daily_series, rf_monthly=None, start_date=None, end_
         "Best Month": best_month,
         "Best Month Date": best_month_date,
         "Calmar Ratio": calmar,
+        "Ulcer Index": ulcer_index,
+        "Martin Ratio": martin,
         "Annualized Vol": ann_vol,
         "Downside Dev": downside_dev,
         "Risk-Free Annual": rf_annual,
@@ -11979,7 +11995,7 @@ def render_performance_summary_section(ctx):
             with st.container(key="ae_ps_tools", horizontal=True, horizontal_alignment="distribute",
                               vertical_alignment="center", gap="small"):
                 st.button(
-                    "Show fewer metrics" if show_all else "Show all 22 metrics, with dates",
+                    "Show fewer metrics" if show_all else "Show all 23 metrics, with dates",
                     key="perf_summary_more",
                     on_click=_ps_toggle_all,
                     icon=":material/keyboard_arrow_up:" if show_all else ":material/keyboard_arrow_down:",
@@ -11991,10 +12007,10 @@ def render_performance_summary_section(ctx):
         # Today's full footnote, unchanged, under Full methodology.
         footnote_summary = (
             f"Metrics computed from daily portfolio values over the selected period. "
-            f"Monthly-based figures (CAGR, Sortino, Calmar, Annualized Vol, Best/Worst Year, Win Rate) "
+            f"Monthly-based figures (CAGR, Sortino, Calmar, Martin, Annualized Vol, Best/Worst Year, Win Rate) "
             f"resample to month-end values and anchor on the prior month-end, so the first monthly "
             f"return covers the full calendar month of the selected start date. "
-            f"Sortino ratio uses BIL (1-3 Month T-Bill ETF) as the risk-free rate where available; "
+            f"Sortino and Martin ratios use BIL (1-3 Month T-Bill ETF) as the risk-free rate where available; "
             f"months outside BIL's history default to 0%. "
             f"Max DD (Daily), Worst/Best Single Day, and Worst/Best Week are computed from the daily series over the "
             f"literal selected range, with the date of occurrence shown beneath each figure (and on hover). Worst/Best "
@@ -12790,6 +12806,7 @@ PS_GROUPS = [
     ("Risk-adjusted", [
         ("Sortino ratio", "Sortino Ratio", "ratio", "higher", None, None),
         ("Calmar ratio", "Calmar Ratio", "ratio", "higher", None, None),
+        ("Martin ratio", "Martin Ratio", "ratio", "higher", None, None),
     ]),
     ("Consistency", [
         ("Months with a gain", "Win Rate", "pct", "higher", None, None),
@@ -12806,12 +12823,28 @@ PS_GROUPS = [
 ]
 # Hover text for row labels that need it (the th's title).
 PS_ROW_HELP = {
+    # The three risk-adjusted ratios in plain terms (November 8, 2026).
+    "Sortino ratio": (
+        "Return per unit of bad volatility: the yearly return above T-bills (BIL), divided by how "
+        "large the losing months typically were. Gains don't count against it. Higher is better."
+    ),
+    "Calmar ratio": (
+        "Return per unit of worst loss: the yearly growth rate divided by the deepest month-end drop "
+        "from a previous high. A Calmar of 1 means a year's return about equals that worst drop. It "
+        "rests on a single episode, so one bad stretch can move it a lot. Higher is better."
+    ),
+    "Martin ratio": (
+        "Return per unit of drawdown pain: the yearly return above T-bills (BIL), divided by the "
+        "Ulcer Index, which measures how far below its previous high the portfolio sat at every "
+        "month-end. It counts how deep and how long every decline was, not just the worst one. "
+        "Higher is better."
+    ),
     "vs. S&P 500, daily": "Each column's portfolio against the S&P 500 (SPY), correlation of daily returns",
     "vs. S&P 500, monthly": "Each column's portfolio against the S&P 500 (SPY), correlation of monthly returns",
     "vs. Asymmetric Edge, daily": "Each column's portfolio against Asymmetric Edge, correlation of daily returns",
     "vs. Asymmetric Edge, monthly": "Each column's portfolio against Asymmetric Edge, correlation of monthly returns",
 }
-# Revealed by "Show all 22 metrics, with dates".
+# Revealed by "Show all 23 metrics, with dates".
 PS_MORE_GROUPS = [
     ("Best and worst periods", [
         ("Worst single day", "Worst Day", "pct", "higher", "Worst Day Date", "day"),
@@ -12829,7 +12862,7 @@ PS_MORE_GROUPS = [
 PS_NOTE = (
     "Asymmetric Edge’s monthly figures tie to Fidelity’s reported returns. Its daily "
     "figures come from a close-only reconstruction and are approximate. Benchmarks are Yahoo "
-    "Finance adjusted closes with dividends reinvested. Sortino uses BIL as the risk-free rate. "
+    "Finance adjusted closes with dividends reinvested. Sortino and Martin use BIL as the risk-free rate. "
     "Correlation rows read down each column: that portfolio against the S&amp;P 500 or against "
     "Asymmetric Edge, so a portfolio against itself reads 1.00. Before taxes and fees."
 )
