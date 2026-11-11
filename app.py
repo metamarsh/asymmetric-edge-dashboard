@@ -871,7 +871,7 @@ def load_reconstruction_data():
 PRICE_SNAPSHOT_NAME = "price_snapshot.csv"
 
 
-@st.cache_data(ttl=86400)
+@st.cache_data(ttl=3600)
 def load_price_snapshot() -> pd.DataFrame:
     """Committed adjusted-close history, used whenever Yahoo is unavailable."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
