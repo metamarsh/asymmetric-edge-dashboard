@@ -1,13 +1,13 @@
 {
  "schema": 1,
- "generated_at": "2026-11-11 14:47",
+ "generated_at": "2026-11-12 14:47",
  "generated_by": "make_holdings_snapshot.py",
  "note": "Theme weights are percent of each fund and add to 100; each fund's cash, money market and derivatives sleeve is spread proportionally across its holdings. top lists the largest holdings as [display name, ticker, theme, percent of fund] on the same basis.",
  "funds": {
   "QQQ": {
    "as_of": "2026-11-10",
    "source": "Invesco QQQ holdings (dng-api.invesco.com); GICS sectors from the iShares Nasdaq 100 UCITS ETF holdings file, which tracks the same index",
-   "method": "live",
+   "method": "previous",
    "holdings_count": 100,
    "cash_and_other_pct": 0.1603,
    "themes": {
@@ -266,646 +266,646 @@
    "sector_file_as_of": "2026-11-10"
   },
   "IWM": {
-   "as_of": "2026-11-10",
+   "as_of": "2026-11-11",
    "source": "iShares IWM holdings file (https://www.ishares.com/us/products/239710/ishares-russell-2000-etf/latest-holdings.csv)",
    "method": "live",
    "holdings_count": 1955,
-   "cash_and_other_pct": 0.3522,
+   "cash_and_other_pct": 0.3155,
    "themes": {
-    "health": 21.1845,
-    "financials": 19.5851,
-    "industrials": 13.4687,
-    "consumer": 11.7744,
-    "other_tech": 10.676,
-    "energy_mat": 9.9698,
-    "re_util": 8.864,
-    "internet": 2.4101,
-    "semis": 2.0674
+    "health": 21.235,
+    "financials": 19.4016,
+    "industrials": 13.5194,
+    "consumer": 11.6683,
+    "other_tech": 10.7731,
+    "energy_mat": 10.055,
+    "re_util": 8.7746,
+    "internet": 2.4154,
+    "semis": 2.1576
    },
    "top": [
     [
      "Glaukos",
      "GKOS",
      "health",
-     0.4586
+     0.4755
     ],
     [
      "Brightspring Health Services",
      "BTSG",
      "health",
-     0.4104
+     0.4074
     ],
     [
      "Jfrog",
      "FROG",
      "other_tech",
-     0.3809
-    ],
-    [
-     "UMB Financial",
-     "UMBF",
-     "financials",
-     0.3372
+     0.3992
     ],
     [
      "Moog",
      "MOG A",
      "industrials",
-     0.3303
+     0.3324
+    ],
+    [
+     "UMB Financial",
+     "UMBF",
+     "financials",
+     0.3311
     ],
     [
      "Viasat",
      "VSAT",
      "other_tech",
-     0.3247
-    ],
-    [
-     "Ryman Hospitality Properties Reit",
-     "RHP",
-     "re_util",
-     0.3168
+     0.3228
     ],
     [
      "TG Therapeutics",
      "TGTX",
      "health",
-     0.3145
-    ],
-    [
-     "Caretrust Reit",
-     "CTRE",
-     "re_util",
-     0.3131
+     0.3189
     ],
     [
      "Vaxcyte",
      "PCVX",
      "health",
-     0.3094
+     0.317
+    ],
+    [
+     "Ryman Hospitality Properties Reit",
+     "RHP",
+     "re_util",
+     0.3148
     ],
     [
      "Jackson Financial",
      "JXN",
      "financials",
-     0.3089
+     0.3093
+    ],
+    [
+     "Caretrust Reit",
+     "CTRE",
+     "re_util",
+     0.3084
     ],
     [
      "Old National Bancorp",
      "ONB",
      "financials",
-     0.2989
-    ],
-    [
-     "Twist Bioscience",
-     "TWST",
-     "health",
-     0.2948
-    ],
-    [
-     "Healthequity",
-     "HQY",
-     "health",
-     0.2932
-    ],
-    [
-     "Kymera Therapeutics",
-     "KYMR",
-     "health",
-     0.2881
-    ],
-    [
-     "Praxis Precision Medicines",
-     "PRAX",
-     "health",
-     0.2856
+     0.2962
     ],
     [
      "Brinker International",
      "EAT",
      "consumer",
-     0.2855
+     0.291
     ],
     [
-     "Protagonist Therapeutics",
-     "PTGX",
+     "Praxis Precision Medicines",
+     "PRAX",
      "health",
-     0.2821
+     0.2902
     ],
     [
-     "Victoria S Secret",
-     "VSXY",
-     "consumer",
-     0.2726
-    ],
-    [
-     "Oscar Health",
-     "OSCR",
-     "financials",
-     0.2713
-    ],
-    [
-     "Spyre Therapeutics",
-     "SYRE",
+     "Healthequity",
+     "HQY",
      "health",
-     0.269
-    ],
-    [
-     "Krystal Biotech",
-     "KRYS",
-     "health",
-     0.2689
+     0.2891
     ],
     [
      "Zeta Global",
      "ZETA",
      "other_tech",
-     0.2684
+     0.2862
+    ],
+    [
+     "Kymera Therapeutics",
+     "KYMR",
+     "health",
+     0.2818
+    ],
+    [
+     "Protagonist Therapeutics",
+     "PTGX",
+     "health",
+     0.2766
+    ],
+    [
+     "Spyre Therapeutics",
+     "SYRE",
+     "health",
+     0.2725
+    ],
+    [
+     "Twist Bioscience",
+     "TWST",
+     "health",
+     0.271
+    ],
+    [
+     "Krystal Biotech",
+     "KRYS",
+     "health",
+     0.2685
+    ],
+    [
+     "Victoria S Secret",
+     "VSXY",
+     "consumer",
+     0.268
     ],
     [
      "Alkermes",
      "ALKS",
      "health",
-     0.2624
-    ],
-    [
-     "Interdigital",
-     "IDCC",
-     "other_tech",
-     0.2572
+     0.2679
     ],
     [
      "Cytokinetics",
      "CYTK",
      "health",
-     0.2551
+     0.2633
     ],
     [
-     "Firstcash",
-     "FCFS",
+     "Interdigital",
+     "IDCC",
+     "other_tech",
+     0.262
+    ],
+    [
+     "Oscar Health",
+     "OSCR",
      "financials",
-     0.2525
-    ],
-    [
-     "Macerich Reit",
-     "MAC",
-     "re_util",
-     0.2519
-    ],
-    [
-     "Life Time",
-     "LTH",
-     "consumer",
-     0.2506
-    ],
-    [
-     "10X Genomics",
-     "TXG",
-     "health",
-     0.2483
-    ],
-    [
-     "Silicon Laboratories",
-     "SLAB",
-     "semis",
-     0.2478
-    ],
-    [
-     "Compass",
-     "COMP",
-     "re_util",
-     0.2459
-    ],
-    [
-     "Commercial Metals",
-     "CMC",
-     "energy_mat",
-     0.2435
+     0.2579
     ],
     [
      "SM Energy",
      "SM",
      "energy_mat",
+     0.254
+    ],
+    [
+     "Firstcash",
+     "FCFS",
+     "financials",
+     0.251
+    ],
+    [
+     "Compass",
+     "COMP",
+     "re_util",
+     0.2502
+    ],
+    [
+     "Life Time",
+     "LTH",
+     "consumer",
+     0.2489
+    ],
+    [
+     "Macerich Reit",
+     "MAC",
+     "re_util",
+     0.2479
+    ],
+    [
+     "Silicon Laboratories",
+     "SLAB",
+     "semis",
+     0.2455
+    ],
+    [
+     "Commercial Metals",
+     "CMC",
+     "energy_mat",
      0.2429
+    ],
+    [
+     "10X Genomics",
+     "TXG",
+     "health",
+     0.2427
     ],
     [
      "Terreno Realty Reit",
      "TRNO",
      "re_util",
-     0.2403
-    ],
-    [
-     "Commvault Systems",
-     "CVLT",
-     "other_tech",
      0.2391
     ],
     [
      "Fluor",
      "FLR",
      "industrials",
-     0.2387
-    ],
-    [
-     "Frontdoor",
-     "FTDR",
-     "consumer",
      0.2373
     ],
     [
      "Valley National",
      "VLY",
      "financials",
-     0.2372
+     0.2365
     ],
     [
-     "First Bancorp",
-     "FBP",
-     "financials",
-     0.2359
+     "Federal Signal",
+     "FSS",
+     "industrials",
+     0.2364
+    ],
+    [
+     "Commvault Systems",
+     "CVLT",
+     "other_tech",
+     0.2347
+    ],
+    [
+     "Frontdoor",
+     "FTDR",
+     "consumer",
+     0.2336
     ]
    ]
   },
   "EMXC": {
-   "as_of": "2026-11-10",
+   "as_of": "2026-11-11",
    "source": "iShares EMXC holdings file (https://www.ishares.com/us/products/288504/ishares-msci-emerging-markets-ex-china-etf/latest-holdings.csv)",
    "method": "live",
    "holdings_count": 600,
-   "cash_and_other_pct": 0.1748,
+   "cash_and_other_pct": 0.1484,
    "themes": {
-    "semis": 38.6268,
-    "financials": 21.1816,
-    "energy_mat": 10.0224,
-    "other_tech": 8.2434,
-    "consumer": 7.0469,
-    "industrials": 6.2936,
-    "internet": 3.4541,
-    "re_util": 2.9738,
-    "health": 2.1574
+    "semis": 39.4816,
+    "financials": 20.8503,
+    "energy_mat": 9.8351,
+    "other_tech": 8.2369,
+    "consumer": 6.9149,
+    "industrials": 6.2442,
+    "internet": 3.4062,
+    "re_util": 2.9128,
+    "health": 2.1179
    },
    "top": [
     [
      "TSMC",
      "2330",
      "semis",
-     19.4494
+     19.9338
     ],
     [
      "Samsung Electronics",
      "005930",
      "semis",
-     9.0077
+     9.1287
     ],
     [
      "SK hynix",
      "000660",
      "semis",
-     5.7015
+     5.8767
     ],
     [
      "MediaTek",
      "2454",
      "semis",
-     1.9054
+     1.941
     ],
     [
      "HDFC Bank",
      "HDFCBANK",
      "financials",
-     1.1018
+     1.0893
     ],
     [
      "Hon Hai",
      "2317",
      "other_tech",
-     1.0214
+     1.0008
     ],
     [
      "ICICI Bank",
      "ICICIBANK",
      "financials",
-     1.0131
+     0.9803
     ],
     [
      "Reliance Industries",
      "RELIANCE",
      "energy_mat",
-     0.9246
+     0.9121
     ],
     [
      "Delta Electronics",
      "2308",
      "other_tech",
-     0.8589
+     0.8531
     ],
     [
      "Bharti Airtel",
      "BHARTIARTL",
      "internet",
-     0.7063
+     0.7033
     ],
     [
      "ASE Technology",
      "3711",
      "semis",
-     0.6974
+     0.6955
     ],
     [
      "SK Square",
      "402340",
      "industrials",
-     0.5978
+     0.6125
     ],
     [
      "Al Rajhi Bank",
      "1120",
      "financials",
-     0.567
+     0.5577
     ],
     [
      "Anglogold Ashanti",
      "ANG",
      "energy_mat",
-     0.5451
-    ],
-    [
-     "Itau Unibanco",
-     "ITUB4",
-     "financials",
-     0.5001
-    ],
-    [
-     "Nu",
-     "NU",
-     "financials",
-     0.4981
-    ],
-    [
-     "Cia Vale Do Rio Doce SH",
-     "VALE3",
-     "energy_mat",
-     0.4803
+     0.5188
     ],
     [
      "Nan Ya Plastics",
      "1303",
      "energy_mat",
-     0.4756
+     0.5036
+    ],
+    [
+     "Itau Unibanco",
+     "ITUB4",
+     "financials",
+     0.4978
+    ],
+    [
+     "Nu",
+     "NU",
+     "financials",
+     0.4957
+    ],
+    [
+     "Cia Vale Do Rio Doce SH",
+     "VALE3",
+     "energy_mat",
+     0.4692
     ],
     [
      "Saudi Arabian Oil",
      "2222",
      "energy_mat",
-     0.4669
+     0.4631
     ],
     [
      "Fubon Financial",
      "2881",
      "financials",
-     0.4434
-    ],
-    [
-     "KB Financial",
-     "105560",
-     "financials",
-     0.4385
+     0.4519
     ],
     [
      "Elite Material",
      "2383",
      "other_tech",
-     0.4291
-    ],
-    [
-     "CTBC Financial",
-     "2891",
-     "financials",
-     0.4271
-    ],
-    [
-     "Infosys",
-     "INFY",
-     "other_tech",
-     0.426
-    ],
-    [
-     "Petroleo Brasileiro",
-     "PETR4",
-     "energy_mat",
-     0.4218
+     0.4326
     ],
     [
      "Samsung Electro-Mechanics",
      "009150",
      "other_tech",
-     0.4212
+     0.4312
     ],
     [
-     "Naspers Limited Class N",
-     "NPN",
-     "consumer",
-     0.3994
+     "KB Financial",
+     "105560",
+     "financials",
+     0.4307
     ],
     [
-     "Grupo Mexico B",
-     "GMEXICOB",
+     "CTBC Financial",
+     "2891",
+     "financials",
+     0.4233
+    ],
+    [
+     "Infosys",
+     "INFY",
+     "other_tech",
+     0.4171
+    ],
+    [
+     "Petroleo Brasileiro",
+     "PETR4",
      "energy_mat",
-     0.3972
-    ],
-    [
-     "Gold Fields",
-     "GFI",
-     "energy_mat",
-     0.3934
+     0.4015
     ],
     [
      "UMC",
      "2303",
      "semis",
-     0.3927
-    ],
-    [
-     "Petroleo Brasileiro Sa Petrobras",
-     "PETR3",
-     "energy_mat",
-     0.3857
+     0.3974
     ],
     [
      "Unimicron Technology",
      "3037",
      "other_tech",
-     0.3854
+     0.3932
+    ],
+    [
+     "Grupo Mexico B",
+     "GMEXICOB",
+     "energy_mat",
+     0.3895
+    ],
+    [
+     "Naspers Limited Class N",
+     "NPN",
+     "consumer",
+     0.3766
+    ],
+    [
+     "Gold Fields",
+     "GFI",
+     "energy_mat",
+     0.3726
+    ],
+    [
+     "Petroleo Brasileiro Sa Petrobras",
+     "PETR3",
+     "energy_mat",
+     0.371
     ],
     [
      "Cathay Financial",
      "2882",
      "financials",
-     0.3632
-    ],
-    [
-     "Axis Bank",
-     "AXISBANK",
-     "financials",
-     0.3491
+     0.3649
     ],
     [
      "Mahindra And Mahindra",
      "M&M",
      "consumer",
-     0.3473
+     0.3577
+    ],
+    [
+     "Axis Bank",
+     "AXISBANK",
+     "financials",
+     0.3482
     ],
     [
      "Larsen And Toubro",
      "LT",
      "industrials",
-     0.3434
+     0.3381
     ],
     [
      "The Saudi National Bank",
      "1180",
      "financials",
-     0.3414
+     0.3371
+    ],
+    [
+     "Asia Vital Components",
+     "3017",
+     "other_tech",
+     0.3293
     ],
     [
      "Firstrand",
      "FSR",
      "financials",
-     0.3399
+     0.3259
     ],
     [
      "Bajaj Finance",
      "BAJFINANCE",
      "financials",
-     0.3217
-    ],
-    [
-     "Kotak Mahindra Bank",
-     "KOTAKBANK",
-     "financials",
-     0.3187
+     0.3188
     ]
    ]
   },
   "HGER": {
-   "as_of": "2026-11-11",
+   "as_of": "2026-11-12",
    "method": "live",
    "source": "Harbor HGER page data, Quantix Commodity Index sector weights (https://www.harborcapital.com/page-data/etf/hger/page-data.json)",
    "holdings_count": 18,
    "cash_and_other_pct": 0.0,
    "themes": {
-    "oil": 40.4911,
-    "agri": 23.1796,
-    "gold": 19.1319,
-    "livestock": 11.1597,
-    "ind_metals": 6.0378
+    "oil": 40.776,
+    "agri": 23.2635,
+    "gold": 18.8424,
+    "livestock": 11.0561,
+    "ind_metals": 6.062
    },
    "top": [
     [
      "Gold",
      "GCG7",
      "gold",
-     19.1319
+     18.8424
     ],
     [
      "Brent crude",
      "COH7",
      "oil",
-     16.6662
+     16.7651
     ],
     [
      "Heating oil",
      "HOH7",
      "oil",
-     12.6179
+     12.6509
     ],
     [
      "Gasoil",
      "QSH7",
      "oil",
-     11.207
+     11.3599
     ],
     [
      "Live cattle",
      "LCG7",
      "livestock",
-     5.6556
+     5.6149
     ],
     [
      "Lean hogs",
      "LHG7",
      "livestock",
-     5.5041
+     5.4412
     ],
     [
      "Wheat",
      "W H7",
      "agri",
-     3.6304
+     3.6508
     ],
     [
      "Cocoa",
      "CCH7",
      "agri",
-     3.4586
+     3.555
     ],
     [
      "Sugar",
      "SBH7",
      "agri",
-     2.7642
-    ],
-    [
-     "Coffee",
-     "KCH7",
-     "agri",
-     2.7216
+     2.8019
     ],
     [
      "Soybeans",
      "S H7",
      "agri",
-     2.7204
+     2.7095
+    ],
+    [
+     "Coffee",
+     "KCH7",
+     "agri",
+     2.6878
     ],
     [
      "Cotton",
      "CTH7",
      "agri",
-     2.1487
+     2.129
     ],
     [
      "Zinc",
      "LXH7",
      "ind_metals",
-     2.0412
+     2.0481
     ],
     [
      "Copper",
      "HGH7",
      "ind_metals",
-     2.0118
+     2.0135
     ],
     [
      "Aluminum",
      "LAH27",
      "ind_metals",
-     1.9847
+     2.0003
     ],
     [
      "Soybean oil",
      "BOH7",
      "agri",
-     1.9632
+     1.9862
     ],
     [
      "Soymeal",
      "SMH7",
      "agri",
-     1.9395
+     1.9294
     ],
     [
      "Corn",
      "C H7",
      "agri",
-     1.833
+     1.8139
     ]
    ]
   }
