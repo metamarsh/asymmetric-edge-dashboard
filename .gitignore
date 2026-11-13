@@ -3,3 +3,5 @@ __pycache__/
 *.bak*
 # ETF Screener data stays on the PC (Watchlist verdicts, backtest results)
 etf_screener/
+# Sector labels make_holdings_snapshot.py saves for days the iShares file is down (PC only)
+ndx_sector_labels.json
