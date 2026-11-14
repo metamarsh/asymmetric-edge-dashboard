@@ -6980,7 +6980,9 @@ def render_underwater_section(combined, latest_date):
 # slightly, and the strategy's worst against the market's, on one scale.
 # Public text never names the strategy's settings (Tyler, November 5, 2026).
 # The backtest figures are static outputs of the Strategy Backtesting System
-# (Basket Research\ETF Scouting\Drawdown Expectation 2026-11-05), stored in
+# (Basket Research\ETF Scouting\Drawdown Expectation 2026-11-05, rerun
+# November 13, 2026 on the current position sizing; the rerun's folder is
+# named in the Chart Dashboard 00 Index.md), stored in
 # drawdown_context.json beside app.py; the live figure comes from the
 # published series every rerun. Refresh the JSON when the reference baseline
 # changes or at the quarterly review. Tyler, November 5, 2026: public, on the
@@ -6997,7 +6999,7 @@ DDC_BAND_EDGE = "#C8BFE6"
 DDC_GRID = "#EDEDF1"
 DDC_ROW = 44                     # px per bar row
 DDC_BENCH = [("80/20", "80/20 portfolio"), ("S&P 500", "S&P 500 (SPY)")]
-DDC_LIVE_AUG_2024 = "In August 2024 the live account fell 9.2%, against the backtest's 11.0%."
+DDC_LIVE_AUG_2024 = "In August 2024 the live account fell 9.2%, against the backtest's 10.8%."
 
 
 @st.cache_data(show_spinner=False)
