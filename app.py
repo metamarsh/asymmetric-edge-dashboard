@@ -200,6 +200,11 @@ st.markdown("""
         font-weight: 600 !important;
     }
 
+    /* The PNG font fix (render_png_font_fix) is a script only; hide its slot. */
+    [data-testid="stElementContainer"]:has(.ae-png-font-fix) {
+        display: none;
+    }
+
     /* Center toggle widgets (used by the Portfolio Growth legend) */
     div[data-testid="stToggle"] {
         display: flex !important;
@@ -12794,6 +12799,70 @@ def render_total_return_section(ctx):
     st.markdown(f'<p class="footer-text">{footnote_tr}</p>', unsafe_allow_html=True)
 
 
+# ---------- PNG downloads keep Inter (November 14, 2026) ----------
+# Plotly's "Download plot as a png" draws the chart's SVG onto a canvas as an
+# image, and an SVG drawn as an image cannot see the page's web fonts, so every
+# exported PNG fell back to Arial (DM Sans exports did the same). This script
+# fetches Google's Inter file (latin, weights 400 to 700, the same file the
+# theme loads) once per page load and, whenever Plotly builds the SVG blob for
+# an export, embeds it in the SVG as an @font-face, so the PNG matches the
+# screen. Nothing on the page changes; if the font cannot be fetched, exports
+# work as before. Plotly only builds blobs this way for PNG, JPEG and WebP in
+# Chrome, Edge and Firefox (Safari takes a data-URL path this does not touch).
+# Tag-like strings inside the script are written with \x3c for "<": Streamlit's
+# HTML sanitizer drops any script whose text contains "<svg" and the like.
+PNG_FONT_FIX_HTML = r"""
+<div class="ae-png-font-fix"></div>
+<script>
+(function () {
+  var w = window;
+  if (w.__aePngFontFix) { return; }
+  w.__aePngFontFix = { css: null };
+  var CSS_URL = "https://fonts.googleapis.com/css2?family=Inter:wght@400..700&display=swap";
+  function toBase64(buf) {
+    var bytes = new Uint8Array(buf), bin = "";
+    for (var i = 0; i < bytes.length; i += 0x8000) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return w.btoa(bin);
+  }
+  fetch(CSS_URL).then(function (r) { return r.text(); }).then(function (css) {
+    var parts = css.split("/* latin */");
+    if (parts.length < 2) { return; }
+    var face = parts[1].slice(parts[1].indexOf("@font-face"), parts[1].indexOf("}") + 1);
+    var m = face.match(/url\((https:[^)]+)\)/);
+    if (!m) { return; }
+    return fetch(m[1]).then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+      w.__aePngFontFix.css = face.replace(m[1], "data:font/woff2;base64," + toBase64(buf));
+    });
+  }).catch(function () {});
+  var OrigBlob = w.Blob;
+  class AEBlob extends OrigBlob {
+    constructor(parts, opts) {
+      try {
+        var css = w.__aePngFontFix.css;
+        if (css && opts && /svg/.test(opts.type || "") && parts && parts.length === 1 &&
+            typeof parts[0] === "string" && parts[0].indexOf("\x3csvg") === 0 &&
+            parts[0].indexOf("main-svg") !== -1) {
+          var s = parts[0], i = s.indexOf(">") + 1;
+          parts = [s.slice(0, i) + "\x3cdefs>\x3cstyle>" + css + "\x3c/style>\x3c/defs>" + s.slice(i)];
+        }
+      } catch (e) {}
+      super(parts, opts);
+    }
+  }
+  w.Blob = AEBlob;
+})();
+</script>
+"""
+
+
+def render_png_font_fix():
+    """Install the PNG-export font fix (once per page load; the script guards
+    itself). Its element container is hidden by CSS, so it takes no space."""
+    st.html(PNG_FONT_FIX_HTML, unsafe_allow_javascript=True)
+
+
 def render_footer():
     """The footer line at the bottom of every page."""
     # Bottom footer
@@ -14503,6 +14572,7 @@ def main():
     current_page.run()
 
     render_footer()
+    render_png_font_fix()
 
 
 if __name__ == "__main__":
