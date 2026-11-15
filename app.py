@@ -25,9 +25,25 @@ st.set_page_config(
 )
 
 # ---------- Brand tokens ----------
-TEXT_PRIMARY = "#484848"
-TEXT_SECONDARY = "#666677"
-TEXT_MUTED = "#777788"
+# Warm neutral set and type from the asymmetricedge.io homepage (theme pass,
+# November 14, 2026). These are the single definitions: the style block reads
+# them through the CSS variables in AE_ROOT_CSS, charts read them directly,
+# and .streamlit/config.toml mirrors INK, WASH, CONTROL_BORDER and
+# BRAND_PURPLE (change both together).
+INK = "#1C1B19"              # headings, primary text, table text, data labels
+BODY_TEXT = "#55524D"        # body, secondary and muted text
+AXIS_TEXT = "#6B6B7B"        # chart axis and tick text
+RULE_COLOR = "#E6E3DC"       # dividers and table rules
+CONTROL_BORDER = "#D9D5CC"   # pills, tags, tooltips
+CARD_BORDER = "#E2DED6"      # card borders
+WASH = "#F5F4F0"             # light fill and hover fill
+PURPLE_TINT = "#F0EDF8"      # selected pill fill
+BRAND_PURPLE_DARK = "#26076E"
+FONT_SANS = "Inter, sans-serif"
+FONT_SERIF = "'IBM Plex Serif', Georgia, serif"
+TEXT_PRIMARY = INK
+TEXT_SECONDARY = BODY_TEXT
+TEXT_MUTED = BODY_TEXT
 BRAND_PURPLE = "#3A0CA3"
 BRAND_TEAL = "#30C7B5"
 GAIN_GREEN = "#1F8A4C"
@@ -35,10 +51,24 @@ LOSS_RED = "#C0392B"
 GRID_COLOR = "#eeeeee"
 ZERO_LINE = "#dddddd"
 
+# CSS variables for the brand tokens above, so every style block on the page
+# (this one, the Screener's, the per-section ones) reads the same values.
+AE_ROOT_CSS = (
+    ":root {"
+    f" --ae-ink: {INK}; --ae-body: {BODY_TEXT}; --ae-axis: {AXIS_TEXT};"
+    f" --ae-rule: {RULE_COLOR}; --ae-control: {CONTROL_BORDER}; --ae-card: {CARD_BORDER};"
+    f" --ae-wash: {WASH}; --ae-purple: {BRAND_PURPLE}; --ae-purple-dark: {BRAND_PURPLE_DARK};"
+    f" --ae-purple-tint: {PURPLE_TINT}; --ae-sans: {FONT_SANS}; --ae-serif: {FONT_SERIF};"
+    " }"
+)
+
 # ---------- Custom CSS ----------
+# Fonts come from .streamlit/config.toml (theme.font and theme.headingFont);
+# the import below is the fallback if that file is missing.
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@600&family=Inter:wght@400;500;600;700;800;900&display=swap');
+    """ + AE_ROOT_CSS + """
 
     /* Hide Streamlit chrome */
     #MainMenu {visibility: hidden;}
@@ -50,9 +80,9 @@ st.markdown("""
         background-color: #ffffff;
     }
 
-    html, body, [class*="css"] {
-        font-family: 'DM Sans', sans-serif;
-        color: """ + TEXT_PRIMARY + """;
+    html, body, [class*="css"], .stApp, [data-testid="stMarkdownContainer"] {
+        font-family: var(--ae-sans);
+        color: var(--ae-ink);
     }
 
     .block-container {
@@ -61,13 +91,18 @@ st.markdown("""
         max-width: 1100px;
     }
 
+    /* Page titles and section headings: IBM Plex Serif 600, as on the
+       homepage. Sizes are unchanged from the sans versions. */
+    h1, h2, h3 {
+        font-family: var(--ae-serif) !important;
+        font-weight: 600 !important;
+        color: var(--ae-ink) !important;
+        letter-spacing: -0.01em;
+    }
     h2 {
-        font-weight: 700 !important;
         font-size: 1.35rem !important;
-        color: """ + TEXT_PRIMARY + """ !important;
         margin-top: 0 !important;
         margin-bottom: 0.25rem !important;
-        letter-spacing: -0.01em;
     }
 
     /* Header */
@@ -78,10 +113,11 @@ st.markdown("""
         margin-bottom: 0.25rem;
     }
     .brand-header .brand-name {
+        font-family: var(--ae-serif);
         font-size: 1.6rem;
-        font-weight: 700;
-        color: """ + TEXT_PRIMARY + """;
-        letter-spacing: -0.02em;
+        font-weight: 600;
+        color: var(--ae-ink);
+        letter-spacing: -0.01em;
     }
     .brand-header .brand-tag {
         font-size: 0.85rem;
@@ -110,28 +146,57 @@ st.markdown("""
 
     /* Dividers */
     hr {
-        border-color: #e8e8ee !important;
+        border-color: var(--ae-rule) !important;
         margin: 2.5rem 0 !important;
     }
-    /* Pills styling */
-    button[data-testid="stBaseButton-pills"] {
-        border: 1px solid #ddd !important;
-        border-radius: 8px !important;
-        color: """ + TEXT_SECONDARY + """ !important;
+    /* Pills: one rule for every pill group, matching the homepage controls.
+       Streamlit 1.54 marks pills with data-testid stBaseButton-pills and
+       stBaseButton-pillsActive (kind pills and pillsActive); 1.61 drops the
+       testid and uses data-variant="pills" with data-selected="true" on the
+       selected ones (plus aria-checked for single-select groups and
+       aria-pressed for multi-select). All are covered so a version change
+       cannot bring back the default accent. */
+    button[data-testid="stBaseButton-pills"],
+    button[kind="pills"],
+    button[data-variant="pills"],
+    button[data-testid="stBaseButton-pillsActive"],
+    button[kind="pillsActive"] {
+        border: 1px solid var(--ae-control) !important;
+        border-radius: 999px !important;
+        color: var(--ae-body) !important;
         background-color: #ffffff !important;
         font-weight: 500 !important;
         font-size: 0.85rem !important;
         padding: 0.3rem 0.9rem !important;
-        transition: all 0.15s ease !important;
+        transition: background-color 0.15s ease, border-color 0.15s ease !important;
     }
-    button[data-testid="stBaseButton-pills"]:hover {
-        border-color: #bbb !important;
-        background-color: #f5f5f8 !important;
+    button[data-testid="stBaseButton-pills"] p,
+    button[kind="pills"] p,
+    button[data-variant="pills"] p {
+        color: var(--ae-body) !important;
+        font-weight: 500 !important;
     }
-    button[data-testid="stBaseButton-pills"][aria-checked="true"] {
-        background-color: #f0edf8 !important;
-        border-color: """ + BRAND_PURPLE + """ !important;
-        color: """ + BRAND_PURPLE + """ !important;
+    button[data-testid="stBaseButton-pills"]:hover,
+    button[kind="pills"]:hover,
+    button[data-variant="pills"]:not([data-selected="true"]):not([aria-checked="true"]):not([aria-pressed="true"]):hover {
+        background-color: var(--ae-wash) !important;
+    }
+    button[data-testid="stBaseButton-pillsActive"],
+    button[kind="pillsActive"],
+    button[data-variant="pills"][data-selected="true"],
+    button[data-variant="pills"][aria-checked="true"],
+    button[data-variant="pills"][aria-pressed="true"] {
+        border-color: var(--ae-purple) !important;
+        color: var(--ae-purple) !important;
+        background-color: var(--ae-purple-tint) !important;
+        font-weight: 600 !important;
+    }
+    button[data-testid="stBaseButton-pillsActive"] p,
+    button[kind="pillsActive"] p,
+    button[data-variant="pills"][data-selected="true"] p,
+    button[data-variant="pills"][aria-checked="true"] p,
+    button[data-variant="pills"][aria-pressed="true"] p {
+        color: var(--ae-purple) !important;
         font-weight: 600 !important;
     }
 
@@ -151,7 +216,7 @@ st.markdown("""
     }
     .st-key-ae_topbar {
         min-height: 64px;
-        border-bottom: 1px solid #E5E7EB;
+        border-bottom: 1px solid var(--ae-rule);
         flex-wrap: wrap;
         column-gap: 32px;
         row-gap: 0;
@@ -166,7 +231,7 @@ st.markdown("""
         overflow: hidden;
         clip-path: inset(50%);
         white-space: nowrap;
-        font-family: 'DM Sans', sans-serif;
+        font-family: var(--ae-sans);
     }
     .st-key-ae_nav {
         flex-wrap: wrap;
@@ -186,7 +251,7 @@ st.markdown("""
     .st-key-ae_nav [data-testid="stPageLink-NavLink"] p {
         font-size: 15px;
         font-weight: 500;
-        color: #555566;
+        color: var(--ae-body);
     }
     .st-key-ae_nav [data-testid="stPageLink-NavLink"]:hover p {
         color: """ + BRAND_PURPLE + """;
@@ -204,18 +269,19 @@ st.markdown("""
         margin: 1rem 0 1.5rem 0;
     }
     .ae-page-title {
+        font-family: var(--ae-serif);
         font-size: 32px;
         line-height: 1.15;
-        font-weight: 700;
-        letter-spacing: -0.02em;
-        color: #2E2E38;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        color: var(--ae-ink);
     }
     [data-testid="stMarkdownContainer"] p.ae-page-desc {
         margin: 8px 0 0 0;
         max-width: 720px;
         font-size: 16px;
         line-height: 1.6;
-        color: #555566;
+        color: var(--ae-body);
     }
     .ae-otp {
         display: flex;
@@ -223,8 +289,8 @@ st.markdown("""
         column-gap: 24px;
         margin-top: 20px;
         padding: 12px 0;
-        border-top: 1px solid #E5E7EB;
-        border-bottom: 1px solid #E5E7EB;
+        border-top: 1px solid var(--ae-rule);
+        border-bottom: 1px solid var(--ae-rule);
     }
     .ae-otp-links {
         display: flex;
@@ -244,7 +310,7 @@ st.markdown("""
     [data-testid="stMarkdownContainer"] .ae-otp a:visited {
         font-size: 14px;
         font-weight: 500;
-        color: #555566;
+        color: var(--ae-body);
         text-decoration: none;
     }
     [data-testid="stMarkdownContainer"] .ae-otp a:hover {
@@ -265,6 +331,11 @@ st.markdown("""
         .st-key-ae_topbar {
             padding-top: 12px;
         }
+        /* The serif wordmark's descenders sit lower than the old sans, so
+           give the wrapped menu row a little room (November 14, 2026). */
+        .st-key-ae_topbar .brand-header {
+            margin-bottom: 6px;
+        }
         .st-key-ae_nav {
             position: relative;
             left: -12px;
@@ -281,31 +352,32 @@ st.markdown("""
         flex-direction: column;
         gap: 10px;
         margin: 0.75rem 0 1.25rem 0;
-        font-family: 'DM Sans', sans-serif;
+        font-family: var(--ae-sans);
     }
     [data-testid="stMarkdownContainer"] .ae-hero p {
         margin: 0;
-        font-family: 'DM Sans', sans-serif;
+        font-family: var(--ae-sans);
     }
     [data-testid="stMarkdownContainer"] .ae-hero p.ae-hero-eyebrow {
         font-size: 12px;
         font-weight: 600;
         letter-spacing: 0.08em;
         text-transform: uppercase;
-        color: #666677;
+        color: var(--ae-body);
     }
     .ae-hero-title {
+        font-family: var(--ae-serif);
         font-size: 38px;
         line-height: 1.12;
-        font-weight: 700;
-        letter-spacing: -0.025em;
-        color: #2E2E38;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        color: var(--ae-ink);
     }
     [data-testid="stMarkdownContainer"] .ae-hero p.ae-hero-lede {
         max-width: 720px;
         font-size: 17px;
         line-height: 1.6;
-        color: #555566;
+        color: var(--ae-body);
     }
     [data-testid="stMarkdownContainer"] .ae-hero p.ae-hero-status {
         display: flex;
@@ -313,7 +385,7 @@ st.markdown("""
         gap: 8px;
         margin-top: 4px;
         font-size: 13px;
-        color: #666677;
+        color: var(--ae-body);
     }
     .ae-dot {
         display: inline-block;
@@ -333,13 +405,13 @@ st.markdown("""
         flex-direction: column;
         gap: 10px;
         padding: 20px;
-        border: 1px solid #E5E7EB;
+        border: 1px solid var(--ae-card);
         border-radius: 12px;
     }
     [data-testid="stMarkdownContainer"] .ae-hero p.ae-tile-label {
         font-size: 14px;
         font-weight: 500;
-        color: #555566;
+        color: var(--ae-body);
     }
     [data-testid="stMarkdownContainer"] .ae-hero p.ae-tile-value {
         font-size: 34px;
@@ -355,7 +427,7 @@ st.markdown("""
         align-items: center;
         gap: 8px;
         font-size: 13px;
-        color: #555566;
+        color: var(--ae-body);
         font-variant-numeric: tabular-nums;
     }
     /* vs 80/20 chips, shared by the tiles and the table */
@@ -364,7 +436,7 @@ st.markdown("""
         padding: 2px 9px;
         border: 1px solid transparent;
         border-radius: 999px;
-        font-family: 'DM Sans', sans-serif;
+        font-family: var(--ae-sans);
         font-size: 13px;
         font-weight: 600;
         line-height: 1.5;
@@ -382,47 +454,25 @@ st.markdown("""
         border-color: #E0948A;
     }
     .ae-chip-even {
-        color: #555566;
-        background: #F3F4F6;
-        border-color: #F3F4F6;
+        color: var(--ae-body);
+        background: var(--ae-wash);
+        border-color: var(--ae-wash);
     }
 
     /* Performance page table */
     [data-testid="stMarkdownContainer"] p.ae-ps-range {
         margin: 0;
         font-size: 14px;
-        color: #555566;
+        color: var(--ae-body);
     }
     .st-key-ae_ps_head {
         flex-wrap: wrap;
         row-gap: 8px;
     }
-    .st-key-perf_summary_period button {
-        min-height: 34px;
-        padding: 0 12px !important;
-        border: 1px solid #DDDDE3 !important;
-        border-radius: 8px !important;
-        background: #ffffff !important;
-    }
-    .st-key-perf_summary_period button p {
-        font-size: 13px;
-        font-weight: 500;
-        color: #555566;
-    }
-    .st-key-perf_summary_period button[aria-checked="true"],
-    .st-key-perf_summary_period button[data-testid="stBaseButton-pillsActive"] {
-        border-color: """ + BRAND_PURPLE + """ !important;
-        background: #F0EDF8 !important;
-    }
-    .st-key-perf_summary_period button[aria-checked="true"] p,
-    .st-key-perf_summary_period button[data-testid="stBaseButton-pillsActive"] p {
-        font-weight: 600;
-        color: """ + BRAND_PURPLE + """;
-    }
     .ae-ps-wrap {
         overflow-x: auto;
         margin-bottom: 12px;
-        border: 1px solid #E5E7EB;
+        border: 1px solid var(--ae-card);
         border-radius: 12px;
     }
     [data-testid="stMarkdownContainer"] table.ae-ps {
@@ -431,29 +481,29 @@ st.markdown("""
         margin: 0;
         border: none;
         border-collapse: collapse;
-        font-family: 'DM Sans', sans-serif;
+        font-family: var(--ae-sans);
         font-size: 14px;
-        color: #2E2E38;
+        color: var(--ae-ink);
         font-variant-numeric: tabular-nums;
     }
     [data-testid="stMarkdownContainer"] table.ae-ps th,
     [data-testid="stMarkdownContainer"] table.ae-ps td {
         padding: 11px 18px;
         border: none;
-        border-top: 1px solid #EEEEF2;
+        border-top: 1px solid var(--ae-rule);
         background: transparent;
         font-size: 14px;
         font-weight: 400;
         text-align: right;
         vertical-align: middle;
         white-space: nowrap;
-        color: #2E2E38;
+        color: var(--ae-ink);
     }
     [data-testid="stMarkdownContainer"] table.ae-ps thead th {
         padding: 14px 18px;
         border-top: none;
         border-bottom: 2px solid """ + BRAND_PURPLE + """;
-        background: #F9FAFB;
+        background: var(--ae-wash);
         font-size: 13px;
         font-weight: 600;
         color: """ + TEXT_PRIMARY + """;
@@ -488,7 +538,7 @@ st.markdown("""
     [data-testid="stMarkdownContainer"] table.ae-ps th.ae-ps-vs {
         padding-top: 8px;
         padding-bottom: 8px;
-        border-left: 1px solid #E5E7EB;
+        border-left: 1px solid var(--ae-rule);
     }
     [data-testid="stMarkdownContainer"] table.ae-ps thead th.ae-ps-vs {
         padding-top: 14px;
@@ -500,7 +550,7 @@ st.markdown("""
         font-weight: 700;
         letter-spacing: 0.08em;
         text-transform: uppercase;
-        color: #666677;
+        color: var(--ae-body);
     }
     [data-testid="stMarkdownContainer"] table.ae-ps tr.ae-ps-first th,
     [data-testid="stMarkdownContainer"] table.ae-ps tr.ae-ps-first td {
@@ -539,9 +589,9 @@ st.markdown("""
         flex-wrap: wrap;
         align-items: center;
         gap: 8px 16px;
-        font-family: 'DM Sans', sans-serif;
+        font-family: var(--ae-sans);
         font-size: 13px;
-        color: #555566;
+        color: var(--ae-body);
     }
     .ae-ps-key {
         display: inline-flex;
@@ -565,26 +615,28 @@ st.markdown("""
     [data-testid="stMarkdownContainer"] p.ae-ps-note {
         max-width: 860px;
         margin: 0;
-        font-family: 'DM Sans', sans-serif;
+        font-family: var(--ae-sans);
         font-size: 13px;
         line-height: 1.6;
-        color: #666677;
+        color: var(--ae-body);
     }
 
     /* Explore the dashboard (Overview) */
     .ae-explore-title {
+        font-family: var(--ae-serif);
         font-size: 18px;
-        font-weight: 700;
-        color: #2E2E38;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        color: var(--ae-ink);
     }
     .st-key-ae_explore {
-        border: 1px solid #E5E7EB;
+        border: 1px solid var(--ae-card);
         border-radius: 12px;
         overflow: hidden;
     }
     [class*="st-key-ae_explore_"] {
         padding: 12px 20px;
-        border-top: 1px solid #EEEEF2;
+        border-top: 1px solid var(--ae-rule);
         column-gap: 20px;
         flex-wrap: nowrap;
     }
@@ -603,12 +655,12 @@ st.markdown("""
     .ae-explore-name {
         font-size: 15px;
         font-weight: 700;
-        color: #2E2E38;
+        color: var(--ae-ink);
     }
     .ae-explore-secs {
         font-size: 14px;
         line-height: 1.55;
-        color: #555566;
+        color: var(--ae-body);
     }
     [class*="st-key-ae_explore_"] [data-testid="stPageLink-NavLink"] {
         background: transparent !important;
@@ -713,7 +765,7 @@ COMPARE_PALETTE = [
 DARK_LAYOUT = dict(
     plot_bgcolor="#ffffff",
     paper_bgcolor="#ffffff",
-    font=dict(family="DM Sans, sans-serif", size=13, color=TEXT_SECONDARY),
+    font=dict(family=FONT_SANS, size=13, color=AXIS_TEXT),
 )
 
 # Chart-interaction tools that don't apply to static, table-style charts.
@@ -1519,7 +1571,7 @@ def build_performance_chart(bar_df, series_names):
             ),
             text=[f"{v:.1f}%" for v in subset["Return"]],
             textposition="outside",
-            textfont=dict(size=14, color=TEXT_SECONDARY),
+            textfont=dict(size=13, color=INK),
             cliponaxis=False,
         ))
     fig.update_layout(
@@ -1530,9 +1582,9 @@ def build_performance_chart(bar_df, series_names):
             gridcolor=GRID_COLOR,
             zeroline=True,
             zerolinecolor=ZERO_LINE,
-            tickfont=dict(size=16, color=TEXT_MUTED),
+            tickfont=dict(size=16, color=AXIS_TEXT),
         ),
-        xaxis=dict(type="category", tickfont=dict(size=16, color=TEXT_SECONDARY, weight=700)),
+        xaxis=dict(type="category", tickfont=dict(size=16, color=AXIS_TEXT, weight=700)),
         legend=dict(
             orientation="h", yanchor="top", y=-0.16,
             xanchor="center", x=0.5,
@@ -1542,7 +1594,7 @@ def build_performance_chart(bar_df, series_names):
         height=430,
         bargap=0.28,
         bargroupgap=0.10,
-        uniformtext=dict(mode="show", minsize=14),
+        uniformtext=dict(mode="show", minsize=13),
     )
     return fig
 
@@ -1614,8 +1666,8 @@ def build_growth_chart(combined, series_names, start_g, end_g):
         SQ_GAP_PX = 9             # space between marker and series name
         ITEM_GAP_PX = 56          # space between adjacent legend items
         FIG_W_PX = 790            # chart width in Tyler's Firefox (about 795 px content column)
-        NAME_CHAR_PX = 8.9        # 16pt DM Sans medium, average char width
-        VALUE_CHAR_PX = 7.1       # 13pt DM Sans regular, average char width
+        NAME_CHAR_PX = 9.0        # 16pt Inter medium, average char width
+        VALUE_CHAR_PX = 7.7       # 13pt Inter regular, average char width
 
         # Vertical positions in paper-y. y_name is further from the plot
         # than the prior version to leave a comfortable gap between the
@@ -1689,7 +1741,7 @@ def build_growth_chart(combined, series_names, start_g, end_g):
                 text=item["name"],
                 showarrow=False,
                 font=dict(size=16, color=TEXT_SECONDARY,
-                          family="DM Sans, sans-serif", weight=500),
+                          family=FONT_SANS, weight=500),
                 xanchor="left", yanchor="middle",
             ))
             # Value + percentage, centered horizontally under the name's center
@@ -1699,7 +1751,7 @@ def build_growth_chart(combined, series_names, start_g, end_g):
                 text=item["value_text"],
                 showarrow=False,
                 font=dict(size=13, color=TEXT_MUTED,
-                          family="DM Sans, sans-serif"),
+                          family=FONT_SANS),
                 xanchor="center", yanchor="middle",
             ))
 
@@ -1711,14 +1763,14 @@ def build_growth_chart(combined, series_names, start_g, end_g):
             tickprefix="$", tickformat=",",
             gridcolor=GRID_COLOR,
             zeroline=False,
-            tickfont=dict(size=16, color=TEXT_MUTED),
+            tickfont=dict(size=16, color=AXIS_TEXT),
         ),
         xaxis=dict(
             tickmode="array",
             tickvals=tick_dates,
             ticktext=tick_labels,
             gridcolor="rgba(0,0,0,0)",
-            tickfont=dict(size=16, color=TEXT_MUTED),
+            tickfont=dict(size=16, color=AXIS_TEXT),
             range=[start_g - timedelta(days=2), end_g + timedelta(days=2)],
         ),
         margin=dict(t=15, b=125, l=70, r=30),
@@ -1744,7 +1796,7 @@ def build_drawdown_chart(bar_df, series_names):
             ),
             text=[f"{v:.1f}%" for v in subset["Drawdown"]],
             textposition="outside",
-            textfont=dict(size=14, color=TEXT_SECONDARY),
+            textfont=dict(size=13, color=INK),
             cliponaxis=False,
         ))
     fig.update_layout(
@@ -1755,9 +1807,9 @@ def build_drawdown_chart(bar_df, series_names):
             gridcolor=GRID_COLOR,
             zeroline=True,
             zerolinecolor=ZERO_LINE,
-            tickfont=dict(size=16, color=TEXT_MUTED),
+            tickfont=dict(size=16, color=AXIS_TEXT),
         ),
-        xaxis=dict(type="category", tickfont=dict(size=16, color=TEXT_SECONDARY, weight=700)),
+        xaxis=dict(type="category", tickfont=dict(size=16, color=AXIS_TEXT, weight=700)),
         legend=dict(
             orientation="h", yanchor="top", y=-0.16,
             xanchor="center", x=0.5,
@@ -1767,7 +1819,7 @@ def build_drawdown_chart(bar_df, series_names):
         height=430,
         bargap=0.28,
         bargroupgap=0.10,
-        uniformtext=dict(mode="show", minsize=14),
+        uniformtext=dict(mode="show", minsize=13),
     )
     return fig
 
@@ -1823,7 +1875,7 @@ def build_total_return_chart(series_dict, start_date, end_date, color_map):
             showarrow=False,
             xanchor="left",
             xshift=8,
-            font=dict(size=16, color=color, family="DM Sans, sans-serif"),
+            font=dict(size=16, color=color, family=FONT_SANS),
         ))
 
     # Reverse trace draw order so the first series in series_dict (typically
@@ -1839,14 +1891,14 @@ def build_total_return_chart(series_dict, start_date, end_date, color_map):
             zeroline=True,
             zerolinecolor=ZERO_LINE,
             zerolinewidth=1,
-            tickfont=dict(size=16, color=TEXT_MUTED),
+            tickfont=dict(size=16, color=AXIS_TEXT),
         ),
         xaxis=dict(
             tickmode="array",
             tickvals=tick_dates,
             ticktext=tick_labels,
             gridcolor="rgba(0,0,0,0)",
-            tickfont=dict(size=16, color=TEXT_MUTED),
+            tickfont=dict(size=16, color=AXIS_TEXT),
             range=[pd.Timestamp(start_date) - timedelta(days=2), pd.Timestamp(end_date) + timedelta(days=2)],
         ),
         legend=dict(
@@ -1963,13 +2015,13 @@ def build_asset_class_chart(returns_dict, periods=None, selected_period=None):
                 break
             is_selected = (period == selected_period)
             if is_selected:
-                bg = "#f0edf8"
+                bg = PURPLE_TINT
                 border = BRAND_PURPLE
                 txt_color = BRAND_PURPLE
                 font_weight = 700
             else:
                 bg = "#ffffff"
-                border = "#dddddd"
+                border = CONTROL_BORDER
                 txt_color = TEXT_MUTED
                 font_weight = 500
             annotations.append(dict(
@@ -1984,7 +2036,7 @@ def build_asset_class_chart(returns_dict, periods=None, selected_period=None):
                 font=dict(
                     size=13,
                     color=txt_color,
-                    family="DM Sans, sans-serif",
+                    family=FONT_SANS,
                     weight=font_weight,
                 ),
                 xanchor="center", yanchor="middle",
@@ -2084,7 +2136,7 @@ def build_summary_table_html(metrics_by_series, series_order):
     .perf-summary-table {{
         width: 100%;
         border-collapse: collapse;
-        font-family: 'DM Sans', sans-serif;
+        font-family: var(--ae-sans);
         font-size: 14px;
         color: {TEXT_PRIMARY};
         margin: 0.5rem 0 1rem 0;
@@ -2232,24 +2284,24 @@ def build_allocation_table(rows):
 
     # Alternating row fills for readability
     n = len(rows)
-    row_fills = ["#F9FAFB" if i % 2 == 1 else "#ffffff" for i in range(n)]
+    row_fills = [WASH if i % 2 == 1 else "#ffffff" for i in range(n)]
 
     fig = go.Figure(data=[go.Table(
         columnwidth=[220, 70, 80, 320],
         header=dict(
             values=[f"<b>{v}</b>" for v in header_values],
-            fill_color="#F9FAFB",
-            line_color="#E5E7EB",
+            fill_color=WASH,
+            line_color=RULE_COLOR,
             align=["left", "left", "right", "left"],
-            font=dict(family="DM Sans, sans-serif", size=17, color=TEXT_PRIMARY),
+            font=dict(family=FONT_SANS, size=17, color=TEXT_PRIMARY),
             height=38,
         ),
         cells=dict(
             values=[assets, tickers, weights, purposes],
             fill_color=[row_fills],
-            line_color="#E5E7EB",
+            line_color=RULE_COLOR,
             align=["left", "left", "right", "left"],
-            font=dict(family="DM Sans, sans-serif", size=16, color=TEXT_PRIMARY),
+            font=dict(family=FONT_SANS, size=16, color=TEXT_PRIMARY),
             height=38,
         ),
     )])
@@ -2582,13 +2634,13 @@ def build_allocation_history_figure(holdings_values):
             gridcolor=GRID_COLOR,
             zeroline=True,
             zerolinecolor=ZERO_LINE,
-            tickfont=dict(size=15, color=TEXT_MUTED),
+            tickfont=dict(size=15, color=AXIS_TEXT),
         ),
         xaxis=dict(
             type="category",
             tickvals=labels[::3],
             tickangle=0,
-            tickfont=dict(size=14, color=TEXT_SECONDARY),
+            tickfont=dict(size=14, color=AXIS_TEXT),
         ),
         legend=dict(
             orientation="h", yanchor="top", y=-0.12,
@@ -2635,24 +2687,24 @@ def build_next_allocation_table(rows):
     purposes = [row["purpose"] for row in rows]
 
     n = len(rows)
-    row_fills = ["#F9FAFB" if i % 2 == 1 else "#ffffff" for i in range(n)]
+    row_fills = [WASH if i % 2 == 1 else "#ffffff" for i in range(n)]
 
     fig = go.Figure(data=[go.Table(
         columnwidth=[220, 70, 80, 320],
         header=dict(
             values=[f"<b>{v}</b>" for v in header_values],
-            fill_color="#F9FAFB",
-            line_color="#E5E7EB",
+            fill_color=WASH,
+            line_color=RULE_COLOR,
             align=["left", "left", "right", "left"],
-            font=dict(family="DM Sans, sans-serif", size=17, color=TEXT_PRIMARY),
+            font=dict(family=FONT_SANS, size=17, color=TEXT_PRIMARY),
             height=38,
         ),
         cells=dict(
             values=[assets, tickers, weights, purposes],
             fill_color=[row_fills],
-            line_color="#E5E7EB",
+            line_color=RULE_COLOR,
             align=["left", "left", "right", "left"],
-            font=dict(family="DM Sans, sans-serif", size=16, color=TEXT_PRIMARY),
+            font=dict(family=FONT_SANS, size=16, color=TEXT_PRIMARY),
             height=38,
         ),
     )])
@@ -3078,7 +3130,7 @@ def build_drift_table(summary, new_target_rows):
             trade_cells.append("\u2014")
 
     n = len(asset_cells)
-    row_fills = ["#F9FAFB" if i % 2 == 1 else "#ffffff" for i in range(n)]
+    row_fills = [WASH if i % 2 == 1 else "#ffffff" for i in range(n)]
 
     header_values = ["Asset", "Month Start", "Drift", "New Target", "Trim/Add"]
 
@@ -3097,18 +3149,18 @@ def build_drift_table(summary, new_target_rows):
         columnwidth=[255, 120, 80, 110, 125],
         header=dict(
             values=[f"<b>{v}</b>" for v in header_values],
-            fill_color="#F9FAFB",
-            line_color="#E5E7EB",
+            fill_color=WASH,
+            line_color=RULE_COLOR,
             align=["left", "right", "right", "right", "right"],
-            font=dict(family="DM Sans, sans-serif", size=17, color=TEXT_PRIMARY),
+            font=dict(family=FONT_SANS, size=17, color=TEXT_PRIMARY),
             height=38,
         ),
         cells=dict(
             values=[asset_cells, start_cells, drift_cells, target_cells, trade_cells],
             fill_color=[row_fills],
-            line_color="#E5E7EB",
+            line_color=RULE_COLOR,
             align=["left", "right", "right", "right", "right"],
-            font=dict(family="DM Sans, sans-serif", size=16, color=TEXT_PRIMARY),
+            font=dict(family=FONT_SANS, size=16, color=TEXT_PRIMARY),
             height=38,
         ),
     )])
@@ -3284,7 +3336,7 @@ def build_live_drift_table(result):
         ret_colors.append(GAIN_GREEN if round(ret_pct, 1) >= 0 else LOSS_RED)
 
     n = len(asset_cells)
-    row_fills = ["#F9FAFB" if i % 2 == 1 else "#ffffff" for i in range(n)]
+    row_fills = [WASH if i % 2 == 1 else "#ffffff" for i in range(n)]
     primary_col = [TEXT_PRIMARY] * n
 
     header_values = ["Asset", "Ticker", "Month Start", "Return", "Current"]
@@ -3293,19 +3345,19 @@ def build_live_drift_table(result):
         columnwidth=[230, 80, 120, 110, 110],
         header=dict(
             values=[f"<b>{v}</b>" for v in header_values],
-            fill_color="#F9FAFB",
-            line_color="#E5E7EB",
+            fill_color=WASH,
+            line_color=RULE_COLOR,
             align=["left", "left", "right", "right", "right"],
-            font=dict(family="DM Sans, sans-serif", size=17, color=TEXT_PRIMARY),
+            font=dict(family=FONT_SANS, size=17, color=TEXT_PRIMARY),
             height=38,
         ),
         cells=dict(
             values=[asset_cells, ticker_cells, start_cells, ret_cells, cur_cells],
             fill_color=[row_fills],
-            line_color="#E5E7EB",
+            line_color=RULE_COLOR,
             align=["left", "left", "right", "right", "right"],
             font=dict(
-                family="DM Sans, sans-serif",
+                family=FONT_SANS,
                 size=16,
                 color=[primary_col, primary_col, primary_col, ret_colors, primary_col],
             ),
@@ -4338,9 +4390,9 @@ def build_qci_sector_table(sector_rows, n_commodities):
     BAR_H = 11
     BAR_FILL = "#4F2DB8"
     BAR_TRACK = "#ECECF1"
-    RULE = "#E5E7EB"
-    HEADER_BG = "#F9FAFB"
-    font_family = "DM Sans, sans-serif"
+    RULE = RULE_COLOR
+    HEADER_BG = WASH
+    font_family = FONT_SANS
 
     n = len(sector_rows)
     HEIGHT = HEADER_H + n * ROW_H + TOTAL_H
@@ -4613,7 +4665,7 @@ def build_asset_universe_html(universe):
 
     return (
         f'<div style="max-width: 680px; margin: 16px auto 8px auto; '
-        f"font-family: 'DM Sans', sans-serif;\">"
+        f"font-family: var(--ae-sans);\">"
         f'{"".join(rows_html)}'
         f'</div>'
     )
@@ -4631,22 +4683,22 @@ UNIVERSE_HIGHLIGHT_HELD = True
 UNIVERSE_VIEW_NOW = "Held now"
 UNIVERSE_VIEW_NEXT = "Next month"
 
-# Approximate DM Sans advance widths in em, used only to center the ticker
+# Approximate Inter advance widths in em, used only to center the ticker
 # and weight pill as one group under each held card's name.
-_DM_SANS_EM = {".": 0.27, "%": 0.82, " ": 0.25, "-": 0.36}
+_SANS_EM = {".": 0.32, "%": 0.98, " ": 0.27, "-": 0.31}
 
 
 def _est_text_width(text, size, bold=False):
     w = 0.0
     for ch in str(text):
-        if ch in _DM_SANS_EM:
-            w += _DM_SANS_EM[ch]
+        if ch in _SANS_EM:
+            w += _SANS_EM[ch]
         elif ch.isdigit():
-            w += 0.58
+            w += 0.60
         elif ch.isupper():
-            w += 0.66
+            w += 0.71
         else:
-            w += 0.55
+            w += 0.56
     return w * size * (1.04 if bold else 1.0)
 
 
@@ -4711,7 +4763,7 @@ def build_asset_universe_chart(universe, held=None, held_label="Held now, with w
 
     shapes = []
     annotations = []
-    font = "DM Sans, sans-serif"
+    font = FONT_SANS
 
     for i, cat in enumerate(categories):
         row_top = TOP_PAD + i * (ROW_HEIGHT + ROW_GAP)
@@ -5110,11 +5162,11 @@ def render_asset_universe_section():
 # ===========================================================================
 
 ANALYTICS_WIDTH = 780   # fits Tyler's Firefox content column (about 795 px); wider figures get squeezed
-ANALYTICS_FONT = "DM Sans, sans-serif"
+ANALYTICS_FONT = FONT_SANS
 ANALYTICS_TINT = "#F0EDF8"      # light lavender used for AE emphasis cells
-ANALYTICS_RULE = "#E5E7EB"
-ANALYTICS_HEADER_BG = "#F9FAFB"
-ANALYTICS_CELL_TEXT = "#2E2E38"
+ANALYTICS_RULE = RULE_COLOR
+ANALYTICS_HEADER_BG = WASH
+ANALYTICS_CELL_TEXT = INK
 MINUS = "−"
 
 # The benchmark every analytics section compares against first (Tyler's
@@ -5530,24 +5582,25 @@ def build_monthly_returns_figure(ae_monthly, spx_monthly, open_period, last_date
 
     # Scale legend
     ly = H - LEG_H / 2 + 4
-    _px_text(ann, 0, ly, "Scale", size=11, color=TEXT_SECONDARY)
+    _px_text(ann, 0, ly, "Scale", size=12, color=TEXT_SECONDARY)
     chip_w, chip_h, chip_gap = 76, 24, 5
     cx = 38
     for lower, fill, label in reversed(HEAT_TIERS):
         shapes.append(dict(type="path",
                            path=_round_rect_path(cx, ly - chip_h / 2, cx + chip_w, ly + chip_h / 2, 5),
                            fillcolor=fill, line=dict(width=0), layer="below"))
-        _px_text(ann, cx + chip_w / 2, ly, label, anchor="center", size=11, color=ANALYTICS_CELL_TEXT)
+        _px_text(ann, cx + chip_w / 2, ly, label, anchor="center", size=12, color=ANALYTICS_CELL_TEXT)
         cx += chip_w + chip_gap
     if open_period is not None:
         # Key: a miniature of the open-month cell, purple outline with its tag.
-        mx = W - 124
+        # 134 px leaves room for "Month to date" at 12 px Inter.
+        mx = W - 134
         shapes.append(dict(type="path",
                            path=_round_rect_path(mx, ly - chip_h / 2, mx + 38, ly + chip_h / 2, 5),
                            fillcolor="#ffffff",
                            line=dict(color=BRAND_PURPLE, width=2)))
         _px_text(ann, mx + 19, ly, "MTD", anchor="center", size=10, color=BRAND_PURPLE, bold=True)
-        _px_text(ann, mx + 46, ly, "Month to date", size=11, color=TEXT_SECONDARY)
+        _px_text(ann, mx + 46, ly, "Month to date", size=12, color=TEXT_SECONDARY)
 
     fig = go.Figure()
     if hx:
@@ -5796,7 +5849,7 @@ def build_attribution_figure(result, is_open):
                            line=dict(color="#c9c9d3" if is_zero else GRID_COLOR, width=1),
                            layer="below"))
         tick = "0%" if is_zero else _fmt_pct(t, 2 if step < 0.5 else (1 if step < 1 else 0))
-        _px_text(ann, x, rows_bottom + TICK_H / 2 + 2, tick, anchor="center", size=11,
+        _px_text(ann, x, rows_bottom + TICK_H / 2 + 2, tick, anchor="center", size=12,
                  color=TEXT_MUTED)
         t += step
 
@@ -5999,7 +6052,7 @@ def build_capture_figure(captures, worst, bench_label=None, bench_color=None):
         value = ae[key] if ae else np.nan
         _px_text(ann, x0 + 14, 64, f"{value:.0f}%" if np.isfinite(value) else "n/a",
                  size=34, color=BRAND_PURPLE, bold=True)
-        _px_text(ann, x0 + 14, 100, sub.replace("&", "&amp;"), size=11, color=TEXT_SECONDARY)
+        _px_text(ann, x0 + 14, 100, sub.replace("&", "&amp;"), size=12, color=TEXT_SECONDARY)
 
     if ae and np.isfinite(ae["up"]) and np.isfinite(ae["down"]):
         sentence = (f"In months {the_noun} rose, the strategy captured about {ae['up']:.0f}% "
@@ -6036,7 +6089,7 @@ def build_capture_figure(captures, worst, bench_label=None, bench_color=None):
     if ae:
         _px_text(ann, TX, y + 18,
                  f"{ae['n']} months: {ae['n_up']} up and {ae['n_down']} down for "
-                 f"{the_noun.replace('&', '&amp;')}", size=11, color=TEXT_SECONDARY)
+                 f"{the_noun.replace('&', '&amp;')}", size=12, color=TEXT_SECONDARY)
 
     fig = go.Figure()
     if worst is not None and not worst.empty:
@@ -6054,7 +6107,7 @@ def build_capture_figure(captures, worst, bench_label=None, bench_color=None):
             x=labels, y=worst["bench"] * 100.0, name=bench_label,
             marker=dict(color=bench_bar, cornerradius=5),
             text=[_fmt_pct(v * 100.0) for v in worst["bench"]], textposition="outside",
-            textfont=dict(size=11, color=TEXT_SECONDARY, family=ANALYTICS_FONT),
+            textfont=dict(size=11, color=INK, family=ANALYTICS_FONT),
             cliponaxis=False, xaxis="x2", yaxis="y2",
             hovertemplate="%{x}<br>" + bench_label + " %{y:.2f}%<extra></extra>",
         ))
@@ -6071,14 +6124,15 @@ def build_capture_figure(captures, worst, bench_label=None, bench_color=None):
             lx += 140
         _pixel_layout(fig, W, H, shapes, ann)
         fig.update_layout(
-            barmode="group", bargap=0.22, bargroupgap=0.04,
+            # bargap 0.16 (was 0.22) keeps neighboring Inter labels apart.
+            barmode="group", bargap=0.16, bargroupgap=0.04,
             uniformtext=dict(mode="show", minsize=11),
             xaxis2=dict(domain=[0.07, 1.0], anchor="y2", type="category",
                         tickfont=dict(size=12, color=TEXT_PRIMARY, weight=600), fixedrange=True),
             yaxis2=dict(domain=[0.05, 0.53], anchor="x2",
                         range=[low - span * 0.16, high + span * 0.12 + 0.3],
                         ticksuffix="%", gridcolor=GRID_COLOR, zeroline=True,
-                        zerolinecolor="#c9c9d3", tickfont=dict(size=12, color=TEXT_MUTED),
+                        zerolinecolor="#c9c9d3", tickfont=dict(size=12, color=AXIS_TEXT),
                         fixedrange=True),
         )
     else:
@@ -6595,25 +6649,25 @@ DD_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "Au
 
 
 def _dd_text_width(text, size, bold=False):
-    """Approximate DM Sans width in px, used only to size table columns."""
+    """Approximate Inter width in px, used only to size table columns."""
     w = 0.0
     for ch in str(text):
         if ch.isdigit():
-            w += 0.6
+            w += 0.62
         elif ch in ".,' ":
-            w += 0.27
+            w += 0.32
         elif ch == "%":
-            w += 0.84
+            w += 1.0
         elif ch in (MINUS, "+", "-"):
-            w += 0.6
+            w += 0.67
         elif ch == "/":
             w += 0.4
         elif ch == "&":
             w += 0.68
         elif ch != ch.lower():
-            w += 0.68
+            w += 0.72
         else:
-            w += 0.53
+            w += 0.55
     return w * size * (1.06 if bold else 1.0)
 
 
@@ -6729,10 +6783,10 @@ def build_underwater_chart(window, shown, rank, episodes):
         height=HEIGHT,
         margin=dict(t=M_T, b=M_B, l=60, r=30),
         yaxis=dict(ticksuffix="%", dtick=step, range=[ymin, step * 0.08], gridcolor="#EDEDF1",
-                   zeroline=True, zerolinecolor="#C9C9D3", tickfont=dict(size=16, color=TEXT_MUTED),
+                   zeroline=True, zerolinecolor="#C9C9D3", tickfont=dict(size=16, color=AXIS_TEXT),
                    fixedrange=True),
         xaxis=dict(tickmode="array", tickvals=tick_dates, ticktext=tick_labels,
-                   gridcolor="rgba(0,0,0,0)", tickfont=dict(size=16, color=TEXT_MUTED), ticklabelstandoff=10,
+                   gridcolor="rgba(0,0,0,0)", tickfont=dict(size=16, color=AXIS_TEXT), ticklabelstandoff=10,
                    range=[start - timedelta(days=2), end + timedelta(days=2)],
                    hoverformat="%B %-d, %Y" if daily else "Week ending %b %-d, %Y"),
         legend=dict(orientation="h", yanchor="top", y=-0.13, xanchor="center", x=0.5,
@@ -7103,7 +7157,7 @@ def _ddc_draw(top, bottom, title_top, title_bottom, key_items, band=None):
                          zeroline=True, zerolinecolor="#C9C9D3", zerolinewidth=1.5, fixedrange=True,
                          row=row, col=1)
     fig.update_xaxes(ticktext=[_ddc_pct(-t, 0) if t else "0%" for t in ticks],
-                     tickfont=dict(size=13, color=TEXT_MUTED),
+                     tickfont=dict(size=13, color=AXIS_TEXT),
                      title=dict(text="Decline from peak", font=dict(size=13, color=TEXT_SECONDARY), standoff=8),
                      row=2, col=1)
 
@@ -7496,7 +7550,7 @@ def _vsp_tile_shapes(tiles, width, M_L, M_R, M_T, M_B, height, top_px):
                           font=dict(family=ANALYTICS_FONT, size=20, color=BRAND_PURPLE)))
         notes.append(dict(x=px(x0 + 14), y=py(y0 + 47), xref="paper", yref="paper", xanchor="left",
                           yanchor="middle", showarrow=False, text=label,
-                          font=dict(family=ANALYTICS_FONT, size=12, color="#555566")))
+                          font=dict(family=ANALYTICS_FONT, size=12, color=BODY_TEXT)))
         x0 = x1 + gap
     return shapes, notes
 
@@ -7593,11 +7647,11 @@ def build_vol_spike_figure(cfg, past, current, since, show_current=False):
         width=W, height=H, margin=dict(t=M_T, b=M_B, l=M_L, r=M_R),
         xaxis=dict(range=[0, VSP_HORIZON], tickvals=[t for t, _ in VSP_TICKS],
                    ticktext=[s for _, s in VSP_TICKS], showgrid=False, zeroline=False, fixedrange=True,
-                   tickfont=dict(size=13, color=TEXT_MUTED), ticklabelstandoff=6),
+                   tickfont=dict(size=13, color=AXIS_TEXT), ticklabelstandoff=6),
         yaxis=dict(range=[y0, y1], gridcolor="#EDEDF1", zeroline=True, zerolinecolor="#A9ABB8",
                    zerolinewidth=1.2, fixedrange=True, tickvals=yticks,
                    ticktext=[_fmt_pct(v, 0) if v else "0%" for v in yticks],
-                   tickfont=dict(size=13, color=TEXT_MUTED)),
+                   tickfont=dict(size=13, color=AXIS_TEXT)),
         legend=dict(orientation="h", xref="container", yref="container", x=0.5, xanchor="center",
                     y=12 / H, yanchor="bottom", font=dict(size=13, color=TEXT_SECONDARY),
                     itemclick=False, itemdoubleclick=False, traceorder="normal"),
@@ -7865,9 +7919,9 @@ def build_rolling_figure(frame, view):
     fig.update_layout(
         **DARK_LAYOUT,
         yaxis=dict(ticksuffix="" if ratio else "%", gridcolor=GRID_COLOR, zeroline=True, zerolinecolor="#c9c9d3",
-                   range=y_range, tickfont=dict(size=16, color=TEXT_MUTED)),
+                   range=y_range, tickfont=dict(size=16, color=AXIS_TEXT)),
         xaxis=dict(tickmode="array", tickvals=tick_dates, ticktext=tick_labels,
-                   gridcolor="rgba(0,0,0,0)", tickfont=dict(size=16, color=TEXT_MUTED),
+                   gridcolor="rgba(0,0,0,0)", tickfont=dict(size=16, color=AXIS_TEXT),
                    ticklabelstandoff=10,
                    range=[start - timedelta(days=12), end + timedelta(days=45)]),
         legend=dict(orientation="h", yanchor="top", y=-0.12, xanchor="center", x=0.5,
@@ -8277,7 +8331,7 @@ def build_risk_return_figure(points, ref_point, measure="vol"):
                                line=dict(color="#9A9AAE", width=1.4)))
         annotations.append(dict(x=w1 + RR_GAP_FRAC + RR_STRIP_FRAC / 2, y=1, xref="x", yref="paper",
                                 yanchor="bottom", showarrow=False, text="compressed",
-                                font=dict(size=11, color=TEXT_MUTED, family=ANALYTICS_FONT)))
+                                font=dict(size=12, color=TEXT_MUTED, family=ANALYTICS_FONT)))
 
     for kind in ["asset", "custom", "family"]:
         for p in [q for q in points if q["kind"] == kind]:
@@ -8308,12 +8362,12 @@ def build_risk_return_figure(points, ref_point, measure="vol"):
         xaxis=dict(range=[-0.005, 1.0], tickmode="array", tickvals=tickvals, ticktext=ticktext,
                    gridcolor=GRID_COLOR, zeroline=False, fixedrange=True,
                    title=dict(text=title, font=dict(size=15, color=TEXT_PRIMARY)),
-                   tickfont=dict(size=15, color=TEXT_MUTED)),
+                   tickfont=dict(size=15, color=AXIS_TEXT)),
         yaxis=dict(range=y_range, ticksuffix="%", gridcolor=GRID_COLOR, zeroline=True,
                    zerolinecolor="#c9c9d3", tick0=0, dtick=y_step, fixedrange=True,
                    title=dict(text="Annualized return", font=dict(size=15, color=TEXT_PRIMARY),
                               standoff=9),   # a little room between the title and the tick labels
-                   tickfont=dict(size=15, color=TEXT_MUTED)),
+                   tickfont=dict(size=15, color=AXIS_TEXT)),
         margin=dict(t=36, b=60, l=85, r=30),
         height=560,
         shapes=shapes, annotations=annotations,
@@ -8651,7 +8705,7 @@ def _cx_text_on(bg):
 
 def _cx_text(ann, x, y, text, anchor="left", size=13, color=TEXT_PRIMARY, weight=400,
              valign="middle"):
-    """Pixel-coordinate text with an explicit DM Sans weight (400 to 700)."""
+    """Pixel-coordinate text with an explicit Inter weight (400 to 700)."""
     ann.append(dict(
         x=x, y=y, xref="x", yref="y", xanchor=anchor, yanchor=valign, text=text,
         showarrow=False, align=anchor if anchor in ("left", "right") else "center",
@@ -8691,7 +8745,7 @@ def _cx_triangle(shapes, x, y, up, s, color):
 
 
 def _cx_wrap(text, size, max_w):
-    """Greedy word wrap by estimated DM Sans width (px)."""
+    """Greedy word wrap by estimated Inter width (px)."""
     lines, cur = [], ""
     for word in str(text).split():
         trial = f"{cur} {word}".strip()
@@ -9094,7 +9148,7 @@ def _corr_scale_legend(shapes, ann, x, y, w=250):
                      (0.7, "0.7"), (1, "1")]:
         xx = x + w * (v + 1) / 2
         _cx_line(shapes, xx, y + 12, xx, y + 16, CORR_RULE_GRAY, 1)
-        _cx_text(ann, xx, y + 25, label, anchor="center", size=11, color=TEXT_MUTED)
+        _cx_text(ann, xx, y + 25, label, anchor="center", size=12, color=TEXT_MUTED)
     _cx_text(ann, x, y - 10, "Move opposite", size=12, color=TEXT_SECONDARY, weight=600)
     _cx_text(ann, x + w / 2, y - 10, "Unrelated", anchor="center", size=12, color=TEXT_SECONDARY,
              weight=600)
@@ -9182,7 +9236,7 @@ def build_corr_calendar_figure(months, pairs, values, tiles, lag=3):
         if p.month == 1 or i == 0:
             _cx_text(ann, x, head + 9, str(p.year), size=13, color=TEXT_PRIMARY, weight=700)
         if step >= 11 or p.month in (1, 4, 7, 10):
-            _cx_text(ann, x + cw / 2, head + 27, p.strftime("%b")[0], anchor="center", size=11,
+            _cx_text(ann, x + cw / 2, head + 27, p.strftime("%b")[0], anchor="center", size=12,
                      color=TEXT_MUTED, weight=500)
     _cx_text(ann, XNOW, head + 27, "Now", anchor="right", size=12, color=TEXT_PRIMARY, weight=700)
     _cx_text(ann, XCHG, head + 27, f"vs {lag} mo", anchor="right", size=12, color=TEXT_PRIMARY,
@@ -9635,7 +9689,7 @@ def build_bets_grid_figure(rows, floor):
     for b in (1, 2, 3, 4):
         xx = kx + (b - 1) / 3 * kw
         _cx_line(shapes, xx, ky + 12, xx, ky + 16, CORR_RULE_GRAY, 1)
-        _cx_text(ann, xx, ky + 25, str(b), anchor="center", size=11, color=TEXT_MUTED, weight=500)
+        _cx_text(ann, xx, ky + 25, str(b), anchor="center", size=12, color=TEXT_MUTED, weight=500)
     xc = kx + (floor - 1) / 3 * kw
     _cx_line(shapes, xc, ky - 5, xc, ky + 17, ANALYTICS_CELL_TEXT, 2)
     _cx_text(ann, xc, ky - 14, f"Floor {floor:.1f}", anchor="center", size=12,
@@ -10009,9 +10063,9 @@ def build_spx_rolling_figure(frame, shown, full_corr, bench_frames=None):
         **DARK_LAYOUT,
         yaxis=dict(range=y_range, tickmode="array", tickvals=ticks, ticktext=[_spxr_num(t) for t in ticks],
                    gridcolor=GRID_COLOR, zeroline=True, zerolinecolor="#c9c9d3",
-                   tickfont=dict(size=16, color=TEXT_MUTED)),
+                   tickfont=dict(size=16, color=AXIS_TEXT)),
         xaxis=dict(tickmode="array", tickvals=tick_dates, ticktext=tick_labels,
-                   gridcolor="rgba(0,0,0,0)", tickfont=dict(size=16, color=TEXT_MUTED),
+                   gridcolor="rgba(0,0,0,0)", tickfont=dict(size=16, color=AXIS_TEXT),
                    ticklabelstandoff=10, hoverformat="%b %-d, %Y",
                    range=[start - timedelta(days=12), end + timedelta(days=125)]),
         legend=dict(orientation="h", yanchor="top", y=-0.12, xanchor="center", x=0.5,
@@ -10271,31 +10325,32 @@ LT_QCI_NAMES = {
     "Tin": "Tin", "Lean Hogs": "Lean hogs", "Live Cattle": "Live cattle", "Feeder Cattle": "Feeder cattle",
 }
 
-# DM Sans advance widths (thousandths of an em) for printable ASCII at
-# weights 400 and 700, read from the font files, so labels are fitted to
-# their boxes exactly. Other weights are interpolated.
-LT_DM400 = (
-    266, 250, 291, 804, 580, 786, 734, 159, 373, 373, 480, 550, 182, 541, 198, 392, 684, 312,
-    576, 591, 607, 610, 628, 534, 608, 628, 202, 227, 550, 550, 550, 524, 1005, 664, 603, 717,
-    688, 565, 535, 758, 681, 234, 501, 584, 527, 841, 691, 774, 580, 774, 594, 580, 561, 655,
-    669, 968, 603, 580, 541, 314, 392, 314, 622, 660, 213, 544, 626, 572, 627, 568, 340, 558,
-    575, 240, 243, 504, 223, 891, 574, 593, 626, 627, 370, 502, 392, 573, 527, 763, 496, 556,
-    458, 427, 234, 427, 550
+# Inter advance widths (thousandths of an em) for printable ASCII at
+# weights 400 and 700, measured from the Google Fonts Inter the app loads
+# (November 14, 2026), so labels are fitted to their boxes exactly. Other
+# weights are interpolated.
+LT_W400 = (
+    281, 288, 466, 633, 642, 982, 644, 300, 365, 365, 501, 662, 288, 460, 288, 360, 631, 407,
+    610, 618, 646, 593, 620, 566, 619, 620, 288, 302, 662, 662, 662, 511, 966, 690, 654, 730,
+    722, 601, 590, 746, 743, 269, 571, 672, 565, 903, 753, 765, 639, 765, 644, 642, 646, 744,
+    690, 985, 682, 679, 629, 365, 360, 365, 471, 456, 323, 562, 612, 571, 612, 583, 370, 613,
+    591, 242, 242, 549, 242, 876, 591, 600, 612, 612, 376, 528, 327, 591, 562, 818, 546, 562,
+    552, 426, 333, 426, 662
 )
-LT_DM700 = (
-    235, 309, 367, 857, 604, 902, 781, 197, 405, 405, 513, 579, 246, 576, 252, 427, 704, 364,
-    577, 603, 650, 622, 634, 537, 633, 635, 254, 278, 579, 579, 579, 538, 1046, 709, 638, 738,
-    707, 583, 556, 778, 714, 272, 541, 653, 558, 886, 729, 784, 614, 784, 631, 604, 597, 685,
-    706, 1018, 670, 635, 577, 377, 427, 377, 677, 725, 235, 586, 655, 607, 655, 602, 371, 596,
-    618, 274, 274, 578, 267, 941, 617, 610, 655, 655, 409, 532, 433, 616, 565, 820, 571, 604,
-    490, 470, 272, 470, 579
+LT_W700 = (
+    237, 338, 552, 649, 655, 1016, 672, 339, 377, 377, 559, 679, 334, 468, 334, 388, 674, 431,
+    630, 646, 676, 622, 649, 582, 651, 649, 334, 343, 679, 679, 679, 560, 1016, 747, 662, 740,
+    722, 607, 587, 750, 747, 281, 584, 719, 565, 932, 762, 771, 648, 777, 657, 655, 667, 732,
+    747, 1038, 738, 731, 664, 377, 388, 377, 487, 476, 365, 581, 630, 588, 630, 596, 398, 632,
+    623, 271, 271, 580, 271, 913, 623, 613, 630, 630, 407, 560, 366, 623, 600, 850, 580, 602,
+    573, 469, 372, 469, 679
 )
 
 
 # ---------- small helpers ----------
 
 def _lt_tw(text, size, weight=400):
-    """Rendered DM Sans width in px (2% margin for kerning). An emoji counts
+    """Rendered Inter width in px (2% margin for kerning). An emoji counts
     1.3 em and its variation selector nothing; other characters outside
     printable ASCII count 0.6 em."""
     t = (min(max(float(weight), 400.0), 700.0) - 400.0) / 300.0
@@ -10303,10 +10358,12 @@ def _lt_tw(text, size, weight=400):
     for ch in str(text):
         o = ord(ch)
         if 32 <= o <= 126:
-            a, b = LT_DM400[o - 32], LT_DM700[o - 32]
+            a, b = LT_W400[o - 32], LT_W700[o - 32]
             total += a + (b - a) * t
         elif o == 0xFE0F:
             continue
+        elif o == 0x2212:          # minus sign, as wide as + in Inter
+            total += 662.0 + 17.0 * t
         elif o >= 0x1F000 or 0x2600 <= o <= 0x27BF:
             total += 1300.0
         else:
@@ -10951,7 +11008,7 @@ def build_lt_flow_figure(exp, comps, tiles):
         _lt_text(ann, xt, ly_main, label, size=13.5, color=TEXT_PRIMARY, weight=600)
         _lt_text(ann, W, ly_main, _lt_pct(rv[k]), anchor="right", size=13.5, color=TEXT_SECONDARY, weight=500)
         if k == "other_stocks":
-            _lt_text(ann, xt, cy + 9, _lt_other_stocks_note(exp, W - xt), size=11.5, color=TEXT_MUTED)
+            _lt_text(ann, xt, cy + 9, _lt_other_stocks_note(exp, W - xt), size=12, color=TEXT_MUTED)
         if k == largest and len(right) > 1:
             lx = xt + _lt_tw(label, 13.5, 600) + 8
             if lx + 58 <= W - _lt_tw(_lt_pct(rv[k]), 13.5, 500) - 8:
@@ -11462,7 +11519,7 @@ def build_lt_risk_figure(rk, other, other_name):
     y_end = top + bh
     if negatives:
         _lt_text(ann, xb + bw / 2.0, y_end + 16, "Offsets risk: " + ", ".join(negatives), anchor="center",
-                 size=11.5, color=TEXT_MUTED)
+                 size=12, color=TEXT_MUTED)
         y_end += 22
 
     # Tiles at the right
@@ -11496,32 +11553,6 @@ def build_lt_risk_figure(rk, other, other_name):
 
 
 # ---------- rendering ----------
-
-def _lt_pill_css():
-    """Brand-purple pills for this section's controls only. Streamlit 1.54
-    marks the selected pill with data-testid stBaseButton-pillsActive and
-    1.61 with aria-checked on data-variant pills; the app-wide pill CSS
-    targets older markup, so selected pills would otherwise draw in red."""
-    keys = LT_PILL_KEYS
-    sel = ", ".join(f'.st-key-{k} button[data-testid="stBaseButton-pillsActive"], '
-                    f'.st-key-{k} button[data-variant="pills"][aria-checked="true"]' for k in keys)
-    sel_p = ", ".join(f'.st-key-{k} button[data-testid="stBaseButton-pillsActive"] p, '
-                      f'.st-key-{k} button[data-variant="pills"][aria-checked="true"] p' for k in keys)
-    off = ", ".join(f'.st-key-{k} button[data-testid="stBaseButton-pills"], '
-                    f'.st-key-{k} button[data-variant="pills"][aria-checked="false"]' for k in keys)
-    off_hover = ", ".join(f'.st-key-{k} button[data-testid="stBaseButton-pills"]:hover, '
-                          f'.st-key-{k} button[data-variant="pills"][aria-checked="false"]:hover' for k in keys)
-    return (
-        "<style>"
-        f"{off} {{ border: 1px solid #ddd !important; border-radius: 8px !important; "
-        f"background-color: #ffffff !important; color: {TEXT_SECONDARY} !important; font-weight: 500 !important; }}"
-        f"{off_hover} {{ border-color: #bbb !important; background-color: #f5f5f8 !important; }}"
-        f"{sel} {{ border: 1px solid {BRAND_PURPLE} !important; border-radius: 8px !important; "
-        f"background-color: {ANALYTICS_TINT} !important; color: {BRAND_PURPLE} !important; font-weight: 600 !important; }}"
-        f"{sel_p} {{ color: {BRAND_PURPLE} !important; font-weight: 600 !important; }}"
-        "</style>"
-    )
-
 
 def _lt_pick(label, options, key, default, fmt=None):
     """Single-select pills keyed in session state. A stale or cleared value
@@ -11740,7 +11771,6 @@ def render_lookthrough_section(holdings_values):
     # What HGER Holds (just above) already fetched Harbor when it is showing.
     hger_panel_shown = _hger_is_held(derive_current_allocation(holdings_values)[0])
     comps = lt_compositions(tickers, snapshot, live_hger=not hger_panel_shown)
-    st.markdown(_lt_pill_css(), unsafe_allow_html=True)
     options = ["current", "next"] if bk["next"] else ["current"]
     c1, c2 = st.columns(2)
     with c1:
@@ -12486,8 +12516,8 @@ def render_portfolio_growth_section(ctx):
         "daily_shape_partial": "#F4E5C5",
         "daily_shape_partial_via_yahoo": "#F4E5C5",
         "single_endpoint": "#F4E5C5",
-        "noop": "#E5E7EB",
-        "none": "#E5E7EB",
+        "noop": RULE_COLOR,
+        "none": RULE_COLOR,
     }
     _gs_fg_map = {
         "daily_shape_full": "#14543E",
@@ -12498,7 +12528,7 @@ def render_portfolio_growth_section(ctx):
         "noop": "#4B5563",
         "none": "#4B5563",
     }
-    _gs_bg = _gs_bg_map.get(_growth_status["mode"], "#E5E7EB")
+    _gs_bg = _gs_bg_map.get(_growth_status["mode"], RULE_COLOR)
     _gs_fg = _gs_fg_map.get(_growth_status["mode"], TEXT_SECONDARY)
     st.markdown(
         f"<div style='margin-top:6px; padding:8px 12px; background-color:{_gs_bg}; "
@@ -13200,7 +13230,7 @@ def render_top_bar(pages, current_page):
     (and anything typed into the update section)."""
     with st.container(key="ae_topbar", horizontal=True, horizontal_alignment="distribute",
                       vertical_alignment="center", gap=None):
-        # The hidden ae-font-warm line makes the browser load every DM Sans
+        # The hidden ae-font-warm line makes the browser load every Inter
         # weight before any chart draws. Plotly measures chart text when it
         # draws, so a chart drawn before the font arrives keeps fallback-font
         # spacing (a legend wraps differently, table text sits 1 to 2 px off).
@@ -13570,48 +13600,22 @@ SCR_NUM_COLS = ["expense_ratio", "aum", "aum_prev", "aum_change", "price", "doll
 
 SCR_CSS = """
 <style>
-    .st-key-scr_preset button, .st-key-scr_view button {
-        min-height: 32px;
-        padding: 0 12px !important;
-        border: 1px solid #DDDDE3 !important;
-        border-radius: 8px !important;
-        background: #ffffff !important;
-    }
-    .st-key-scr_preset button p, .st-key-scr_view button p {
-        font-size: 13px;
-        font-weight: 500;
-        color: #555566;
-    }
-    .st-key-scr_preset button[aria-checked="true"],
-    .st-key-scr_preset button[data-testid="stBaseButton-pillsActive"],
-    .st-key-scr_view button[aria-checked="true"],
-    .st-key-scr_view button[data-testid="stBaseButton-pillsActive"] {
-        border-color: #3A0CA3 !important;
-        background: #F0EDF8 !important;
-    }
-    .st-key-scr_preset button[aria-checked="true"] p,
-    .st-key-scr_preset button[data-testid="stBaseButton-pillsActive"] p,
-    .st-key-scr_view button[aria-checked="true"] p,
-    .st-key-scr_view button[data-testid="stBaseButton-pillsActive"] p {
-        font-weight: 600;
-        color: #3A0CA3;
-    }
     [data-testid="stMarkdownContainer"] p.ae-scr-dates {
         margin: -0.75rem 0 0.25rem 0;
         font-size: 13px;
         line-height: 1.6;
-        color: #666677;
+        color: var(--ae-body);
     }
     [data-testid="stMarkdownContainer"] p.ae-scr-active {
         margin: 0;
         font-size: 13px;
         line-height: 1.6;
-        color: #555566;
+        color: var(--ae-body);
     }
     [data-testid="stMarkdownContainer"] p.ae-scr-count {
         margin: 0.5rem 0 0 0;
         font-size: 15px;
-        color: #2E2E38;
+        color: var(--ae-ink);
     }
     p.ae-scr-count b {
         color: #3A0CA3;
@@ -13620,15 +13624,15 @@ SCR_CSS = """
     .ae-scr-card {
         margin-top: 4px;
         padding: 20px 22px;
-        border: 1px solid #E5E7EB;
+        border: 1px solid var(--ae-card);
         border-radius: 12px;
-        font-family: 'DM Sans', sans-serif;
+        font-family: var(--ae-sans);
     }
     .ae-scr-card-title {
         font-size: 20px;
         font-weight: 700;
         line-height: 1.3;
-        color: #2E2E38;
+        color: var(--ae-ink);
     }
     .ae-scr-card-title span.ae-scr-tk {
         color: #3A0CA3;
@@ -13638,7 +13642,7 @@ SCR_CSS = """
         margin: 6px 0 0 0;
         font-size: 14px;
         line-height: 1.55;
-        color: #555566;
+        color: var(--ae-body);
     }
     .ae-scr-chip {
         display: inline-block;
@@ -13647,8 +13651,8 @@ SCR_CSS = """
         border-radius: 999px;
         font-size: 12px;
         font-weight: 600;
-        background: #F3F4F6;
-        color: #555566;
+        background: var(--ae-wash);
+        color: var(--ae-body);
     }
     .ae-scr-chip-purple { background: #F0EDF8; color: #3A0CA3; }
     .ae-scr-chip-red { background: #FBEAE7; color: #B03224; }
@@ -13664,19 +13668,19 @@ SCR_CSS = """
         font-weight: 700;
         letter-spacing: 0.08em;
         text-transform: uppercase;
-        color: #666677;
+        color: var(--ae-body);
     }
     .ae-scr-row {
         display: flex;
         justify-content: space-between;
         gap: 12px;
         padding: 5px 0;
-        border-bottom: 1px solid #EEEEF2;
+        border-bottom: 1px solid var(--ae-rule);
         font-size: 14px;
     }
-    .ae-scr-row .ae-scr-k { color: #555566; }
+    .ae-scr-row .ae-scr-k { color: var(--ae-body); }
     .ae-scr-row .ae-scr-v {
-        color: #2E2E38;
+        color: var(--ae-ink);
         text-align: right;
         font-variant-numeric: tabular-nums;
     }

@@ -1,0 +1,18 @@
+# Asymmetric Edge dashboard theme (November 14, 2026).
+# Matches the asymmetricedge.io homepage: Inter for body and interface text,
+# IBM Plex Serif 600 for headings, the warm neutral set and the brand purple
+# accent. Colors here are mirrored by the brand tokens at the top of app.py;
+# change both together. Keep this file identical in Chart Dashboard and
+# ae-dashboard-deploy.
+
+[theme]
+base = "light"
+primaryColor = "#3A0CA3"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F4F0"
+textColor = "#1C1B19"
+linkColor = "#3A0CA3"
+borderColor = "#D9D5CC"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap, sans-serif"
+headingFont = "'IBM Plex Serif':https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@600&display=swap, serif"
+headingFontWeights = [600, 600, 600, 600, 600, 600]
