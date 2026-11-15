@@ -20,6 +20,9 @@ Sources:
         cannot be reached, the sector labels saved from its last good fetch
         (ndx_sector_labels.json, kept on the PC) are used with Invesco's
         weights, and the entry says so.
+        The iShares UK file has returned HTTP 400 since November 12, 2026, so
+        the iShares Russell 1000 file (US site) plus the fixed
+        NDX_NON_US_SECTORS labels now come between it and the saved labels.
   IWM   iShares latest-holdings.csv (Russell 2000).
   EMXC  iShares latest-holdings.csv (MSCI Emerging Markets ex China).
   HGER  Harbor's HGER page data (Quantix Commodity Index sector weights),
@@ -57,7 +60,18 @@ TOP_N = 40
 # that a day when that file is unreachable does not stall QQQ.
 SECTOR_CACHE_PATH = os.path.join(HERE, "ndx_sector_labels.json")
 SECTOR_CACHE_MAX_AGE_DAYS = 45
-SECTOR_CACHE_MIN_COVERAGE = 97.0   # percent of QQQ's stock weight that needs a saved label
+SECTOR_CACHE_MIN_COVERAGE = 97.0   # percent of QQQ's stock weight that needs a label
+
+# GICS sectors for Nasdaq 100 members the Russell 1000 leaves out (companies
+# based outside the US). Used only when the Russell 1000 file supplies QQQ's
+# sectors. If the index adds another non-US company, add it here.
+NDX_NON_US_SECTORS = {
+    "SHOP": "Information Technology", "ASML": "Information Technology",
+    "STX": "Information Technology", "ARM": "Information Technology",
+    "NXPI": "Information Technology", "NBIS": "Information Technology",
+    "MELI": "Consumer Discretionary", "PDD": "Consumer Discretionary",
+    "CCEP": "Consumer Staples", "FER": "Industrials", "TRI": "Industrials",
+}
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36")
@@ -68,6 +82,7 @@ URLS = {
     "QQQ_warmup": "https://www.invesco.com/qqq-etf/en/about.html",
     "NDX_ishares": ("https://www.ishares.com/uk/individual/en/products/253741/"
                     "ishares-nasdaq-100-ucits-etf/latest-holdings.csv"),
+    "R1000_ishares": "https://www.ishares.com/us/products/239707/ishares-russell-1000-etf/latest-holdings.csv",
     "IWM": "https://www.ishares.com/us/products/239710/ishares-russell-2000-etf/latest-holdings.csv",
     "EMXC": ("https://www.ishares.com/us/products/288504/"
              "ishares-msci-emerging-markets-ex-china-etf/latest-holdings.csv"),
@@ -358,7 +373,7 @@ def _load_sector_labels():
     return None
 
 
-def _save_sector_labels(sector_of, as_of):
+def _save_sector_labels(sector_of, as_of, source=None):
     """Keep ticker -> sector for a day when the iShares file cannot be reached."""
     labels = {t: s for t, s in sector_of.items() if s in SECTOR_THEME}
     if len(labels) < 80:
@@ -368,7 +383,7 @@ def _save_sector_labels(sector_of, as_of):
         with open(tmp, "w", encoding="utf-8", newline="\n") as f:
             json.dump({"saved_on": datetime.now().strftime("%Y-%m-%d"),
                        "sector_file_as_of": as_of,
-                       "source": URLS["NDX_ishares"],
+                       "source": source or URLS["NDX_ishares"],
                        "sectors": dict(sorted(labels.items()))}, f, indent=1, ensure_ascii=False)
             f.write("\n")
         os.replace(tmp, SECTOR_CACHE_PATH)
@@ -376,32 +391,60 @@ def _save_sector_labels(sector_of, as_of):
         print(f"  QQQ: could not save the sector labels ({e})")
 
 
+def _r1000_sector_labels():
+    """Ticker -> GICS sector from the iShares Russell 1000 file (US site), plus
+    fixed labels for the Nasdaq 100's non-US members. Returns (labels, as_of)."""
+    rows, as_of = parse_ishares_csv(http_get(URLS["R1000_ishares"]))
+    labels = {r["ticker"]: r["sector"] for r in rows
+              if r["ticker"] and r["sector"] in SECTOR_THEME}
+    for t, s in NDX_NON_US_SECTORS.items():
+        labels.setdefault(t, s)
+    return labels, as_of
+
+
+def _label_coverage(rows):
+    """Percent of the fund's stock weight that has a sector label."""
+    stock = sum(r["weight"] for r in rows if r["asset_class"] == "Equity")
+    labeled = sum(r["weight"] for r in rows
+                  if r["asset_class"] == "Equity" and r["sector"] in SECTOR_THEME)
+    return labeled / stock * 100.0 if stock > 0 else 0.0
+
+
 def fetch_qqq():
-    """QQQ weights from Invesco, sectors from the same-index iShares file. When
-    that file cannot be reached, the sector labels saved from its last good
-    fetch are used, so a good Invesco fetch is not thrown away."""
+    """QQQ weights from Invesco. GICS sectors come from the same-index iShares
+    Nasdaq 100 UCITS file; when that file cannot be reached (it has returned
+    HTTP 400 since November 12, 2026), from the iShares Russell 1000 file plus
+    fixed labels for the index's non-US members; failing both, from the labels
+    saved from the last good fetch. A good Invesco fetch is not thrown away."""
     ndx_rows, ndx_as_of, ndx_error, saved, saved_on = None, None, None, None, ""
+    r1000_as_of = None
     try:
         ndx_rows, ndx_as_of = parse_ishares_csv(http_get(URLS["NDX_ishares"]))
         sector_of = {r["ticker"]: r["sector"] for r in ndx_rows if r["ticker"]}
         _save_sector_labels(sector_of, ndx_as_of)
     except Exception as e:  # noqa: BLE001
         ndx_error = e
-        saved = _load_sector_labels()
-        if saved is None:
-            raise RuntimeError(f"iShares Nasdaq 100 file unavailable ({e}) and no sector labels "
-                               "have been saved yet")
-        saved_on = str(saved.get("saved_on") or "")
         try:
-            age = (datetime.now() - datetime.strptime(saved_on, "%Y-%m-%d")).days
-        except ValueError:
-            age = None
-        if age is None or age > SECTOR_CACHE_MAX_AGE_DAYS:
-            raise RuntimeError(f"iShares Nasdaq 100 file unavailable ({e}) and the saved sector labels "
-                               f"(saved {saved_on or 'on an unknown date'}) are older than "
-                               f"{SECTOR_CACHE_MAX_AGE_DAYS} days")
-        sector_of = saved["sectors"]
-        print(f"  QQQ: iShares Nasdaq 100 file unavailable ({e}); using the sector labels saved {saved_on}")
+            sector_of, r1000_as_of = _r1000_sector_labels()
+            print(f"  QQQ: iShares Nasdaq 100 file unavailable ({e}); using sector labels from the "
+                  "iShares Russell 1000 file")
+        except Exception as e2:  # noqa: BLE001
+            print(f"  QQQ: iShares Russell 1000 file unavailable too ({e2})")
+            saved = _load_sector_labels()
+            if saved is None:
+                raise RuntimeError(f"iShares Nasdaq 100 file unavailable ({e}), Russell 1000 file "
+                                   f"unavailable ({e2}), and no sector labels have been saved yet")
+            saved_on = str(saved.get("saved_on") or "")
+            try:
+                age = (datetime.now() - datetime.strptime(saved_on, "%Y-%m-%d")).days
+            except ValueError:
+                age = None
+            if age is None or age > SECTOR_CACHE_MAX_AGE_DAYS:
+                raise RuntimeError(f"iShares Nasdaq 100 file unavailable ({e}) and the saved sector labels "
+                                   f"(saved {saved_on or 'on an unknown date'}) are older than "
+                                   f"{SECTOR_CACHE_MAX_AGE_DAYS} days")
+            sector_of = saved["sectors"]
+            print(f"  QQQ: using the sector labels saved {saved_on}")
     try:
         payload = json.loads(http_get(URLS["QQQ_invesco"], json_wanted=True))
         rows = []
@@ -422,7 +465,7 @@ def fetch_qqq():
         if not 95.0 <= total <= 105.0 or len(rows) < 80:
             raise RuntimeError(f"Invesco holdings sum to {total:.2f}% over {len(rows)} rows")
         as_of = str(payload.get("effectiveDate") or payload.get("effectiveBusinessDate") or "")[:10]
-        if saved is None:
+        if saved is None and r1000_as_of is None:
             source = ("Invesco QQQ holdings (dng-api.invesco.com); GICS sectors from the iShares "
                       "Nasdaq 100 UCITS ETF holdings file, which tracks the same index")
             fund = build_fund(rows, as_of, source)
@@ -436,19 +479,29 @@ def fetch_qqq():
         source = ("iShares Nasdaq 100 UCITS ETF holdings file (same index as QQQ; Invesco's feed "
                   f"was unavailable) ({URLS['NDX_ishares']})")
         return build_fund(ndx_rows, ndx_as_of, source)
-    # Saved sector labels with Invesco's live weights. A stock added to the index
-    # since the labels were saved has no label and is spread like cash, so stop
-    # if too much of the fund would go unlabeled.
-    stock = sum(r["weight"] for r in rows if r["asset_class"] == "Equity")
-    labeled = sum(r["weight"] for r in rows
-                  if r["asset_class"] == "Equity" and r["sector"] in SECTOR_THEME)
-    coverage = labeled / stock * 100.0 if stock > 0 else 0.0
+    # Borrowed sector labels (Russell 1000 or saved) with Invesco's live weights.
+    # A stock with no label is spread like cash, so stop if too much of the
+    # fund would go unlabeled.
+    coverage = _label_coverage(rows)
+    if r1000_as_of is not None:
+        if coverage < SECTOR_CACHE_MIN_COVERAGE:
+            raise RuntimeError(f"iShares Nasdaq 100 file unavailable ({ndx_error}) and the Russell 1000 "
+                               f"sector labels cover only {coverage:.1f}% of QQQ's stock weight "
+                               "(add the missing non-US names to NDX_NON_US_SECTORS)")
+        _save_sector_labels({r["ticker"]: r["sector"] for r in rows if r["ticker"]}, r1000_as_of,
+                            URLS["R1000_ishares"])
+        source = ("Invesco QQQ holdings (dng-api.invesco.com); GICS sectors from the iShares Russell "
+                  "1000 ETF holdings file plus fixed labels for the index's non-US members (the "
+                  "iShares Nasdaq 100 UCITS file was unavailable for this run)")
+        fund = build_fund(rows, as_of, source)
+        fund["sector_file_as_of"] = r1000_as_of
+        return fund
     if coverage < SECTOR_CACHE_MIN_COVERAGE:
         raise RuntimeError(f"iShares Nasdaq 100 file unavailable ({ndx_error}) and the saved sector "
                            f"labels cover only {coverage:.1f}% of QQQ's stock weight")
     source = ("Invesco QQQ holdings (dng-api.invesco.com); GICS sectors from labels saved "
-              f"{saved_on} from the iShares Nasdaq 100 UCITS ETF holdings file, which tracks the "
-              "same index (that file was unavailable for this run)")
+              f"{saved_on} from an iShares holdings file (the iShares Nasdaq 100 and Russell 1000 "
+              "files were unavailable for this run)")
     fund = build_fund(rows, as_of, source)
     fund["sector_file_as_of"] = saved.get("sector_file_as_of")
     return fund
