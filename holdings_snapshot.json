@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "generated_at": "2026-11-16 14:50",
+ "generated_at": "2026-11-16 17:29",
  "generated_by": "make_holdings_snapshot.py",
  "note": "Theme weights are percent of each fund and add to 100; each fund's cash, money market and derivatives sleeve is spread proportionally across its holdings. top lists the largest holdings as [display name, ticker, theme, percent of fund] on the same basis.",
  "funds": {
