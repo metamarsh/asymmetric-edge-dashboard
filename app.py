@@ -1838,15 +1838,91 @@ def load_custom_ticker_data(tickers_tuple, start_date: str, end_date: str):
     return _fetch_closes(tickers, start_date, end_date)
 
 
+def _tr_square_legend(items, plot_h_px, fig_w_px=790, max_row_px=760):
+    """Square-swatch legend for the Total Return Comparison chart, drawn the
+    same way as the Portfolio Growth legend (rounded 14 px square, 16 px
+    name, 13 px return centered beneath), and baked into the figure so PNG
+    exports keep it. Items wrap onto extra rows when they would not fit.
+    Returns (shapes, annotations, row_count)."""
+    SQ_PX, SQ_HALF, CORNER_PX = 14, 7, 3
+    SQ_GAP_PX, ITEM_GAP_PX = 9, 48
+    NAME_CHAR_PX, VALUE_CHAR_PX = 9.0, 7.7
+    NAME_DROP_PX, VALUE_DROP_PX, ROW_PITCH_PX = 63, 86, 58
+
+    h, r = SQ_HALF, CORNER_PX
+    sq_path = (
+        f"M {-h+r},{-h} L {h-r},{-h} "
+        f"Q {h},{-h} {h},{-h+r} L {h},{h-r} "
+        f"Q {h},{h} {h-r},{h} L {-h+r},{h} "
+        f"Q {-h},{h} {-h},{h-r} L {-h},{-h+r} "
+        f"Q {-h},{-h} {-h+r},{-h} Z"
+    )
+
+    def measure(item):
+        name_px = len(item["name"]) * NAME_CHAR_PX
+        val_px = len(item["value_text"]) * VALUE_CHAR_PX
+        name_center = SQ_PX + SQ_GAP_PX + name_px / 2
+        left = min(0, name_center - val_px / 2)
+        right = max(SQ_PX + SQ_GAP_PX + name_px, name_center + val_px / 2)
+        return {"name_px": name_px, "left": left, "w": right - left}
+
+    rows, row, row_w = [], [], 0.0
+    for item in items:
+        g = measure(item)
+        add = g["w"] + (ITEM_GAP_PX if row else 0)
+        if row and row_w + add > max_row_px:
+            rows.append((row, row_w))
+            row, row_w, add = [], 0.0, g["w"]
+        row.append((item, g))
+        row_w += add
+    if row:
+        rows.append((row, row_w))
+
+    shapes, annotations = [], []
+    for ri, (row, row_w) in enumerate(rows):
+        y_name = -(NAME_DROP_PX + ri * ROW_PITCH_PX) / plot_h_px
+        y_value = -(VALUE_DROP_PX + ri * ROW_PITCH_PX) / plot_h_px
+        cursor = 0.5 - (row_w / fig_w_px) / 2
+        for item, g in row:
+            sq_x = cursor + (-g["left"] + SQ_HALF) / fig_w_px
+            name_x = sq_x + (SQ_HALF + SQ_GAP_PX) / fig_w_px
+            name_center_x = name_x + (g["name_px"] / 2) / fig_w_px
+            shapes.append(dict(
+                type="path", path=sq_path, xref="paper", yref="paper",
+                xanchor=sq_x, yanchor=y_name, xsizemode="pixel", ysizemode="pixel",
+                fillcolor=item["color"], line=dict(width=0),
+            ))
+            annotations.append(dict(
+                xref="paper", yref="paper", x=name_x, y=y_name, text=item["name"],
+                showarrow=False, xanchor="left", yanchor="middle",
+                font=dict(size=16, color=TEXT_SECONDARY, family=FONT_SANS, weight=500),
+            ))
+            annotations.append(dict(
+                xref="paper", yref="paper", x=name_center_x, y=y_value, text=item["value_text"],
+                showarrow=False, xanchor="center", yanchor="middle",
+                font=dict(size=13, color=TEXT_MUTED, family=FONT_SANS),
+            ))
+            cursor += (g["w"] + ITEM_GAP_PX) / fig_w_px
+    return shapes, annotations, len(rows)
+
+
 def build_total_return_chart(series_dict, start_date, end_date, color_map):
     """
     Build a percentage-return line chart.
     series_dict: {label: pd.Series of prices}
     Returns a Plotly figure.
+
+    November 17, 2026: every value shows two decimals at most. Hover text is
+    formatted in Python (customdata) so it can never fall back to raw floats.
+    The legend matches Portfolio Growth: rounded square swatches with each
+    series' return beneath, baked into the figure. End-of-line labels are
+    nudged apart so close finishes no longer overprint.
     """
     fig = go.Figure()
     tick_dates, tick_labels = make_x_axis_labels(start_date, end_date)
-    annotations = []
+    PLOT_H_PX, MARGIN_T = 375, 15
+    ends, legend_items = [], []
+    lo, hi = 0.0, 0.0
 
     for i, (label, prices) in enumerate(series_dict.items()):
         s = prices.dropna()
@@ -1856,9 +1932,10 @@ def build_total_return_chart(series_dict, start_date, end_date, color_map):
             continue
 
         first_val = segment.iloc[0]
-        pct_return = (segment / first_val - 1) * 100
+        pct_return = ((segment / first_val - 1) * 100).astype(float)
 
         color = color_map.get(label, "#999999")
+        safe = str(label).replace("&", "&amp;")
 
         fig.add_trace(go.Scatter(
             x=pct_return.index,
@@ -1866,32 +1943,36 @@ def build_total_return_chart(series_dict, start_date, end_date, color_map):
             mode="lines",
             name=label,
             line=dict(color=color, width=3),
-            hovertemplate="%{x|%b %d, %Y}<br>%{y:+.2f}%<extra>" + label + "</extra>",
-            showlegend=True,
-            legendrank=i,
+            customdata=[f"{v:+.2f}%" for v in pct_return.values],
+            hovertemplate=safe + ": %{customdata}<extra></extra>",
+            showlegend=False,
+            zorder=len(series_dict) - i,  # first series (Asymmetric Edge) draws on top
         ))
 
-        # End-of-line annotation with final return value
-        final_val = pct_return.iloc[-1]
-        annotations.append(dict(
-            x=pct_return.index[-1],
-            y=final_val,
-            text=f"<b>{final_val:+.2f}%</b>",
-            showarrow=False,
-            xanchor="left",
-            xshift=8,
-            font=dict(size=16, color=color, family=FONT_SANS),
-        ))
+        final_val = float(pct_return.iloc[-1])
+        lo, hi = min(lo, float(pct_return.min())), max(hi, float(pct_return.max()))
+        ends.append({"x": pct_return.index[-1], "y": final_val, "y_label": final_val, "color": color})
+        legend_items.append({"name": safe, "value_text": f"{final_val:+.2f}%", "color": color})
 
-    # Reverse trace draw order so the first series in series_dict (typically
-    # Asymmetric Edge) renders on top. The legendrank values set in the loop
-    # above preserve the original ordering in the on-screen legend.
-    fig.data = fig.data[::-1]
+    pad = max(1.0, (hi - lo) * 0.06)
+    y_range = [lo - pad, hi + pad]
+    ends = _spread_end_labels(ends, y_range, min_gap_frac=22 / PLOT_H_PX)
+    if ends and ends[-1]["y_label"] > y_range[1]:
+        y_range[1] = ends[-1]["y_label"] + pad * 0.5
+    annotations = [dict(
+        x=e["x"], y=e["y_label"], text=f"<b>{e['y']:+.2f}%</b>", showarrow=False,
+        xanchor="left", xshift=8, yanchor="middle",
+        font=dict(size=16, color=e["color"], family=FONT_SANS),
+    ) for e in ends]
+
+    shapes, legend_ann, n_rows = _tr_square_legend(legend_items, PLOT_H_PX)
+    margin_b = 115 + max(0, n_rows - 1) * 58
 
     fig.update_layout(
         **DARK_LAYOUT,
         yaxis=dict(
             ticksuffix="%",
+            range=y_range,
             gridcolor=GRID_COLOR,
             zeroline=True,
             zerolinecolor=ZERO_LINE,
@@ -1904,18 +1985,16 @@ def build_total_return_chart(series_dict, start_date, end_date, color_map):
             ticktext=tick_labels,
             gridcolor="rgba(0,0,0,0)",
             tickfont=dict(size=16, color=AXIS_TEXT),
+            hoverformat="%b %-d, %Y",
             range=[pd.Timestamp(start_date) - timedelta(days=2), pd.Timestamp(end_date) + timedelta(days=2)],
         ),
-        legend=dict(
-            orientation="h", yanchor="top", y=-0.14,
-            xanchor="center", x=0.5,
-            font=dict(size=22, color=TEXT_SECONDARY, weight=500),
-        ),
-        margin=dict(t=15, b=70, l=60, r=80),
-        height=460,
+        margin=dict(t=MARGIN_T, b=margin_b, l=60, r=80),
+        height=MARGIN_T + PLOT_H_PX + margin_b,
         hovermode="x unified",
-        showlegend=True,
-        annotations=annotations,
+        hoverlabel=dict(font=dict(family=ANALYTICS_FONT, size=13)),
+        showlegend=False,
+        shapes=shapes,
+        annotations=annotations + legend_ann,
     )
     return fig
 
