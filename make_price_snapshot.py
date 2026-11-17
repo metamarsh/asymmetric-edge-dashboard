@@ -6,7 +6,7 @@ import yfinance as yf
 
 TICKERS = [
     "SPY", "AOA", "AOR",
-    "GLD", "EMXC", "DXJ", "QQQ", "IWM", "DX-Y.NYB", "TLT", "CL=F", "BTC-USD",
+    "GLD", "GLDM", "EMXC", "DXJ", "QQQ", "IWM", "DX-Y.NYB", "TLT", "CL=F", "BTC-USD",
     "BIL", "HGER", "IBIT",
     # Every other ticker held since inception (October 22, 2026), for the
     # What Drove the Month and Rebalance Log sections, plus BTAL for Risk vs. Return.

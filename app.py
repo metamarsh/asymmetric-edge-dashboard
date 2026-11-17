@@ -714,7 +714,7 @@ BENCHMARK_TICKERS = {
 }
 
 ASSET_CLASS_TICKERS = {
-    "Gold": "GLD",
+    "Gold": "GLDM",
     "Emerging Mkts": "EMXC",
     "Japan": "DXJ",
     "S&P 500": "SPY",
@@ -2337,7 +2337,9 @@ ASSET_CATALOG = {
     # International
     "EMXC": {"asset": "Emerging Mkts",           "emoji": "\U0001F30F", "purpose": "Emerging-economy growth, ex-China"},
     "DXJ":  {"asset": "Japan",                   "emoji": "\u26E9\uFE0F", "purpose": "Developed-market growth, no yen risk"},
-    # Commodities
+    # Commodities. Gold moved from GLD to GLDM in November 2026 (same bullion,
+    # lower fee); GLD stays so its history keeps its name.
+    "GLDM": {"asset": "Gold",                    "emoji": "\U0001F7E8", "purpose": "Crisis hedge, store of value"},
     "GLD":  {"asset": "Gold",                    "emoji": "\U0001F7E8", "purpose": "Crisis hedge, store of value"},
     "HGER": {"asset": "Broad Commodities",      "emoji": "\U0001F3ED", "purpose": "Hedge against inflation and price spikes"},
     # Crypto
@@ -2347,6 +2349,10 @@ ASSET_CATALOG = {
     "TLT":  {"asset": "Long-Term Treasuries",    "emoji": "\U0001F3E6", "purpose": "Recession and falling-rate hedge"},
     "BTAL": {"asset": "Defensive Equity",        "emoji": "\U0001F6E1\uFE0F", "purpose": "Hedge against stock market sell-offs"},
 }
+
+# Tickers kept in ASSET_CATALOG for their history but no longer offered in the
+# Edit Next Allocation picker.
+ASSET_CATALOG_RETIRED = {"GLD"}
 
 
 def canonical_order(tickers):
@@ -2448,7 +2454,7 @@ ALLOC_HISTORY_TICKER_CATEGORY = {
     "QQQ": "us", "IWM": "us", "SPY": "us",
     "EMXC": "intl", "DXJ": "intl", "EZU": "intl",
     "HGER": "comm", "COPX": "comm",
-    "GLD": "gold",
+    "GLD": "gold", "GLDM": "gold",
     "IBIT": "crypto", "GBTC": "crypto", "BITO": "crypto",
     "BTAL": "def",
     "TLT": "def",
@@ -4574,7 +4580,7 @@ DEFAULT_ASSET_UNIVERSE = {
             "color_bg": "#F4E5C5",
             "color_text": "#7E4A0A",
             "assets": [
-                {"name": "Gold", "ticker": "GLD"},
+                {"name": "Gold", "ticker": "GLDM"},
                 {"name": "Broad commodities", "ticker": "HGER"},
             ],
         },
@@ -8076,7 +8082,7 @@ def render_rolling_section(combined, latest_date):
 ASSET_POINT_COLORS = {
     "QQQ": "#1F4D87", "IWM": "#4F7FC4",          # U.S. equities (blues)
     "DXJ": "#14543E", "EMXC": "#2F8A66",         # International (greens)
-    "HGER": "#7E4A0A", "GLD": "#A57A08",         # Commodities (amber / gold)
+    "HGER": "#7E4A0A", "GLD": "#A57A08", "GLDM": "#A57A08",  # Commodities (amber / gold)
     "IBIT": "#C8650A",                           # Crypto (bitcoin orange)
     "BTAL": "#4A463D", "TLT": "#6E6A62", "BIL": "#8C867C",  # Defensive (warm grays)
 }
@@ -8649,7 +8655,7 @@ CORR_SCALE = [
 
 # Display order for funds: U.S. equities, international, commodities, gold,
 # crypto, defensive (the mockup's matrix order). Unknown tickers go last.
-CORR_FUND_ORDER = ["SPY", "QQQ", "IWM", "EZU", "EMXC", "DXJ", "HGER", "COPX", "GLD",
+CORR_FUND_ORDER = ["SPY", "QQQ", "IWM", "EZU", "EMXC", "DXJ", "HGER", "COPX", "GLD", "GLDM",
                    "IBIT", "GBTC", "BITO", "BTAL", "TLT"]
 # Names for earlier holdings that are not in ASSET_CATALOG.
 CORR_EXTRA_NAMES = {"SPY": "S&P 500", "EZU": "Eurozone", "COPX": "Copper Miners",
@@ -10225,7 +10231,7 @@ def render_correlation_section(holdings_values, totals):
 # (Invesco for QQQ, iShares for IWM and EMXC) and committed with the other
 # data files, so the cloud app never calls the issuers. HGER uses the live
 # Harbor fetch that What HGER Holds already makes (cached six hours), then
-# the saved QCI snapshots, then the holdings snapshot. GLD, BIL and IBIT have
+# the saved QCI snapshots, then the holdings snapshot. GLD, GLDM, BIL and IBIT have
 # fixed look-throughs; any other fund shows as one "Not broken down" block.
 # Daily prices for the companion come through load_holding_prices with the
 # same arguments as the correlation section, so the two share one fetch.
@@ -10308,8 +10314,9 @@ LT_CASH_COLOR = "#8C867C"    # the cash pseudo-fund, in BIL's warm gray
 
 # Funds with a fixed look-through, so they need no holdings file. CASH is the
 # account's money market and uninvested cash.
-LT_FIXED = {"GLD": ("gold", "Gold"), "BIL": ("cash", "T-bills"), "IBIT": ("bitcoin", "Bitcoin"),
-            "GBTC": ("bitcoin", "Bitcoin"), "BITO": ("bitcoin", "Bitcoin"), "CASH": ("cash", "Cash")}
+LT_FIXED = {"GLD": ("gold", "Gold"), "GLDM": ("gold", "Gold"), "BIL": ("cash", "T-bills"),
+            "IBIT": ("bitcoin", "Bitcoin"), "GBTC": ("bitcoin", "Bitcoin"), "BITO": ("bitcoin", "Bitcoin"),
+            "CASH": ("cash", "Cash")}
 
 # Harbor (Quantix Commodity Index) sector -> theme, as make_holdings_snapshot.py maps it.
 LT_QCI_THEME = {
@@ -10846,8 +10853,9 @@ def _lt_commod_note(exp, comps):
                       "livestock": "Livestock is", "ind_metals": "Industrial metals are"}.get(
                 k, f"{_lt_label(k)} is")
             return f"{phrase} {shares[k]:.0f}% of HGER"
-    if w.get("GLD", 0.0) >= LT_MIN_PCT:
-        return "All gold, through GLD"
+    gold_funds = [t for t in ("GLDM", "GLD") if w.get(t, 0.0) >= LT_MIN_PCT]
+    if gold_funds:
+        return f"All gold, through {_cap_join(gold_funds)}"
     return "None in this basket"
 
 
@@ -11618,7 +11626,7 @@ def _lt_sources_text(comps, tickers):
             parts.append(f"{_cap_join(ts)} from {src}{when}")
     text = ("Fund holdings: " + "; ".join(parts) + ".") if parts else ""
     if fixed:
-        what = {"GLD": "gold", "BIL": "T-bills", "IBIT": "bitcoin", "GBTC": "bitcoin", "BITO": "bitcoin"}
+        what = {"GLD": "gold", "GLDM": "gold", "BIL": "T-bills", "IBIT": "bitcoin", "GBTC": "bitcoin", "BITO": "bitcoin"}
         text += " " + "; ".join(f"{t} is all {what.get(t, t)}" for t in fixed) + "."
     return text.strip()
 
@@ -12178,7 +12186,7 @@ def render_next_allocation_section(ctx):
     saved_rows = load_next_allocation()
 
     # --- Editor expander ---
-    available_tickers = sorted(ASSET_CATALOG.keys())
+    available_tickers = sorted(t for t in ASSET_CATALOG if t not in ASSET_CATALOG_RETIRED)
     editor_rows = []
     if studio:
         with st.expander("Edit Next Allocation"):
