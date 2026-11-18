@@ -1371,6 +1371,14 @@ def compute_summary_metrics(daily_series, rf_monthly=None, start_date=None, end_
     ulcer_index = float(np.sqrt(np.mean(drawdown.values ** 2))) if len(drawdown) else np.nan
     martin = (cagr - rf_annual) / ulcer_index if ulcer_index > 0 else np.nan
 
+    # Gain-to-pain ratio (November 17, 2026), Jack Schwager's definition: the
+    # sum of all monthly returns divided by the absolute sum of the losing
+    # months. Simple sums, raw returns (no risk-free rate), from the same
+    # anchored monthly returns as Sortino and Calmar. NaN (shown as N/A) when
+    # the range has no losing month, since the ratio is then undefined.
+    loss_sum = float(monthly_returns[monthly_returns < 0].sum())
+    gain_to_pain = float(monthly_returns.sum()) / abs(loss_sum) if loss_sum < 0 else np.nan
+
     # ---- Daily and weekly metrics over user's literal range ----
     # Day and week extremes come from the daily reconstruction within the
     # selected range. For AsymEdge these are approximations (the daily shape
@@ -1453,6 +1461,7 @@ def compute_summary_metrics(daily_series, rf_monthly=None, start_date=None, end_
         "Calmar Ratio": calmar,
         "Ulcer Index": ulcer_index,
         "Martin Ratio": martin,
+        "Gain to Pain": gain_to_pain,
         "Annualized Vol": ann_vol,
         "Downside Dev": downside_dev,
         "Risk-Free Annual": rf_annual,
@@ -8167,6 +8176,35 @@ ASSET_POINT_COLORS = {
 }
 
 
+# Total Return Comparison default colors (November 17, 2026). A ticker typed
+# into that chart starts in the same color it has on Risk vs. Return: the
+# benchmark funds take their series colors, universe ETFs their hollow-point
+# colors (falling back to their Asset Universe category color), and BTC-USD
+# takes bitcoin orange. Anything else gets the first unused palette color.
+TR_SERIES_TICKER_COLORS = {
+    "SPY": SERIES_COLORS["S&P 500"],
+    "AOA": SERIES_COLORS["80/20"],
+    "AOR": SERIES_COLORS["60/40"],
+    "BTC-USD": ASSET_POINT_COLORS["IBIT"],
+}
+
+
+def tr_house_color(ticker):
+    """Risk vs. Return color for a ticker, or None if it is not a house asset."""
+    t = str(ticker).strip().upper()
+    if t in TR_SERIES_TICKER_COLORS:
+        return TR_SERIES_TICKER_COLORS[t]
+    if t in ASSET_POINT_COLORS:
+        return ASSET_POINT_COLORS[t]
+    try:
+        for cat in load_asset_universe().get("categories", []):
+            for a in cat.get("assets", []):
+                if str(a.get("ticker", "")).strip().upper() == t:
+                    return cat.get("color_text") or None
+    except Exception:
+        pass
+    return None
+
 # --- Risk vs. Return (October 23, 2026 redesign; mockup option C) ------------------
 # The volatility axis is linear up to just past the most volatile point at or
 # below RR_OUTLIER_VOL, then breaks; anything more volatile (bitcoin, or a
@@ -12131,7 +12169,7 @@ def render_performance_summary_section(ctx):
         # Today's full footnote, unchanged, under Full methodology.
         footnote_summary = (
             f"Metrics computed from daily portfolio values over the selected period. "
-            f"Monthly-based figures (CAGR, Sortino, Calmar, Martin, Annualized Vol, Best/Worst Year, Win Rate) "
+            f"Monthly-based figures (CAGR, Sortino, Calmar, Martin, Gain-to-Pain, Annualized Vol, Best/Worst Year, Win Rate) "
             f"resample to month-end values and anchor on the prior month-end, so the first monthly "
             f"return covers the full calendar month of the selected start date. "
             f"Sortino and Martin ratios use BIL (1-3 Month T-Bill ETF) as the risk-free rate where available; "
@@ -12839,13 +12877,29 @@ def render_total_return_section(ctx):
             f'<p style="font-size:0.82rem; color:{TEXT_MUTED}; margin-bottom:0.25rem;">Line colors</p>',
             unsafe_allow_html=True,
         )
+        # Default colors: Asymmetric Edge purple, then each ticker's Risk vs.
+        # Return color when it is a house asset (tr_house_color), then the
+        # first palette color no other series is using. A color the viewer
+        # has already picked for a ticker stays (the widget keeps its state).
+        defaults = {}
+        for label in all_labels:
+            if label == "Asymmetric Edge":
+                defaults[label] = SERIES_COLORS["AsymEdge"]
+            else:
+                house = tr_house_color(label)
+                if house:
+                    defaults[label] = house
+        for label in all_labels:
+            if label not in defaults:
+                used = {c.upper() for c in defaults.values()}
+                defaults[label] = next((c for c in COMPARE_PALETTE if c.upper() not in used),
+                                       COMPARE_PALETTE[len(defaults) % len(COMPARE_PALETTE)])
         # Arrange color pickers in rows of up to 4
         for row_start in range(0, len(all_labels), 4):
             row_labels = all_labels[row_start:row_start + 4]
             cols = st.columns(len(row_labels))
             for i, label in enumerate(row_labels):
-                idx = row_start + i
-                default_color = COMPARE_PALETTE[idx % len(COMPARE_PALETTE)]
+                default_color = defaults[label]
                 with cols[i]:
                     color_map[label] = st.color_picker(
                         label,
@@ -12995,6 +13049,7 @@ PS_GROUPS = [
         ("Sortino ratio", "Sortino Ratio", "ratio", "higher", None, None),
         ("Calmar ratio", "Calmar Ratio", "ratio", "higher", None, None),
         ("Martin ratio", "Martin Ratio", "ratio", "higher", None, None),
+        ("Gain-to-pain ratio (monthly)", "Gain to Pain", "ratio", "higher", None, None),
     ]),
     ("Consistency", [
         ("Months with a gain", "Win Rate", "pct", "higher", None, None),
@@ -13025,6 +13080,13 @@ PS_ROW_HELP = {
         "Return per unit of drawdown pain: the yearly return above T-bills (BIL), divided by the "
         "Ulcer Index, which measures how far below its previous high the portfolio sat at every "
         "month-end. It counts how deep and how long every decline was, not just the worst one. "
+        "Higher is better."
+    ),
+    "Gain-to-pain ratio (monthly)": (
+        "Net gain per dollar lost in down months: all monthly returns added together, divided by the "
+        "total of the losing months. Each loss counts at its size, so several small losses weigh the "
+        "same as one large loss of the same total. Above 1 is very good, above 1.5 excellent. With few "
+        "losing months, one new loss can move it a lot. N/A when the period has no losing month. "
         "Higher is better."
     ),
     "vs. S&P 500, daily": "Each column's portfolio against the S&P 500 (SPY), correlation of daily returns",
