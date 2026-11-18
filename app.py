@@ -1352,25 +1352,7 @@ def compute_summary_metrics(daily_series, rf_monthly=None, start_date=None, end_
         excess = monthly_returns
         rf_annual = 0.0
 
-    # Month in progress (November 18, 2026). When the range ends inside a
-    # calendar month, that month's return so far counts toward downside risk
-    # as one more monthly observation. CAGR above already runs to end_ts, so
-    # without this a loss in the unfinished month lowered the return while
-    # the downside deviation still stopped at the prior month-end. Only the
-    # Sortino ratio and Downside Dev read it; every other monthly-based
-    # metric still uses completed months. A range that ends on a month-end
-    # has no month in progress and is unchanged.
-    excess_for_downside = excess.values
-    if len(daily_in_range) >= 2 and daily_in_range.index[-1] > monthly_values.index[-1]:
-        partial_return = float(daily_in_range.iloc[-1]) / float(monthly_values.iloc[-1]) - 1.0
-        partial_rf = 0.0
-        if rf_monthly is not None and len(rf_monthly) > 0:
-            partial_label = daily_in_range.index[-1] + pd.offsets.MonthEnd(0)
-            partial_rf_val = rf_monthly.get(partial_label, 0.0)
-            partial_rf = float(partial_rf_val) if pd.notna(partial_rf_val) else 0.0
-        excess_for_downside = np.append(excess_for_downside, partial_return - partial_rf)
-
-    excess_downside = np.minimum(excess_for_downside, 0.0)
+    excess_downside = np.minimum(excess.values, 0.0)
     downside_var = np.mean(excess_downside ** 2)
     downside_dev = np.sqrt(downside_var) * np.sqrt(12)
     sortino = (cagr - rf_annual) / downside_dev if downside_dev > 0 else 0.0
