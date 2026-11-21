@@ -737,6 +737,84 @@ ASSET_CLASS_FOOTNOTES = {
 
 SERIES_ORDER = ["AsymEdge", "80/20", "60/40", "S&P 500"]
 
+# ---- Extra comparison ticker (November 21, 2026) ----
+# One more series beside the three benchmarks, typed into the "Compare with a ticker" box on the
+# Overview, Performance and Risk pages. The box is blank at startup: nothing is fetched and every
+# page is what it was. With a ticker in it, build_shared_context adds the ticker's total-return
+# series to a copy of the shared frame (ctx.cmp_combined) and names this run's series in
+# ctx.cmp_series. The sections that compare Asymmetric Edge with all three benchmarks read those
+# two (Performance Summary, Performance Comparison, Portfolio Growth, Maximum Drawdown, Drawdowns
+# Over Time, Rolling 12-Month Return), and Risk vs. Return's own Custom ticker box follows the
+# box. SERIES_ORDER itself never changes, so everything else (the Overview tiles, the homepage
+# export, the sections that take one benchmark at a time) reads the four series as before. The
+# ticker lasts for the viewer's own session only. Build and checks:
+# C:\Users\tyler\OneDrive\PROJECTS\Strategy Backtesting System\Chart Dashboard\Comparison Ticker 2026-11-21\
+CMP_STATE_KEY = "cmp_ticker"            # the cleaned ticker, kept across pages
+CMP_INPUT_KEY = "cmp_ticker_input"      # the text box
+# Its color (added later the same day): a preset from CMP_PALETTE or any hex code, chosen beside the
+# box once a ticker is in it, and kept across pages like the ticker. A valid hex code wins over
+# the preset. The one color, exactly as chosen, is used wherever the ticker is drawn: lines, bars,
+# dots, labels, legend swatches and table headers. Every preset sits apart from the purple, the
+# two blues and the gray.
+CMP_COLOR_KEY = "cmp_color"                 # the preset's name, kept across pages
+CMP_HEX_KEY = "cmp_color_hex"               # the typed hex code, kept across pages
+CMP_COLOR_PICK_KEY = "cmp_color_pick"       # the preset menu
+CMP_HEX_INPUT_KEY = "cmp_color_hex_input"   # the hex code box
+# The starting color is Charcoal (Tyler, November 21, 2026: a dark gray, not a bright color). It is
+# darker than the S&P 500's gray, and on Drawdowns Over Time it is a solid line where the S&P 500's
+# is dashed.
+CMP_PALETTE = {
+    "Charcoal": "#2B2F36", "Emerald": "#1F9D6B", "Teal": "#0E8C8C", "Olive": "#7A8B2A", "Gold": "#C99A0B",
+    "Burnt orange": "#D9622B", "Crimson": "#C0392B", "Rose": "#E0527A", "Magenta": "#C2278F", "Brown": "#8A5A3B",
+}
+CMP_PALETTE_DEFAULT = "Charcoal"            # the starting color
+CMP_MIN_SESSIONS = 20                   # with fewer closes than this since inception the ticker is left out
+
+
+def cmp_clean(raw):
+    """The typed ticker in upper case, less anything a Yahoo ticker never holds. Blank stays blank."""
+    return re.sub(r"[^A-Za-z0-9.\-^=]", "", str(raw or "")).upper()
+
+
+def cmp_hex(raw):
+    """A typed hex color code as "#RRGGBB" in upper case, or None when it is not one. Takes
+    "#1f9d6b", "1F9D6B" and the three-digit form "#2a7"."""
+    s = str(raw or "").strip().lstrip("#")
+    if re.fullmatch(r"[0-9A-Fa-f]{3}", s):
+        s = "".join(ch * 2 for ch in s)
+    return "#" + s.upper() if re.fullmatch(r"[0-9A-Fa-f]{6}", s) else None
+
+
+def cmp_look(preset=None, typed=""):
+    """The extra ticker's color from the preset's name and the typed hex code: "color" (the hex
+    code used), "says" (the line beside the swatch) and "bad" (the typed code is not a hex code,
+    so the preset is used)."""
+    name = preset if preset in CMP_PALETTE else CMP_PALETTE_DEFAULT
+    color, says, bad = CMP_PALETTE[name], f"{name} ({CMP_PALETTE[name]})", False
+    if str(typed or "").strip():
+        code = cmp_hex(typed)
+        if code:
+            color, says = code, f"Hex code {code}"
+        else:
+            says, bad = f"Not a hex color code, so {says} is used", True
+    return {"color": color, "says": says, "bad": bad}
+
+
+def series_order():
+    """This run's series in column and legend order: the four, then the extra comparison ticker
+    when one is set and loaded. Outside a page run (the homepage export) it is the four."""
+    extra = getattr(globals().get("AE_CTX"), "cmp_series", None)
+    return list(extra) if extra else SERIES_ORDER
+
+
+def cmp_footnote(names):
+    """A closing footnote sentence naming the extra comparison ticker when it is among names."""
+    ticker = getattr(globals().get("AE_CTX"), "cmp_ticker", None)
+    if not ticker or ticker not in list(names):
+        return ""
+    return (f" {ticker} is the ticker typed into the Compare with a ticker box: total return from "
+            "Yahoo Finance, dividends reinvested.")
+
 
 def series_label(name):
     """Name a series as subscribers see it. "AsymEdge" stays the key in code;
@@ -1678,7 +1756,9 @@ def build_growth_chart(combined, series_names, start_g, end_g):
         SQ_HALF = SQ_PX / 2
         CORNER_PX = 3             # rounded corner radius, pixels
         SQ_GAP_PX = 9             # space between marker and series name
-        ITEM_GAP_PX = 56          # space between adjacent legend items
+        # Space between adjacent legend items; closer when an extra comparison
+        # ticker makes five, so the row still fits the chart's width.
+        ITEM_GAP_PX = 56 if n_items <= 4 else 34
         FIG_W_PX = 790            # chart width in Tyler's Firefox (about 795 px content column)
         NAME_CHAR_PX = 9.0        # 16pt Inter medium, average char width
         VALUE_CHAR_PX = 7.7       # 13pt Inter regular, average char width
@@ -5428,14 +5508,14 @@ def _cap_join(items):
 
 
 def _cap_vs(keys):
-    bench = [CAPTION_SERIES[k] for k in SERIES_ORDER if k in keys and k in CAPTION_SERIES]
+    bench = [CAPTION_SERIES[k] for k in series_order() if k in keys and k in CAPTION_SERIES]
     return "Asymmetric Edge vs. " + _cap_join(bench) if bench else "Asymmetric Edge"
 
 
 def newsletter_returns_sentences(keys):
     """Standard ending that names the benchmarks shown, for a caption whose
     description doesn't (Growth of $10,000)."""
-    bench = [CAPTION_SERIES[k] for k in SERIES_ORDER if k in keys and k in CAPTION_SERIES]
+    bench = [CAPTION_SERIES[k] for k in series_order() if k in keys and k in CAPTION_SERIES]
     out = "Asymmetric Edge uses my account's time-weighted returns. "
     if bench:
         lead = "Benchmarks are" if len(bench) > 1 else "The benchmark is"
@@ -6796,7 +6876,8 @@ def build_underwater_chart(window, shown, rank, episodes):
     for k in shown:
         dd = _dd_window_drawdown(window[k])
         lows = dd.groupby(bucket.reindex(dd.index).values).min()
-        x = [start] + list(bucket_last.reindex(lows.index).values)
+        # An extra comparison ticker whose prices begin inside the period starts where they begin.
+        x = [start if k in DD_KEYS else max(start, dd.index[0])] + list(bucket_last.reindex(lows.index).values)
         y = [0.0] + list(lows.values)
         curves[k] = (x, y)
         t = dd.idxmin()
@@ -6807,14 +6888,16 @@ def build_underwater_chart(window, shown, rank, episodes):
     ymin = min(-2 * step, np.floor((lo - 0.55 * step) / step) * step)
 
     fig = go.Figure()
-    # Benchmarks first so Asymmetric Edge draws on top.
-    for k in ["S&P 500", "60/40", "80/20"]:
+    # Benchmarks first so Asymmetric Edge draws on top. An extra comparison ticker (a key
+    # outside DD_KEYS) is drawn before them and listed last in the legend.
+    for k in [c for c in curves if c not in DD_KEYS] + ["S&P 500", "60/40", "80/20"]:
         if k not in curves:
             continue
         x, y = curves[k]
         fig.add_trace(go.Scatter(
-            x=x, y=y, mode="lines", name=series_label(k) + DD_LEGEND_PAD, legendrank=DD_KEYS.index(k) + 1,
-            line=dict(color=DD_LINE[k], width=DD_WIDTH[k], dash=DD_DASH[k]),
+            x=x, y=y, mode="lines", name=series_label(k) + DD_LEGEND_PAD,
+            legendrank=(DD_KEYS.index(k) + 1) if k in DD_KEYS else len(DD_KEYS) + 1,
+            line=dict(color=DD_LINE[k], width=DD_WIDTH[k], dash=DD_DASH.get(k)),
             hovertemplate=series_label(k).replace("&", "&amp;") + ": %{y:.1f}%<extra></extra>",
         ))
     if "AsymEdge" in curves:
@@ -7018,6 +7101,8 @@ def render_underwater_section(combined, latest_date):
     if "AsymEdge" not in combined.columns:
         st.info("Drawdowns unavailable: the portfolio series did not load.")
         return
+    # This run's series: the four, plus the extra comparison ticker when one is set.
+    DD_KEYS = list(series_order())
     keys = [k for k in DD_KEYS if k in combined.columns]
     label_of = {k: series_label(k) for k in keys}
     key_of = {v: k for k, v in label_of.items()}
@@ -7027,8 +7112,22 @@ def render_underwater_section(combined, latest_date):
 
     ss = st.session_state
     ss["dd_bounds"] = (lo_mi, hi_mi)
+    # Extra comparison ticker (November 21, 2026): it is shown as soon as it is set, and a
+    # ticker that has gone leaves the Rank by and Show picks (a pick that is no longer an
+    # option would be an error). With no ticker this block changes nothing.
+    cmp_key = next((k for k in keys if k not in SERIES_ORDER), None)
+    if ss.get("dd_rank") is not None and ss["dd_rank"] not in key_of:
+        ss["dd_rank"] = label_of["AsymEdge"]
+    if "dd_show" in ss and any(v not in key_of for v in (ss["dd_show"] or [])):
+        ss["dd_show"] = [v for v in ss["dd_show"] if v in key_of]
+    if cmp_key and ss.get("_dd_cmp_seen") != cmp_key and "dd_show" in ss \
+            and label_of[cmp_key] not in (ss["dd_show"] or []):
+        ss["dd_show"] = list(ss["dd_show"] or []) + [label_of[cmp_key]]
+    if cmp_key or "_dd_cmp_seen" in ss:
+        ss["_dd_cmp_seen"] = cmp_key
     ss.setdefault("dd_rank", label_of["AsymEdge"])
-    ss.setdefault("dd_show", [label_of[k] for k in DD_DEFAULT_SHOW if k in label_of])
+    ss.setdefault("dd_show", [label_of[k] for k in DD_DEFAULT_SHOW if k in label_of]
+                  + ([label_of[cmp_key]] if cmp_key else []))
     ss.setdefault("dd_from_y", lo_mi // 12)
     ss.setdefault("dd_from_m", DD_MONTHS[lo_mi % 12])
     ss.setdefault("dd_to_y", hi_mi // 12)
@@ -7092,7 +7191,7 @@ def render_underwater_section(combined, latest_date):
                "60/40": "the 60/40 portfolio", "S&P 500": "the S&amp;P 500"}
         note = ""
         if len(compare) == 1:
-            note = (f"The shaded column shows how far {the[compare[0]]} fell between the same "
+            note = (f"The shaded column shows how far {the.get(compare[0], compare[0])} fell between the same "
                     "peak and recovery dates.")
         elif compare:
             note = ("The shaded columns show how far each of the other portfolios fell between "
@@ -7119,6 +7218,7 @@ def render_underwater_section(combined, latest_date):
         "Asymmetric Edge daily values come from a close-only reconstruction anchored to Fidelity's "
         "monthly time-weighted returns, so within-month depths are approximations. 80/20 (AOA), "
         "60/40 (AOR) and S&amp;P 500 (SPY) are total returns from Yahoo Finance, dividends reinvested."
+        + cmp_footnote(shown)
     )
     newsletter_caption(
         f"Decline from each portfolio's previous high, {_cap_vs(shown)}, "
@@ -7149,6 +7249,7 @@ DDC_LIVE = BRAND_PURPLE          # the live account: the hero color
 DDC_BACKTEST = "#AFA2DE"         # hypothetical backtest: a light Asymmetric Edge purple
 DDC_BAND = "#F1EEF8"             # range of worst drawdowns with slightly different settings
 DDC_BAND_EDGE = "#C8BFE6"
+DDC_BAND_TO = 20.0               # the shaded band is drawn to at least this depth, in percent (Tyler, November 21, 2026)
 DDC_GRID = "#EDEDF1"
 DDC_ROW = 44                     # px per bar row
 DDC_BENCH = [("80/20", "80/20 portfolio"), ("S&P 500", "S&P 500 (SPY)")]
@@ -7317,6 +7418,11 @@ def _ddc_watch_band(data):
     lo, hi = -max(band), -min(band)                   # magnitudes, e.g. 15.28 and 18.08
     text = (f"<b>Shaded:</b> maximum drawdown range<br>from backtesting, "
             f"{_ddc_pct(-lo)} to {_ddc_pct(-hi)}")
+    # The shading is drawn to at least DDC_BAND_TO (Tyler, November 21, 2026: extend it to -20%).
+    # The label keeps the backtests' own range and says where the shading stops.
+    if hi < DDC_BAND_TO:
+        text += f",<br>shown to {_ddc_pct(-DDC_BAND_TO, 0)}"
+        hi = DDC_BAND_TO
     return lo, hi, text
 
 
@@ -7477,6 +7583,9 @@ def render_drawdown_context_section(portfolio_series, combined, latest_date, inc
     s = s[s.index <= pd.Timestamp(latest_date)]
     live = _ddc_live(s)
     band = _ddc_watch_band(data)
+    # Said wherever the shading is described, while it is drawn past the backtests' own range.
+    band_ext = (f"The shading is carried to {DDC_BAND_TO:.0f}%, a little past the deepest of those backtest "
+                "drawdowns. " if band and "shown to" in band[2] else "")
     lead = f'<p style="font-size:1.0rem; color:{TEXT_PRIMARY}; margin:0.2rem 0 0.7rem 0;">'
 
     if choice == DDC_LIVE_PILL:
@@ -7493,6 +7602,7 @@ def render_drawdown_context_section(portfolio_series, combined, latest_date, inc
             + ("The shaded zone is the maximum drawdown range from hypothetical backtests of the strategy since "
                "June 1995 with its parameters varied slightly; backtests do not reflect actual trading, the range "
                "is not a limit, and future drawdowns can be deeper. " if band else "")
+            + band_ext
             + "Benchmarks "
             "are 80/20 (AOA) and S&amp;P 500 (SPY) total returns from Yahoo Finance adjusted closes, dividends "
             "reinvested. Before taxes and advisory fees. Past performance does not guarantee future results."
@@ -7503,6 +7613,7 @@ def render_drawdown_context_section(portfolio_series, combined, latest_date, inc
             f"and each portfolio's worst drawdown over the same span, Asymmetric Edge vs. 80/20 (AOA) and "
             f"S&P 500 (SPY), data through {_cap_date(view['end'])}. "
             + ("Shaded: maximum drawdown range from hypothetical backtests since 1995, not a limit. " if band else "")
+            + (f"The shading is carried to {DDC_BAND_TO:.0f}%. " if band_ext else "")
             + NEWSLETTER_RETURNS_SENTENCES
         )
         return
@@ -7528,6 +7639,7 @@ def render_drawdown_context_section(portfolio_series, combined, latest_date, inc
         "period. Backtests run on tuned "
         "parameters tend to understate future losses, so this range is a more cautious guide than any "
         "single backtest. It is not a limit, and future drawdowns can be deeper. "
+        + band_ext +
         f"Now is the live account's decline from its {_long_date(live[1])} high to "
         f"the {_long_date(live[2])} close, from daily values reconstructed from closing prices and anchored "
         f"to Fidelity's monthly time-weighted returns, so it is approximate within a month. "
@@ -7540,6 +7652,7 @@ def render_drawdown_context_section(portfolio_series, combined, latest_date, inc
         f"{_cap_date(start)} to {_cap_date(bt_end)}, net of an assumed 0.05% trading cost a side, with the "
         f"live account's decline from its {_cap_date(live[1])} high through {_cap_date(live[2])}. Shaded: "
         "maximum drawdown range from backtesting since 1995, with the strategy's parameters varied slightly. "
+        + (f"The shading is carried to {DDC_BAND_TO:.0f}%. " if band_ext else "") +
         "It is not a limit; future drawdowns can be deeper. Backtest results are "
         "hypothetical, not actual trading. Benchmarks are total return: S&P 500 (SPY) and 80/20 (VASGX "
         "before June 2009, AOA after). Before taxes and fees. Past performance does not guarantee future results."
@@ -8071,7 +8184,7 @@ def compute_rolling_frame(combined, latest_date, view, rf_daily=None):
     one column per series, closed months only, indexed by month-end date."""
     inception = combined.index[0]
     open_p = _open_period(latest_date)
-    names = [n for n in SERIES_ORDER if n in combined.columns]
+    names = [n for n in series_order() if n in combined.columns]
     values, rets = {}, {}
     for n in names:
         v = _month_end_values(combined[n], inception)
@@ -8139,6 +8252,7 @@ def render_rolling_section(combined, latest_date):
         "measured from the January 2, 2024 inception close. Asymmetric Edge months are anchored to "
         "Fidelity's reported returns; 80/20 (AOA), 60/40 (AOR), and S&amp;P 500 (SPY) are total returns "
         "from Yahoo Finance with dividends reinvested. Before taxes and advisory fees."
+        + cmp_footnote(list(frame.columns))
     )
     roll_desc = {
         "12-month return": "Trailing 12-month total return at each month-end",
@@ -8627,11 +8741,28 @@ def render_risk_return_section(combined, latest_date):
     hide = {i for l, (k, i) in opts.items() if k == "asset" and l not in shown}
     hide_family = {i for l, (k, i) in opts.items() if k == "family" and l not in shown}
     col_t, col_c, _ = st.columns([1, 0.55, 2.45], vertical_alignment="bottom")
+    # The Compare with a ticker box (November 21, 2026): this box takes its ticker while it is
+    # empty, and keeps a ticker of its own. With that box blank nothing here changes.
+    cmp_now = getattr(AE_CTX, "cmp_ticker", None)
+    if cmp_now and cmp_clean(ss.get("rr_custom", "")) in ("", cmp_now):
+        # Assigned on every run while it follows, so the box on the page shows the ticker too
+        # (a value set on an earlier page is used but not displayed).
+        ss["rr_custom"] = cmp_now
     raw = col_t.text_input("Custom ticker", value="", max_chars=12, key="rr_custom",
                            placeholder="e.g. SMH",
                            help="Add any ticker Yahoo Finance carries to the chart.")
-    custom_color = col_c.color_picker("Color", value=CAPTURE_CUSTOM_BAR, key="rr_custom_color")
     custom = re.sub(r"[^A-Za-z0-9.\-^=]", "", raw or "").upper() or None
+    if cmp_now and custom == cmp_now:
+        # The ticker from the Compare with a ticker box keeps that box's color here too, so this
+        # section's own color picker is not drawn for it.
+        custom_color = AE_CTX.cmp_colors["color"]
+        col_c.markdown(
+            f'<p class="ae-cmp-rr" style="font-size:0.8rem; line-height:1.3; margin:0 0 0.55rem 0; '
+            f'color:{TEXT_SECONDARY};">Color set in the Compare with a ticker box</p>',
+            unsafe_allow_html=True,
+        )
+    else:
+        custom_color = col_c.color_picker("Color", value=CAPTURE_CUSTOM_BAR, key="rr_custom_color")
 
     if not shown and not custom:
         st.info("Every dot is hidden. Turn some on under Show, or pick a preset.")
@@ -12004,6 +12135,47 @@ def build_shared_context():
         (combined.index >= inception_date) & (combined.index <= latest_date)
     ]
 
+    # Extra comparison ticker (November 21, 2026). Blank box: cmp_combined is the shared frame
+    # itself and cmp_series is SERIES_ORDER, so nothing below differs. A ticker: its total-return
+    # series, rebased like the benchmarks', joins a copy of the frame on the frame's own dates
+    # (the frame gains no rows), and its colors and caption name are registered for this rerun.
+    cmp_typed = cmp_clean(st.session_state.get(CMP_STATE_KEY, ""))
+    cmp_combined, cmp_series, cmp_ticker, cmp_note, cmp_error = combined, SERIES_ORDER, None, "", ""
+    cmp_colors = cmp_look(st.session_state.get(CMP_COLOR_KEY), st.session_state.get(CMP_HEX_KEY, ""))
+    if cmp_typed:
+        cmp_same = next((n for n, t in BENCHMARK_TICKERS.items() if t == cmp_typed), None)
+        if cmp_same:
+            cmp_error = f"{cmp_typed} is already on the charts as the {cmp_same} line, so nothing was added."
+        else:
+            cmp_raw = load_custom_ticker_data(
+                (cmp_typed,),
+                inception_date.strftime("%Y-%m-%d"),
+                latest_date.strftime("%Y-%m-%d"),
+            )
+            cmp_px = (cmp_raw[cmp_typed].dropna() if cmp_raw is not None and cmp_typed in cmp_raw.columns
+                      else pd.Series(dtype="float64"))
+            cmp_col = normalize_to_10k(cmp_px).reindex(combined.index)
+            if cmp_col.notna().sum() < CMP_MIN_SESSIONS:
+                cmp_error = (f"Couldn't load enough price history for {cmp_typed}, so nothing was added. "
+                             "Check the spelling, or try again in a few minutes.")
+            else:
+                cmp_ticker = cmp_typed
+                cmp_combined = combined.copy()
+                cmp_combined[cmp_ticker] = cmp_col
+                cmp_series = list(SERIES_ORDER) + [cmp_ticker]
+                # The chosen color, exactly, for its lines, bars and labels alike.
+                SERIES_COLORS[cmp_ticker] = cmp_colors["color"]
+                BAR_SERIES_COLORS[cmp_ticker] = cmp_colors["color"]
+                SERIES_OPACITY[cmp_ticker] = 1.0
+                DD_LINE[cmp_ticker], DD_WIDTH[cmp_ticker], DD_TEXT[cmp_ticker] = cmp_colors["color"], 2.0, cmp_colors["color"]
+                CAPTION_SERIES[cmp_ticker] = cmp_ticker
+                cmp_first = cmp_col.first_valid_index()
+                cmp_note = (f"{cmp_ticker} is added to the comparisons on the Overview, Performance and "
+                            "Risk pages. Clear the box to remove it.")
+                if cmp_first > combined.index[0] + timedelta(days=5):
+                    cmp_note += (f" Its prices begin {cmp_first:%B} {cmp_first.day}, {cmp_first.year}, so for "
+                                 "any period that starts earlier its figures start on that date.")
+
     # Load asset class data once
     asset_start = (pd.Timestamp(latest_date) - timedelta(days=400)).strftime("%Y-%m-%d")
     asset_close = load_asset_class_data(
@@ -12039,6 +12211,12 @@ def build_shared_context():
     ctx.latest_date = latest_date
     ctx.bench_close = bench_close
     ctx.combined = combined
+    ctx.cmp_combined = cmp_combined
+    ctx.cmp_series = cmp_series
+    ctx.cmp_ticker = cmp_ticker
+    ctx.cmp_note = cmp_note
+    ctx.cmp_error = cmp_error
+    ctx.cmp_colors = cmp_colors
     ctx.asset_close = asset_close
     ctx.holdings_for_alloc = _holdings_for_alloc
     ctx.current_alloc_rows = current_alloc_rows
@@ -12055,7 +12233,8 @@ def render_performance_summary_section(ctx):
     phase 2): period buttons, a grouped table with a vs 80/20 column, and the
     long footnote under Full methodology. Presentation only; the numbers come
     from compute_summary_metrics exactly as before."""
-    latest_date, inception_date, combined = ctx.latest_date, ctx.inception_date, ctx.combined
+    latest_date, inception_date, combined = ctx.latest_date, ctx.inception_date, ctx.cmp_combined
+    SERIES_ORDER = ctx.cmp_series   # the four series, plus the extra comparison ticker when one is set
     st.markdown("## Performance Summary")
 
     # Default custom range to full inception â†’ latest. The date pickers below
@@ -12188,6 +12367,7 @@ def render_performance_summary_section(ctx):
             f"figure uses returns that tie to Fidelity; the daily figure uses the reconstruction and is approximate. "
             f"S&P 500 (SPY), 60/40 (AOR), and 80/20 (AOA) total return data sourced from Yahoo Finance (adjusted close, dividends reinvested). "
             f"All figures are pre-tax and pre-fee."
+            + cmp_footnote(SERIES_ORDER)
         )
         st.markdown(f'<p class="ae-ps-note">{PS_NOTE}</p>', unsafe_allow_html=True)
         with st.expander("Full methodology"):
@@ -12515,7 +12695,8 @@ def render_allocation_history_section(ctx):
 
 def render_performance_comparison_section(ctx):
     """Performance Comparison chart, footnote and caption."""
-    latest_date, inception_date, combined = ctx.latest_date, ctx.inception_date, ctx.combined
+    latest_date, inception_date, combined = ctx.latest_date, ctx.inception_date, ctx.cmp_combined
+    SERIES_ORDER = ctx.cmp_series   # the four series, plus the extra comparison ticker when one is set
     # ================================================================
     # 1. PERFORMANCE COMPARISON
     # ================================================================
@@ -12559,6 +12740,7 @@ def render_performance_comparison_section(ctx):
         f"time-weighted returns for a personal portfolio. "
         f"S&P 500 (SPY), 60/40 (AOR), and 80/20 (AOA) total return data sourced from Yahoo Finance (adjusted close, dividends reinvested). "
         f"All performance figures are shown before taxes and advisory fees, which would reduce returns."
+        + cmp_footnote(SERIES_ORDER)
     )
     st.markdown(f'<p class="footer-text">{footnote}</p>', unsafe_allow_html=True)
     newsletter_caption(
@@ -12569,11 +12751,13 @@ def render_performance_comparison_section(ctx):
 
 def render_portfolio_growth_section(ctx):
     """Portfolio Growth chart, toggles, footnote and caption, then the partial-month status and the diagnostic."""
-    latest_date, inception_date, combined, portfolio_df = ctx.latest_date, ctx.inception_date, ctx.combined, ctx.portfolio_df
+    latest_date, inception_date, combined, portfolio_df = ctx.latest_date, ctx.inception_date, ctx.cmp_combined, ctx.portfolio_df
+    SERIES_ORDER = ctx.cmp_series   # the four series, plus the extra comparison ticker when one is set
     # ================================================================
     # 2. PORTFOLIO GROWTH
     # ================================================================
     st.markdown("## Portfolio Growth")
+    render_cmp_box()
 
     growth_periods = ["3M", "6M", "YTD", "1Y", "2025", "2024", "Inception"]
     selected_growth = st.pills(
@@ -12623,6 +12807,7 @@ def render_portfolio_growth_section(ctx):
         f"Asymmetric Edge data anchored to Fidelity's reported monthly time-weighted returns for a personal portfolio. "
         f"S&P 500 (SPY), 60/40 (AOR), and 80/20 (AOA) total return data sourced from Yahoo Finance (adjusted close). "
         f"All performance figures are shown before taxes and advisory fees, which would reduce returns."
+        + cmp_footnote(enabled_series)
     )
     st.markdown(f'<p class="footer-text">{footnote_growth}</p>', unsafe_allow_html=True)
     newsletter_caption(
@@ -12700,7 +12885,8 @@ def render_portfolio_growth_section(ctx):
 
 def render_max_drawdown_section(ctx):
     """Maximum Drawdown chart, footnote and caption."""
-    latest_date, inception_date, combined = ctx.latest_date, ctx.inception_date, ctx.combined
+    latest_date, inception_date, combined = ctx.latest_date, ctx.inception_date, ctx.cmp_combined
+    SERIES_ORDER = ctx.cmp_series   # the four series, plus the extra comparison ticker when one is set
     # ================================================================
     # 3. MAXIMUM DRAWDOWN
     # ================================================================
@@ -12744,6 +12930,7 @@ def render_max_drawdown_section(ctx):
         f"anchored to Fidelity's monthly time-weighted returns and are therefore approximations. "
         f"S&P 500 (SPY), 60/40 (AOR), and 80/20 (AOA) total return data sourced from Yahoo Finance (adjusted close). "
         f"All performance figures are shown before taxes and advisory fees, which would reduce returns."
+        + cmp_footnote(SERIES_ORDER)
     )
     st.markdown(f'<p class="footer-text">{footnote_dd}</p>', unsafe_allow_html=True)
     newsletter_caption(
@@ -13186,7 +13373,9 @@ def _ps_date(ts, kind):
 
 
 def build_perf_summary_table(metrics_by_series, show_all):
-    """The Performance page table: Metric, the four series, then vs 80/20."""
+    """The Performance page table: Metric, the four series (and the extra
+    comparison ticker when one is set), then vs 80/20."""
+    SERIES_ORDER = series_order()
     ae = metrics_by_series.get("AsymEdge") or {}
     bench = metrics_by_series.get(PRIMARY_BENCHMARK) or {}
     col_class = {s: ("ae-ps-ae" if s == "AsymEdge" else "") for s in SERIES_ORDER}
@@ -13216,7 +13405,14 @@ def build_perf_summary_table(metrics_by_series, show_all):
             help_attr = f' title="{_esc(PS_ROW_HELP[label])}"' if label in PS_ROW_HELP else ""
             body.append(f'<tr{text_row}><th scope="row"{help_attr}>{_esc(label)}</th>{"".join(cells)}'
                         f'<td class="ae-ps-vs">{chip}</td></tr>')
-    return ('<div class="ae-ps-wrap"><table class="ae-ps"><thead><tr>' + "".join(head)
+    # With an extra comparison ticker the table has a sixth column; tighter side padding keeps it
+    # inside the page's width. With four series the HTML is what it always was.
+    wide = len(SERIES_ORDER) > 4
+    wide_css = ('<style>[data-testid="stMarkdownContainer"] table.ae-ps.ae-ps-wide th, '
+                '[data-testid="stMarkdownContainer"] table.ae-ps.ae-ps-wide td '
+                '{ padding-left: 10px; padding-right: 10px; }</style>') if wide else ""
+    return (wide_css + '<div class="ae-ps-wrap"><table class="ae-ps' + (" ae-ps-wide" if wide else "")
+            + '"><thead><tr>' + "".join(head)
             + "</tr></thead><tbody>" + "".join(body) + "</tbody></table></div>")
 
 
@@ -13498,6 +13694,84 @@ def section_anchor(anchor_id):
     st.markdown(f'<div class="ae-anchor" id="{anchor_id}"></div>', unsafe_allow_html=True)
 
 
+# ---------- Compare with a ticker (November 21, 2026) ----------
+
+def _cmp_changed():
+    """The box changed: keep the cleaned ticker for the session, and let Risk vs. Return's
+    own Custom ticker box follow it unless that box holds a ticker of its own."""
+    ss = st.session_state
+    old = ss.get(CMP_STATE_KEY, "")
+    new = cmp_clean(ss.get(CMP_INPUT_KEY, ""))
+    ss[CMP_STATE_KEY] = new
+    ss[CMP_INPUT_KEY] = new
+    if new not in BENCHMARK_TICKERS.values() and cmp_clean(ss.get("rr_custom", "")) in ("", old):
+        ss["rr_custom"] = new
+
+
+def _cmp_color_changed():
+    """The color controls changed: keep the choice for the session, across pages."""
+    ss = st.session_state
+    ss[CMP_COLOR_KEY] = ss.get(CMP_COLOR_PICK_KEY, CMP_PALETTE_DEFAULT)
+    ss[CMP_HEX_KEY] = str(ss.get(CMP_HEX_INPUT_KEY, "") or "").strip()
+
+
+def render_cmp_box():
+    """The Compare with a ticker box and, beside it, what it did. Blank at startup. The ticker
+    is kept under CMP_STATE_KEY, because a widget's own state is dropped on pages that do not
+    draw it; the box is refilled from there when a page draws it again."""
+    ss = st.session_state
+    # Filled on every run, not only when the key is missing: each page's box is its own widget, and
+    # on the first run after a page change the last page's value is still listed under the key.
+    ss[CMP_INPUT_KEY] = ss.get(CMP_STATE_KEY, "")
+    # With a ticker on the charts the row is the box, its color controls and a swatch, and the
+    # note goes on the line below. Otherwise it is the box and, beside it, any note, as before.
+    on_charts = bool(getattr(AE_CTX, "cmp_ticker", None))
+    if on_charts:
+        col_box, col_pick, col_hex, col_sw = st.columns([1.15, 1.15, 0.95, 1.75], vertical_alignment="bottom")
+        col_note = st
+    else:
+        col_box, col_note = st.columns([1.15, 3.85], vertical_alignment="bottom")
+    col_box.text_input(
+        "Compare with a ticker", max_chars=12, key=CMP_INPUT_KEY, placeholder="Optional, e.g. QQQ",
+        on_change=_cmp_changed,
+        help=("Type any ticker Yahoo Finance carries, such as QQQ, VTI or BRK-B, and press Enter. It is "
+              "added beside the 80/20, 60/40 and S&P 500 in the Performance Summary, Performance "
+              "Comparison, Portfolio Growth, Maximum Drawdown, Drawdowns Over Time, Rolling 12-Month "
+              "Return and Risk vs. Return, and stays as you move between pages. Clear the box to "
+              "remove it."),
+    )
+    if on_charts:
+        look = getattr(AE_CTX, "cmp_colors", None) or cmp_look()
+        # Filled from the kept choice on every run, like the box (each page's controls are their own).
+        ss[CMP_COLOR_PICK_KEY] = ss.get(CMP_COLOR_KEY) if ss.get(CMP_COLOR_KEY) in CMP_PALETTE else CMP_PALETTE_DEFAULT
+        ss[CMP_HEX_INPUT_KEY] = ss.get(CMP_HEX_KEY, "")
+        col_pick.selectbox(
+            "Color", list(CMP_PALETTE), key=CMP_COLOR_PICK_KEY, on_change=_cmp_color_changed,
+            help=("The added ticker's color wherever it is drawn: lines, bars, dots, labels and table "
+                  "headers. Pick a preset here, or type a hex code in the box beside it."),
+        )
+        col_hex.text_input(
+            "Or a hex code", max_chars=7, key=CMP_HEX_INPUT_KEY, placeholder="#2B2F36",
+            on_change=_cmp_color_changed,
+            help=("Any hex color code, such as #1F9D6B or #2a7, then Enter. When it is filled in it is "
+                  "used in place of the preset. Clear it to go back to the preset."),
+        )
+        col_sw.markdown(
+            f'<p class="ae-cmp-swatch" style="display:flex; align-items:center; gap:8px; font-size:0.85rem; '
+            f'line-height:1.3; margin:0 0 0.55rem 0; color:{"#B45309" if look["bad"] else TEXT_SECONDARY};">'
+            f'<span style="flex:0 0 28px; height:12px; border-radius:3px; background:{look["color"]};"></span>'
+            f'<span>{_esc(look["says"])}</span></p>',
+            unsafe_allow_html=True,
+        )
+    error, note = getattr(AE_CTX, "cmp_error", ""), getattr(AE_CTX, "cmp_note", "")
+    if error or note:
+        col_note.markdown(
+            f'<p class="ae-cmp-note" style="font-size:0.85rem; line-height:1.4; margin:0 0 0.5rem 0; '
+            f'color:{"#B45309" if error else TEXT_SECONDARY};">{_esc(error or note)}</p>',
+            unsafe_allow_html=True,
+        )
+
+
 # ---------- Pages ----------
 
 def page_overview():
@@ -13527,6 +13801,7 @@ PERFORMANCE_SECTIONS = [
 def page_performance():
     ctx = AE_CTX
     render_page_header("performance", PERFORMANCE_SECTIONS)
+    render_cmp_box()
 
     section_anchor("summary")
     render_performance_summary_section(ctx)
@@ -13551,7 +13826,7 @@ def page_performance():
     st.divider()
 
     section_anchor("rolling")
-    _render_guarded("Rolling 12-Month Return", render_rolling_section, ctx.combined, ctx.latest_date)
+    _render_guarded("Rolling 12-Month Return", render_rolling_section, ctx.cmp_combined, ctx.latest_date)
 
 
 RISK_SECTIONS = [
@@ -13566,6 +13841,7 @@ RISK_SECTIONS = [
 def page_risk():
     ctx = AE_CTX
     render_page_header("risk", RISK_SECTIONS)
+    render_cmp_box()
 
     section_anchor("drawdown")
     render_max_drawdown_section(ctx)
@@ -13573,7 +13849,7 @@ def page_risk():
     st.divider()
 
     section_anchor("underwater")
-    _render_guarded("Drawdowns Over Time", render_underwater_section, ctx.combined, ctx.latest_date)
+    _render_guarded("Drawdowns Over Time", render_underwater_section, ctx.cmp_combined, ctx.latest_date)
 
     st.divider()
 
