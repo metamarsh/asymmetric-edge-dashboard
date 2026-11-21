@@ -7240,9 +7240,22 @@ def render_underwater_section(combined, latest_date):
 # published series every rerun. Refresh the JSON when the reference baseline
 # changes or at the quarterly review. Tyler, November 5, 2026: public, on the
 # Risk page after Drawdowns Over Time.
+# November 21, 2026 (Tyler): the backtests reach back to January 1981 (a
+# "Since 1981" period beside the others; Since 1995 stays the opening view),
+# the band comes from the January 1981 window on every period, and a public
+# "Position sizing" switch shows the backtests under equal risk contribution
+# (the default) or inverse volatility. drawdown_context.json version 2 holds
+# both methods (Basket Research\ETF Scouting\Drawdown Context 1981
+# 2026-11-21); a version 1 file (one method, from June 1995) draws as before.
 # ===========================================================================
 DDC_FILE = "drawdown_context.json"
-DDC_WINDOWS = {"Since 1995": "1995-06", "Since 2006": "2006-01", "Last 15 years": "2011-11"}
+DDC_WINDOWS = {"Since 1981": "1981-01", "Since 1995": "1995-06", "Since 2006": "2006-01",
+               "Last 15 years": "2011-11"}
+DDC_WINDOW_DEFAULT = "Since 1995"  # the opening view (Tyler, November 21, 2026)
+DDC_BAND_WINDOW = "1981-01"        # the band's history, the same band on every period (Tyler, November 21, 2026)
+DDC_STANDIN_BEFORE = "1995-06-01"  # a view or band starting before this gets the stand-in wording
+DDC_METHODS = {"Equal risk contribution": "erc", "Inverse volatility": "inverse_vol"}
+DDC_METHOD_DEFAULT = "erc"         # Tyler, November 21, 2026: the switch is public, equal risk contribution first
 DDC_LIVE_PILL = "Live record"     # the live account since inception, no backtest (Tyler, November 5, 2026)
 DDC_LIVE_MIN = 0.05               # live drawdowns this deep or deeper get a bar
 DDC_LIVE = BRAND_PURPLE          # the live account: the hero color
@@ -7253,7 +7266,27 @@ DDC_BAND_TO = 20.0               # the shaded band is drawn to at least this dep
 DDC_GRID = "#EDEDF1"
 DDC_ROW = 44                     # px per bar row
 DDC_BENCH = [("80/20", "80/20 portfolio"), ("S&P 500", "S&P 500 (SPY)")]
-DDC_LIVE_AUG_2024 = "In August 2024 the live account fell 9.2%, against the backtest's 10.8%."
+DDC_LIVE_AUG_2024_PCT = 9.2        # the live account's August 2024 drawdown, in percent; the backtest's comes
+                                   # from the file, per position sizing
+DDC_METHOD_HELP = ("How the backtests size the strategy's positions. Inverse volatility sized the live account's "
+                   "positions through November 2026; equal risk contribution sizes them from the November 30, 2026 "
+                   "rebalance on.")
+DDC_SIZING_NOTE = ("Equal risk contribution sizes the holdings so each adds the same share of the portfolio's risk, "
+                   "allowing for how they move together; inverse volatility (simple risk parity) sizes each in "
+                   "inverse proportion to its own volatility. Inverse volatility sized the live account's positions "
+                   "through November 2026, and equal risk contribution sizes them from the November 30, 2026 "
+                   "rebalance on. ")
+DDC_STANDIN_NOTE = (
+    "Most of the funds the strategy holds launched after 1995, so the backtest uses stand-in histories before "
+    "each launch, and before 1995 these rest mainly on indexes, Treasury yields and research data: Treasury bills "
+    "and long Treasuries priced from Treasury yields; the Nasdaq-100 from its index (a scaled Nasdaq Composite "
+    "before February 1985); small companies from Kenneth French's size portfolios; Japan from the Nikkei 225 with "
+    "dividends, hedged to dollars; commodities from the S&amp;P GSCI Total Return; gold from its spot price; the "
+    "market-neutral anti-beta fund from a low-beta factor; and emerging markets from an actively managed fund that "
+    "starts in October 1991, so the strategy holds none before mid-1992. These stand-ins are less certain than "
+    "the later history. ")
+DDC_JKP_NOTE = ("The anti-beta fund's history before its September 2011 launch is built from the Jensen, Kelly and "
+                "Pedersen low-beta factor (jkpfactors.com, CC BY-NC 4.0). ")
 
 
 @st.cache_data(show_spinner=False)
@@ -7267,6 +7300,30 @@ def load_drawdown_context():
     if not os.path.exists(path):
         return None
     return _ddc_read(path, os.path.getmtime(path))
+
+
+def _ddc_method_windows(data, method):
+    """The chosen position sizing's windows from a version 2 file, or the
+    file's own windows (a version 1 file holds one method)."""
+    methods = (data or {}).get("methods") or {}
+    if method in methods:
+        return methods[method].get("windows", {})
+    return (data or {}).get("windows", {})
+
+
+def _ddc_band_window(windows):
+    """The window the band comes from: DDC_BAND_WINDOW (January 1981), else
+    June 1995 (a version 1 file), else the first."""
+    return (windows.get(DDC_BAND_WINDOW) or windows.get("1995-06")
+            or (next(iter(windows.values())) if windows else None))
+
+
+def _ddc_aug_2024(data, method):
+    """The footnote's August 2024 sentence: the live account against the
+    backtest under the chosen position sizing (10.8% with a version 1 file)."""
+    bt = (((data or {}).get("methods") or {}).get(method) or {}).get("aug_2024")
+    bt_txt = f"{abs(float(bt)) * 100.0:.1f}%" if bt is not None else "10.8%"
+    return f"In August 2024 the live account fell {DDC_LIVE_AUG_2024_PCT:.1f}%, against the backtest's {bt_txt}."
 
 
 def _ddc_pct(v, digits=1):
@@ -7406,16 +7463,17 @@ def _ddc_now_row(live):
                        f"Close {_ddc_short(end)}<br>Depth {_ddc_pct(-mag, 2)}"))
 
 
-def _ddc_watch_band(data):
-    """The drawdown range to watch: the full-history (since June 1995) worst
-    drawdowns with the parameters varied slightly. Tyler, November 5, 2026: the
-    same band on every period, the live record included."""
-    windows = (data or {}).get("windows", {})
-    win = windows.get("1995-06") or (next(iter(windows.values())) if windows else None)
+def _ddc_watch_band(data, method=DDC_METHOD_DEFAULT):
+    """The drawdown range to watch: the worst drawdowns of the strategy's
+    settings and its nearby settings over the longest backtest history (since
+    January 1981 from November 21, 2026; June 1995 before), under the chosen
+    position sizing. Tyler, November 5, 2026: the same band on every period,
+    the live record included."""
+    win = _ddc_band_window(_ddc_method_windows(data, method))
     if not win:
         return None
     band = [float(v) * 100.0 for v in win["band"]]
-    lo, hi = -max(band), -min(band)                   # magnitudes, e.g. 15.28 and 18.08
+    lo, hi = -max(band), -min(band)                   # magnitudes, e.g. 16.42 and 19.08
     text = (f"<b>Shaded:</b> maximum drawdown range<br>from backtesting, "
             f"{_ddc_pct(-lo)} to {_ddc_pct(-hi)}")
     # The shading is drawn to at least DDC_BAND_TO (Tyler, November 21, 2026: extend it to -20%).
@@ -7575,24 +7633,45 @@ def _ddc_live_takeaway(view, live):
 
 def render_drawdown_context_section(portfolio_series, combined, latest_date, inception_date):
     data = load_drawdown_context()
-    windows = (data or {}).get("windows", {})
+    methods = (data or {}).get("methods") or {}
+    # Position sizing (Tyler, November 21, 2026): a public switch, equal risk
+    # contribution by default, shown when the file holds both methods.
+    method = DDC_METHOD_DEFAULT if (DDC_METHOD_DEFAULT in methods or not methods) else next(iter(methods))
+    windows = _ddc_method_windows(data, method)
     labels = [k for k, v in DDC_WINDOWS.items() if v in windows] + [DDC_LIVE_PILL]
-    choice = st.pills("Period", labels, selection_mode="single", default=labels[0],
-                      key="ddc_window") or labels[0]
+    default = DDC_WINDOW_DEFAULT if DDC_WINDOW_DEFAULT in labels else labels[0]
+    choice = st.pills("Period", labels, selection_mode="single", default=default,
+                      key="ddc_window") or default
+    m_labels = [k for k, v in DDC_METHODS.items() if v in methods]
+    if len(m_labels) > 1:
+        m_default = next((k for k in m_labels if DDC_METHODS[k] == method), m_labels[0])
+        m_choice = st.pills("Position sizing", m_labels, selection_mode="single", default=m_default,
+                            key="ddc_method", help=DDC_METHOD_HELP) or m_default
+        method = DDC_METHODS[m_choice]
+        windows = _ddc_method_windows(data, method)
+    two = len(m_labels) > 1
     s = portfolio_series.dropna()
     s = s[s.index <= pd.Timestamp(latest_date)]
     live = _ddc_live(s)
-    band = _ddc_watch_band(data)
+    band = _ddc_watch_band(data, method)
+    band_win = _ddc_band_window(windows)
+    band_start = pd.Timestamp(band_win["start"]) if band_win else pd.Timestamp("1995-06-01")
+    band_since = f"{band_start:%B %Y}" + (" (before 1995 on stand-in histories)"
+                                          if band_start < pd.Timestamp(DDC_STANDIN_BEFORE) else "")
     # Said wherever the shading is described, while it is drawn past the backtests' own range.
     band_ext = (f"The shading is carried to {DDC_BAND_TO:.0f}%, a little past the deepest of those backtest "
                 "drawdowns. " if band and "shown to" in band[2] else "")
+    sizing = "equal risk contribution" if method == "erc" else "inverse volatility"
+    sizing_note = DDC_SIZING_NOTE if two else ""
+    # A version 2 file rests on BTAL's JKP-based history before launch (credited wherever the band shows).
+    jkp = DDC_JKP_NOTE if two and band else ""
     lead = f'<p style="font-size:1.0rem; color:{TEXT_PRIMARY}; margin:0.2rem 0 0.7rem 0;">'
 
     if choice == DDC_LIVE_PILL:
         view = _ddc_live_view(combined, latest_date, inception_date)
         st.markdown(lead + _ddc_live_takeaway(view, live) + "</p>", unsafe_allow_html=True)
         st.plotly_chart(build_drawdown_context_live_figure(view, live, band), use_container_width=False,
-                        config=chart_config("Drawdowns in Context Live Record"), key="ddc_fig_live")
+                        config=chart_config("Drawdowns in Context Live Record"), key=f"ddc_fig_live_{method}")
         _footnote(
             f"Asymmetric Edge figures are the live account's daily values from {_long_date(view['start'])} "
             f"to {_long_date(view['end'])}, reconstructed from closing prices and anchored to Fidelity's "
@@ -7600,9 +7679,12 @@ def render_drawdown_context_section(portfolio_series, combined, latest_date, inc
             "a peak until the portfolio closes at a new high, and time to recover counts from the peak to "
             f"that new high. The top panel shows every live drawdown of {DDC_LIVE_MIN:.0%} or more. "
             + ("The shaded zone is the maximum drawdown range from hypothetical backtests of the strategy since "
-               "June 1995 with its parameters varied slightly; backtests do not reflect actual trading, the range "
+               f"{band_since}" + (f", with {sizing} position sizing and" if two else " with") +
+               " its parameters varied slightly; backtests do not reflect actual trading, the range "
                "is not a limit, and future drawdowns can be deeper. " if band else "")
             + band_ext
+            + (sizing_note if band else "")
+            + jkp
             + "Benchmarks "
             "are 80/20 (AOA) and S&amp;P 500 (SPY) total returns from Yahoo Finance adjusted closes, dividends "
             "reinvested. Before taxes and advisory fees. Past performance does not guarantee future results."
@@ -7612,7 +7694,8 @@ def render_drawdown_context_section(portfolio_series, combined, latest_date, inc
             f"{_cap_date(view['start'])}, including the current decline from its {_cap_date(live[1])} high, "
             f"and each portfolio's worst drawdown over the same span, Asymmetric Edge vs. 80/20 (AOA) and "
             f"S&P 500 (SPY), data through {_cap_date(view['end'])}. "
-            + ("Shaded: maximum drawdown range from hypothetical backtests since 1995, not a limit. " if band else "")
+            + (f"Shaded: maximum drawdown range from hypothetical backtests since {band_start.year}"
+               + (f" ({sizing} position sizing)" if two else "") + ", not a limit. " if band else "")
             + (f"The shading is carried to {DDC_BAND_TO:.0f}%. " if band_ext else "")
             + NEWSLETTER_RETURNS_SENTENCES
         )
@@ -7621,41 +7704,64 @@ def render_drawdown_context_section(portfolio_series, combined, latest_date, inc
     if not windows:
         st.info("The backtest views need drawdown_context.json beside app.py.")
         return
-    win = windows[DDC_WINDOWS[choice]]
+    key = DDC_WINDOWS[choice]
+    win = windows[key]
     st.markdown(lead + _ddc_takeaway(win, live) + "</p>", unsafe_allow_html=True)
     st.plotly_chart(build_drawdown_context_figure(win, live, band), use_container_width=False,
-                    config=chart_config("Drawdowns in Context"), key=f"ddc_fig_{DDC_WINDOWS[choice]}")
+                    config=chart_config("Drawdowns in Context"),
+                    key=f"ddc_fig_{key}_{method}" if two else f"ddc_fig_{key}")
 
     bt_end = pd.Timestamp(data.get("backtest_end", "2026-10-30"))
     start = pd.Timestamp(win["start"])
+    if not two:
+        rules, rules_cap = "the strategy's current rules", "the current rules"
+    elif method == "erc":
+        rules = "the strategy's current rules, with positions sized by equal risk contribution"
+        rules_cap = "the current rules (equal risk contribution position sizing)"
+    else:
+        rules = ("the strategy's rules with positions sized by inverse volatility, as the live account's were "
+                 "through November 2026")
+        rules_cap = "the rules with inverse-volatility position sizing, used by the live account through November 2026"
+    pre95 = start < pd.Timestamp(DDC_STANDIN_BEFORE)
+    if pre95:
+        bench_txt = ("Benchmarks are total returns: S&amp;P 500 (SPY; before 1993 the index with dividends "
+                     "reinvested) and an 80/20 portfolio (before October 1994 a US-only mix of 80% stocks and "
+                     "20% Treasuries, then Vanguard LifeStrategy Growth, VASGX, to June 2009 and AOA after). ")
+        bench_cap = ("80/20 (a US-only stock and Treasury mix before October 1994, VASGX to June 2009, AOA after)")
+    else:
+        bench_txt = ("Benchmarks are total returns: S&amp;P 500 (SPY) and an 80/20 portfolio "
+                     "(Vanguard LifeStrategy Growth, VASGX, before June 2009 and AOA after). ")
+        bench_cap = "80/20 (VASGX before June 2009, AOA after)"
     _footnote(
-        f"Strategy history is a hypothetical backtest of the strategy's current rules, including Bitcoin, "
+        f"Strategy history is a hypothetical backtest of {rules}, including Bitcoin, "
         f"net of an assumed 0.05% trading cost a side, from {_long_date(start)} "
         f"to {_long_date(bt_end)} on daily closes. It does not reflect actual trading and was built with "
-        "the benefit of hindsight; Bitcoin enters in June 2015 on bitcoin's own price history. A drawdown "
-        "runs from a peak until the portfolio closes at a new high, and months to recover count from the "
-        "peak to that new high. The shaded zone shows the deepest drawdowns the strategy reached in "
-        "backtests since June 1995 when its parameters were varied slightly, the same range on every "
-        "period. Backtests run on tuned "
+        "the benefit of hindsight; Bitcoin enters in June 2015 on bitcoin's own price history. "
+        + (DDC_STANDIN_NOTE if pre95 else "")
+        + "A drawdown runs from a peak until the portfolio closes at a new high, and months to recover count "
+        "from the peak to that new high. The shaded zone shows the deepest drawdowns the strategy reached in "
+        f"backtests since {band_since}" + (", with the same position sizing," if two else "") +
+        " when its parameters were varied slightly, the same range on every period. Backtests run on tuned "
         "parameters tend to understate future losses, so this range is a more cautious guide than any "
         "single backtest. It is not a limit, and future drawdowns can be deeper. "
-        + band_ext +
+        + band_ext + sizing_note + jkp +
         f"Now is the live account's decline from its {_long_date(live[1])} high to "
         f"the {_long_date(live[2])} close, from daily values reconstructed from closing prices and anchored "
         f"to Fidelity's monthly time-weighted returns, so it is approximate within a month. "
-        f"{DDC_LIVE_AUG_2024} Benchmarks are total returns: S&amp;P 500 (SPY) and an 80/20 portfolio "
-        "(Vanguard LifeStrategy Growth, VASGX, before June 2009 and AOA after). Before taxes and advisory "
+        f"{_ddc_aug_2024(data, method)} " + bench_txt + "Before taxes and advisory "
         "fees. Past performance does not guarantee future results."
     )
     newsletter_caption(
-        f"Asymmetric Edge drawdowns of 10% or more in a hypothetical backtest of the current rules, "
+        f"Asymmetric Edge drawdowns of 10% or more in a hypothetical backtest of {rules_cap}, "
         f"{_cap_date(start)} to {_cap_date(bt_end)}, net of an assumed 0.05% trading cost a side, with the "
         f"live account's decline from its {_cap_date(live[1])} high through {_cap_date(live[2])}. Shaded: "
-        "maximum drawdown range from backtesting since 1995, with the strategy's parameters varied slightly. "
+        f"maximum drawdown range from backtesting since {band_start.year}, with the strategy's parameters varied "
+        "slightly. "
         + (f"The shading is carried to {DDC_BAND_TO:.0f}%. " if band_ext else "") +
-        "It is not a limit; future drawdowns can be deeper. Backtest results are "
-        "hypothetical, not actual trading. Benchmarks are total return: S&P 500 (SPY) and 80/20 (VASGX "
-        "before June 2009, AOA after). Before taxes and fees. Past performance does not guarantee future results."
+        "It is not a limit; future drawdowns can be deeper. "
+        + ("Before 1995 the backtest uses stand-in histories for funds that did not yet exist. " if pre95 else "")
+        + "Backtest results are hypothetical, not actual trading. Benchmarks are total return: S&P 500 (SPY) and "
+        + bench_cap + ". Before taxes and fees. Past performance does not guarantee future results."
     )
 
 # ===========================================================================
