@@ -4706,6 +4706,356 @@ def render_hger_lookthrough_section():
         st.rerun()
 
 
+# ---------- How BTAL Works (AGF long/short sector weights, November 21, 2026) ----------
+# BTAL owns low-beta U.S. stocks and sells high-beta ones short, matched sector
+# by sector. AGF's BTAL page draws its Sector Weightings chart and its
+# Characteristics table from a public JSON feed (BTAL_FEED_URL, no sign-in,
+# found November 21, 2026), which AGF updates monthly. The feed is read first;
+# if it fails, the most recent saved snapshot is shown with a warning. Every
+# successful fetch is saved to btal_snapshots\ beside app.py, one file per
+# as-of date, so an issue can use the month nearest its data date.
+#
+# Shown on Markets always (BTAL is in the Asset Universe) and on Holdings while
+# BTAL is in the current or next allocation, like What HGER Holds.
+
+BTAL_PAGE_URL = "https://www.agf.com/us/products/btal/"
+BTAL_FEED_URL = "https://www.agf.com/fileDispatcherWeb/process/deliverFileResult.action"
+BTAL_FEED_PARAMS = {"format": "JSON", "requestId": "IQ_FUND_CARD_BTAL"}
+BTAL_SNAPSHOT_DIR_NAME = "btal_snapshots"
+BTAL_SECTION_TITLE = "How BTAL Works"
+BTAL_LONG_BAR = GAIN_GREEN    # #1F8A4C, long positions (Tyler, November 21, 2026)
+BTAL_SHORT_BAR = LOSS_RED     # #C0392B, short positions
+
+# AGF (GICS) sector name -> (display name, emoji). Emojis come from the
+# Look-Through Exposure maps where a theme matches. An unknown sector still
+# shows under AGF's name and is flagged on the page.
+BTAL_SECTOR_DISPLAY = {
+    "Communication Services": ("Communication Services", "\U0001F4E1"),
+    "Consumer Discretionary": ("Consumer Discretionary", LT_THEME_EMOJI["consumer"]),
+    "Consumer Staples": ("Consumer Staples", "\U0001F6D2"),
+    "Energy": ("Energy", LT_THEME_EMOJI["oil"]),
+    "Financials": ("Financials", LT_THEME_EMOJI["financials"]),
+    "Health Care": ("Health Care", LT_THEME_EMOJI["health"]),
+    "Industrials": ("Industrials", LT_THEME_EMOJI["industrials"]),
+    "Information Technology": ("Information Technology", LT_THEME_EMOJI["other_tech"]),
+    "Materials": ("Materials", LT_THEME_EMOJI["energy_mat"]),
+    "Real Estate": ("Real Estate", LT_THEME_EMOJI["re_util"]),
+    "Utilities": ("Utilities", "\U0001F4A1"),
+}
+
+# AGF characteristic name -> (row label, formatter), in display order. Beta
+# comes first and is the emphasized row: it is the fund's actual bet.
+BTAL_CHAR_ROWS = [
+    ("Beta", "Beta (market sensitivity)", lambda v: f"{v:.2f}"),
+    ("Number of companies", "Stocks held", lambda v: f"{int(round(v))}"),
+    ("Median Market Cap (blns.)", "Median company size", lambda v: f"${v:.1f}B"),
+    ("Price/Earnings Ratio", "Price-to-earnings ratio", lambda v: f"{v:.1f}"),
+]
+
+
+def _btal_date(raw):
+    try:
+        return datetime.strptime(str(raw or "")[:8], "%Y%m%d").strftime("%Y-%m-%d")
+    except ValueError:
+        return None
+
+
+def _btal_from_feed(payload):
+    """Parse AGF's fund-card JSON. Returns None unless the sector weights are
+    complete and both sides add up to a plausible total."""
+    ec = (payload or {}).get("iq_etf_characteristics") or {}
+    sec = ec.get("iq_sector") or {}
+    names = sec.get("iq_component_name") or []
+    longs = sec.get("iq_weight_long") or []
+    shorts = sec.get("iq_weight_short") or []
+    as_of = _btal_date(sec.get("iq_as_of_date"))
+    if not names or not as_of or not (len(names) == len(longs) == len(shorts)):
+        return None
+    sectors = []
+    for name, lw, sw in zip(names, longs, shorts):
+        try:
+            sectors.append({"sector": str(name).strip(),
+                            "long": float(lw) * 100.0, "short": abs(float(sw)) * 100.0})
+        except (TypeError, ValueError):
+            return None
+    long_total = sum(s["long"] for s in sectors)
+    short_total = sum(s["short"] for s in sectors)
+    if not (50.0 <= long_total <= 150.0 and 50.0 <= short_total <= 150.0):
+        return None
+
+    chars = ec.get("iq_strategy_characteristics") or {}
+    characteristics = {}
+    for name, lv, sv in zip(chars.get("iq_component_name") or [], chars.get("iq_weight_long") or [],
+                            chars.get("iq_weight_short") or []):
+        try:
+            characteristics[str(name).strip()] = [float(lv), float(sv)]
+        except (TypeError, ValueError):
+            continue
+    return {
+        "as_of": as_of,
+        "characteristics_as_of": _btal_date(chars.get("iq_as_of_date")) or as_of,
+        "sectors": sectors,
+        "characteristics": characteristics,
+        "source": BTAL_PAGE_URL,
+        "fetched_at": local_now().strftime("%Y-%m-%d %H:%M"),
+    }
+
+
+@st.cache_data(ttl=6 * 3600, show_spinner=False)
+def fetch_btal_profile():
+    """Fetch BTAL's latest sector weights and characteristics from AGF.
+
+    Raises on failure so Streamlit does not cache a miss for six hours.
+    """
+    payload = _http_json(BTAL_FEED_URL, BTAL_FEED_PARAMS)
+    data = _btal_from_feed(payload) if payload else None
+    if data is None:
+        raise RuntimeError("AGF BTAL feed unavailable")
+    return data
+
+
+def _btal_snapshot_dir():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), BTAL_SNAPSHOT_DIR_NAME)
+
+
+def save_btal_snapshot(data):
+    """Save one snapshot per as-of date. Never overwrites, never raises."""
+    try:
+        folder = _btal_snapshot_dir()
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, f"btal_profile_{data['as_of']}.json")
+        if not os.path.exists(path):
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+    except Exception:
+        pass
+
+
+def list_btal_snapshots():
+    """Return {as_of: path} for saved snapshots, newest first."""
+    found = {}
+    try:
+        for name in os.listdir(_btal_snapshot_dir()):
+            if name.startswith("btal_profile_") and name.endswith(".json"):
+                found[name[len("btal_profile_"):-5]] = os.path.join(_btal_snapshot_dir(), name)
+    except OSError:
+        return {}
+    return dict(sorted(found.items(), reverse=True))
+
+
+def load_btal_snapshot(path):
+    try:
+        with open(path, "r", encoding="utf-8-sig") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+# Sector labels for the band between the long and short columns: two lines
+# where a name is long.
+BTAL_SHORT_LABELS = {
+    "Communication Services": "Comm.<br>Services", "Consumer Discretionary": "Consumer<br>Discr.",
+    "Consumer Staples": "Consumer<br>Staples", "Energy": "Energy", "Financials": "Financials",
+    "Health Care": "Health<br>Care", "Industrials": "Industrials", "Information Technology": "Info<br>Tech",
+    "Materials": "Materials", "Real Estate": "Real<br>Estate", "Utilities": "Utilities",
+}
+
+
+def _btal_prep(data):
+    """Sectors with display names and emoji, sorted by long plus short weight,
+    plus the unmapped sector names and the characteristics dict."""
+    sectors, unmapped = [], []
+    for s in data.get("sectors") or []:
+        display, emoji = BTAL_SECTOR_DISPLAY.get(s["sector"], (None, None))
+        if display is None:
+            unmapped.append(s["sector"])
+            display, emoji = s["sector"] or "Other", QCI_UNMAPPED_EMOJI
+        sectors.append({**s, "display": display, "emoji": emoji})
+    sectors.sort(key=lambda s: -(s["long"] + s["short"]))
+    return sectors, unmapped, data.get("characteristics") or {}
+
+
+def _btal_add_tiles(chars, width, y0, y1, shapes, text):
+    """Characteristic tiles across the top, long value left and short value
+    right in each, beta first on a lavender tile."""
+    rows = [(label, fmt(chars[key][0]), fmt(chars[key][1]), key == "Beta")
+            for key, label, fmt in BTAL_CHAR_ROWS if key in chars]
+    if not rows:
+        return
+    gap, r = 10, 8
+    tw = (width - 2 * 6 - gap * (len(rows) - 1)) / len(rows)
+    for i, (label, long_v, short_v, emph) in enumerate(rows):
+        x0 = 6 + i * (tw + gap)
+        x1 = x0 + tw
+        path = (f"M {x0 + r},{y0} L {x1 - r},{y0} Q {x1},{y0} {x1},{y0 + r} L {x1},{y1 - r} "
+                f"Q {x1},{y1} {x1 - r},{y1} L {x0 + r},{y1} Q {x0},{y1} {x0},{y1 - r} "
+                f"L {x0},{y0 + r} Q {x0},{y0} {x0 + r},{y0} Z")
+        shapes.append(dict(type="path", path=path, fillcolor=ANALYTICS_TINT if emph else WASH,
+                           line_width=0, layer="below"))
+        cx = (x0 + x1) / 2
+        text(cx, y0 + 20, label, size=13, color=BRAND_PURPLE if emph else TEXT_SECONDARY, bold=emph)
+        for side_x, value, word, color in ((cx - tw / 4, long_v, "long", BTAL_LONG_BAR),
+                                           (cx + tw / 4, short_v, "short", BTAL_SHORT_BAR)):
+            text(side_x, y0 + 50, value, size=19, color=color, bold=True)
+            text(side_x, y0 + 72, word, size=12, color=TEXT_SECONDARY)
+
+
+def _btal_column_path(x0, x1, y_base, y_tip, r=5):
+    """A column from y_base to y_tip with rounded corners at the tip only."""
+    d = 1 if y_tip > y_base else -1
+    r = min(r, abs(y_tip - y_base), (x1 - x0) / 2)
+    return (f"M {x0},{y_base} L {x0},{y_tip - d * r} Q {x0},{y_tip} {x0 + r},{y_tip} "
+            f"L {x1 - r},{y_tip} Q {x1},{y_tip} {x1},{y_tip - d * r} L {x1},{y_base} Z")
+
+
+def build_btal_figure(data):
+    """How BTAL Works, drawn in pixel coordinates so the 3x PNG matches the
+    screen (the "label spine" layout Tyler chose on November 21, 2026).
+
+    Characteristic tiles across the top, then one column per sector, sorted by
+    long plus short weight: long positions rise above a band of sector labels
+    and short positions hang below it, on one shared scale. Captions in the
+    open space at the right take the place of a legend.
+    Returns (figure, unmapped_sectors).
+    """
+    sectors, unmapped, chars = _btal_prep(data)
+    W = ANALYTICS_WIDTH
+    TILE_Y0, TILE_Y1 = 6, 96
+    L = R = 14
+    PPT = 8.5          # px per percentage point, the same above and below
+    TIP_ROOM = 24      # room for the value label past each column's tip
+    SPINE_H = 66       # the label band between the long and short columns
+    TOP = TILE_Y1 + 34
+    n = len(sectors)
+    col_w = (W - L - R) / max(n, 1)
+    half = col_w * 0.31
+    max_long = max([s["long"] for s in sectors] + [0.0])
+    max_short = max([s["short"] for s in sectors] + [0.0])
+    y_l0 = TOP + TIP_ROOM + max_long * PPT       # base of the long columns
+    y_s0 = y_l0 + SPINE_H                         # base of the short columns
+    bottom = y_s0 + max_short * PPT + TIP_ROOM
+    H = bottom + 10
+    shapes, ann = [], []
+
+    def text(x, y, value, anchor="center", size=15, color=TEXT_PRIMARY, bold=False):
+        ann.append(dict(x=x, y=y, xref="x", yref="y", xanchor=anchor, yanchor="middle",
+                        text=f"<b>{value}</b>" if bold else value, showarrow=False,
+                        font=dict(family=FONT_SANS, size=size, color=color)))
+
+    _btal_add_tiles(chars, W, TILE_Y0, TILE_Y1, shapes, text)
+
+    shapes.append(dict(type="rect", x0=L, x1=W - R, y0=y_l0, y1=y_s0,
+                       fillcolor=WASH, line_width=0, layer="below"))
+    for i, s in enumerate(sectors):
+        cx = L + (i + 0.5) * col_w
+        yl, ys = y_l0 - s["long"] * PPT, y_s0 + s["short"] * PPT
+        shapes.append(dict(type="path", path=_btal_column_path(cx - half, cx + half, y_l0, yl),
+                           fillcolor=BTAL_LONG_BAR, line_width=0))
+        shapes.append(dict(type="path", path=_btal_column_path(cx - half, cx + half, y_s0, ys),
+                           fillcolor=BTAL_SHORT_BAR, line_width=0))
+        text(cx, yl - 11, _pct1(s["long"]), size=12, bold=True)
+        text(cx, ys + 12, _pct1(s["short"]), size=12, bold=True)
+        label = (f'<span style="font-size:16px">{s["emoji"]}</span><br>'
+                 f'{BTAL_SHORT_LABELS.get(s["sector"], s["display"])}')
+        ann.append(dict(x=cx, y=y_l0 + 6, xref="x", yref="y", xanchor="center", yanchor="top",
+                        text=label, showarrow=False, font=dict(family=FONT_SANS, size=12, color=INK)))
+    for y in (y_l0, y_s0):
+        shapes.append(dict(type="line", x0=L, x1=W - R, y0=y, y1=y, line=dict(color=AXIS_TEXT, width=1)))
+
+    # Captions in the open space at the right, in place of a legend
+    for y, head, rest, color in ((TOP + 6, "Long positions", "low-beta stocks the fund owns", BTAL_LONG_BAR),
+                                 (bottom - 6, "Short positions", "high-beta stocks the fund sells short",
+                                  BTAL_SHORT_BAR)):
+        text(W - R, y, f'<b><span style="color:{color}">{head}</span></b>  {rest}',
+             anchor="right", size=13, color=TEXT_SECONDARY)
+        sx = W - R - _lt_tw(head, 13, 700) - _lt_tw("  " + rest, 13) - 20
+        shapes.append(dict(type="rect", x0=sx, x1=sx + 12, y0=y - 6, y1=y + 6, fillcolor=color, line_width=0))
+
+    fig = go.Figure()
+    fig.update_layout(
+        **DARK_LAYOUT, width=W, height=H, margin=dict(t=0, b=0, l=0, r=0),
+        xaxis=dict(range=[0, W], visible=False, fixedrange=True),
+        yaxis=dict(range=[H, 0], visible=False, fixedrange=True),
+        shapes=shapes, annotations=ann, showlegend=False,
+    )
+    return fig, unmapped
+
+
+def _fund_is_held(current_alloc_rows, ticker):
+    """True when ticker is in the current allocation or the saved next allocation."""
+    tickers = {str(r.get("ticker", "")).upper() for r in (current_alloc_rows or [])}
+    tickers |= {str(r.get("ticker", "")).upper() for r in load_next_allocation()}
+    return ticker.upper() in tickers
+
+
+def render_btal_section(key="markets"):
+    st.markdown(f"## {BTAL_SECTION_TITLE}")
+
+    live, live_error = None, False
+    try:
+        live = fetch_btal_profile()
+        save_btal_snapshot(live)
+    except Exception:
+        live_error = True
+
+    snapshots = list_btal_snapshots()
+    data = live
+    if snapshots and (len(snapshots) > 1 or live is None):
+        dates = list(snapshots.keys())
+        default = dates.index(live["as_of"]) if live and live["as_of"] in dates else 0
+        pick = st.selectbox(
+            "As of", dates, index=default, key=f"btal_as_of_{key}",
+            format_func=lambda d: datetime.strptime(d, "%Y-%m-%d").strftime("%b %d, %Y"),
+        )
+        if live is None or pick != live["as_of"]:
+            data = load_btal_snapshot(snapshots[pick])
+
+    if data is None:
+        st.error(
+            "BTAL sector weights unavailable. AGF's BTAL data could not be reached or its "
+            f"format changed, and no saved snapshot exists yet. Source page: {BTAL_PAGE_URL}"
+        )
+        return
+    if live_error:
+        st.warning(
+            "Could not reach AGF just now, so this shows the most recent saved snapshot. "
+            "Check the as-of date before using it in an issue."
+        )
+
+    lead = ("BTAL owns low-beta U.S. stocks and sells high-beta stocks short, in similar amounts "
+            "within every sector, so the sector bets cancel out. What is left is a bet that steady "
+            "stocks beat volatile ones. That gives the fund a negative beta, so it tends to gain "
+            "when the stock market falls.")
+    st.markdown(f'<p style="font-size:1.0rem; color:{TEXT_PRIMARY}; margin:0.2rem 0 0.7rem 0;">'
+                f'{lead}</p>', unsafe_allow_html=True)
+
+    as_of_dt = datetime.strptime(data["as_of"], "%Y-%m-%d")
+    fig, unmapped = build_btal_figure(data)
+    st.plotly_chart(fig, use_container_width=False,
+                    config=chart_config(f"How BTAL Works {as_of_dt:%m-%d-%Y}", static=True))
+    if unmapped:
+        st.warning(
+            "New sector name from AGF, shown under its raw name: " + ", ".join(unmapped)
+            + ". Add it to BTAL_SECTOR_DISPLAY in app.py to give it an emoji."
+        )
+
+    footnote = (
+        f"Source: AGF Investments, BTAL sector weights and portfolio characteristics as of "
+        f"{as_of_dt:%m/%d/%Y}, updated monthly. Beta measures how much a stock tends to move with "
+        f"the U.S. market: 1.0 moves with it, below 1.0 moves less, above 1.0 moves more."
+    )
+    st.markdown(f'<p class="footer-text">{footnote}</p>', unsafe_allow_html=True)
+    newsletter_caption(
+        f"How the anti-beta fund BTAL is built: long low-beta U.S. stocks and short high-beta "
+        f"stocks, matched sector by sector, as of {_cap_date(as_of_dt)}. Source: AGF Investments."
+    )
+
+    if not studio_mode():
+        return
+    if st.button("Refresh from AGF", key=f"btal_refresh_{key}"):
+        fetch_btal_profile.clear()
+        st.rerun()
+
 # ---------- Asset Universe ----------
 #
 # The asset universe grid lives in a JSON file next to the portfolio CSV.
@@ -13084,6 +13434,7 @@ def render_explore_links(ctx):
     """Explore the dashboard: one row per page with its sections and an Open link."""
     pages = {page.url_path: page for page in getattr(ctx, "pages", [])}
     hger_held = _hger_is_held(ctx.current_alloc_rows)
+    btal_held = _fund_is_held(ctx.current_alloc_rows, "BTAL")
     st.markdown('<div class="ae-explore-title" role="heading" aria-level="2">Explore the dashboard</div>',
                 unsafe_allow_html=True)
     with st.container(key="ae_explore", gap=None):
@@ -13091,7 +13442,8 @@ def render_explore_links(ctx):
             page = pages.get(slug)
             if page is None:
                 continue
-            labels = [label for anchor, label in sections if anchor != "hger" or hger_held]
+            labels = [label for anchor, label in sections
+                      if (anchor != "hger" or hger_held) and (anchor != "btal-held" or btal_held)]
             with st.container(key=f"ae_explore_{slug}", horizontal=True, vertical_alignment="center",
                               gap="medium"):
                 st.markdown(f'<span class="ae-explore-name">{_esc(page.title)}</span>',
@@ -13458,6 +13810,7 @@ def page_diversification():
 HOLDINGS_SECTIONS = [
     ("current", "Current Allocation"),
     ("hger", "What HGER Holds"),   # shown only while HGER is held
+    ("btal-held", BTAL_SECTION_TITLE),   # shown only while BTAL is held
     ("live-drift", "Live Position Drift"),
     ("next", "Next Allocation"),
     ("drift", "Allocation Drift"),
@@ -13469,7 +13822,9 @@ HOLDINGS_SECTIONS = [
 def page_holdings():
     ctx = AE_CTX
     hger_held = _hger_is_held(ctx.current_alloc_rows)
-    render_page_header("holdings", [s for s in HOLDINGS_SECTIONS if s[0] != "hger" or hger_held])
+    btal_held = _fund_is_held(ctx.current_alloc_rows, "BTAL")
+    render_page_header("holdings", [s for s in HOLDINGS_SECTIONS
+                                    if (s[0] != "hger" or hger_held) and (s[0] != "btal-held" or btal_held)])
 
     section_anchor("current")
     render_current_allocation_section(ctx)
@@ -13478,6 +13833,11 @@ def page_holdings():
     if hger_held:
         section_anchor("hger")
         render_hger_lookthrough_section()
+
+    # How BTAL Works, shown here only while BTAL is held (always on Markets)
+    if btal_held:
+        section_anchor("btal-held")
+        _render_guarded(BTAL_SECTION_TITLE, render_btal_section, key="holdings", heading=False)
 
     section_anchor("live-drift")
     render_live_position_drift_section(ctx)
@@ -13508,6 +13868,12 @@ def page_markets():
 
     st.divider()
 
+    # How BTAL Works (AGF long/short look-through), always shown here
+    section_anchor("btal")
+    _render_guarded(BTAL_SECTION_TITLE, render_btal_section, heading=False)
+
+    st.divider()
+
     render_asset_class_returns_section(ctx)
 
     st.divider()
@@ -13525,6 +13891,7 @@ def page_markets():
 
 MARKETS_SECTIONS = [
     ("universe", "Asset Universe"),
+    ("btal", BTAL_SECTION_TITLE),
     ("asset-classes", "Asset Class Returns"),
     ("vol-spikes", "After a Volatility Spike"),
     ("total-return", "Total Return Comparison"),

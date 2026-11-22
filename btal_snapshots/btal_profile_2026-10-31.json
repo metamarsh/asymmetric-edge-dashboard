@@ -1,0 +1,89 @@
+{
+  "as_of": "2026-10-31",
+  "characteristics_as_of": "2026-10-31",
+  "sectors": [
+    {
+      "sector": "Communication Services",
+      "long": 2.90985065,
+      "short": 2.95887578
+    },
+    {
+      "sector": "Consumer Discretionary",
+      "long": 9.85022506,
+      "short": 10.60860742
+    },
+    {
+      "sector": "Consumer Staples",
+      "long": 5.50290192,
+      "short": 5.6580382700000005
+    },
+    {
+      "sector": "Energy",
+      "long": 4.1867885000000005,
+      "short": 3.73631053
+    },
+    {
+      "sector": "Financials",
+      "long": 15.857836619999999,
+      "short": 14.01571954
+    },
+    {
+      "sector": "Health Care",
+      "long": 9.79318661,
+      "short": 10.24621848
+    },
+    {
+      "sector": "Industrials",
+      "long": 17.31343393,
+      "short": 15.27267505
+    },
+    {
+      "sector": "Information Technology",
+      "long": 14.277249470000001,
+      "short": 11.925101080000001
+    },
+    {
+      "sector": "Materials",
+      "long": 4.8544585399999995,
+      "short": 4.025037129999999
+    },
+    {
+      "sector": "Real Estate",
+      "long": 5.45892618,
+      "short": 5.1383660099999995
+    },
+    {
+      "sector": "Utilities",
+      "long": 4.87087776,
+      "short": 4.60325686
+    }
+  ],
+  "characteristics": {
+    "Average Market Cap (blns.)": [
+      57.83,
+      76.45
+    ],
+    "Beta": [
+      0.59,
+      1.3
+    ],
+    "Median Market Cap (blns.)": [
+      18.61,
+      15.85
+    ],
+    "Number of companies": [
+      200.0,
+      200.0
+    ],
+    "Price to Book Ratio": [
+      3.68,
+      3.62
+    ],
+    "Price/Earnings Ratio": [
+      21.13,
+      27.35
+    ]
+  },
+  "source": "https://www.agf.com/us/products/btal/",
+  "fetched_at": "2026-11-21 18:01"
+}
