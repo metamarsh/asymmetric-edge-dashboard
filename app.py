@@ -1355,7 +1355,8 @@ def compute_summary_metrics(daily_series, rf_monthly=None, start_date=None, end_
       - Sortino uses BIL monthly returns as the risk-free rate when available.
         Its return and its downside deviation both use completed months only
         (November 23, 2026), so for a range that ends mid-month it runs through
-        the last month-end ("Sortino Through").
+        the last month-end ("Sortino Through"). Calmar and Martin use the same
+        completed-month return ("Sortino CAGR") over their month-end drawdowns.
     """
     s_full = daily_series.dropna()
     if len(s_full) < 2:
@@ -1450,8 +1451,9 @@ def compute_summary_metrics(daily_series, rf_monthly=None, start_date=None, end_
     # in neither part until it closes (the November 18 rule that a partial month's loss
     # is not risk still holds). A range that ends on a month-end gives the same figures
     # as before, because that month is complete. The Backtest Engine already stops
-    # every figure at the last completed month. CAGR (and Calmar and Martin, which use
-    # it) still run to the latest close.
+    # every figure at the last completed month. Calmar and Martin use this same
+    # completed-month return too (November 23, 2026, Tyler, later that night), since
+    # their drawdowns are month-end figures. CAGR still runs to the latest close.
     sortino_through = monthly_values.index[-1]            # calendar month-end label, e.g. Oct 31
     closed_daily = s_full[s_full.index <= sortino_through]
     sortino_last_close = closed_daily.index[-1] if len(closed_daily) else sortino_through
@@ -1469,14 +1471,16 @@ def compute_summary_metrics(daily_series, rf_monthly=None, start_date=None, end_
     peak = wealth.cummax()
     drawdown = (wealth - peak) / peak
     max_dd = drawdown.min()
-    calmar = cagr / abs(max_dd) if max_dd != 0 else 0.0
+    # Completed-month return over completed-month drawdowns (November 23, 2026).
+    calmar = sortino_cagr / abs(max_dd) if max_dd != 0 else 0.0
 
     # Ulcer Index and Martin ratio (November 8, 2026), from the same month-end
     # drawdowns as Calmar: the root mean square of the drawdown at every
     # month-end, and the return above T-bills divided by it (Peter Martin's
-    # Ulcer Performance Index, the backtest engine's definition too).
+    # Ulcer Performance Index, the backtest engine's definition too). The return
+    # is the completed-month one since November 23, 2026, like Sortino and Calmar.
     ulcer_index = float(np.sqrt(np.mean(drawdown.values ** 2))) if len(drawdown) else np.nan
-    martin = (cagr - rf_annual) / ulcer_index if ulcer_index > 0 else np.nan
+    martin = (sortino_cagr - rf_annual) / ulcer_index if ulcer_index > 0 else np.nan
 
     # Gain-to-pain ratio (November 17, 2026), Jack Schwager's definition: the
     # sum of all monthly returns divided by the absolute sum of the losing
@@ -12326,9 +12330,10 @@ def render_performance_summary_section(ctx):
             f"return covers the full calendar month of the selected start date. "
             f"Sortino and Martin ratios use BIL (1-3 Month T-Bill ETF) as the risk-free rate where available; "
             f"months outside BIL's history default to 0%. "
-            f"The Sortino ratio uses completed calendar months for both parts: its annualized return runs to "
-            f"the last month-end, like its downside deviation, so a month in progress counts in neither until "
-            f"it closes. CAGR, and the return in Calmar and Martin, run to the end of the selected range. "
+            f"The Sortino, Calmar and Martin ratios use completed calendar months for both parts: their "
+            f"annualized return runs to the last month-end, like the downside deviation and the month-end "
+            f"drawdowns they divide by, so a month in progress counts in neither until it closes. CAGR runs "
+            f"to the end of the selected range. "
             f"Max DD (Daily), Worst/Best Single Day, and Worst/Best Week are computed from the daily series over the "
             f"literal selected range, with the date of occurrence shown beneath each figure (and on hover). Worst/Best "
             f"Week use week-ending (Friday) closes. Worst/Best Month use the anchored monthly returns. "
@@ -13239,13 +13244,16 @@ PS_ROW_HELP = {
     "Calmar ratio": (
         "Return per unit of worst loss: the yearly growth rate divided by the deepest month-end drop "
         "from a previous high. A Calmar of 1 means a year's return about equals that worst drop. It "
-        "rests on a single episode, so one bad stretch can move it a lot. Higher is better."
+        "rests on a single episode, so one bad stretch can move it a lot. Higher is better. "
+        "Both parts use completed months, so when the period ends mid-month it runs through the "
+        "last month-end."
     ),
     "Martin ratio": (
         "Return per unit of drawdown pain: the yearly return above T-bills (BIL), divided by the "
         "Ulcer Index, which measures how far below its previous high the portfolio sat at every "
         "month-end. It counts how deep and how long every decline was, not just the worst one. "
-        "Higher is better."
+        "Higher is better. Both parts use completed months, so when the period ends mid-month it "
+        "runs through the last month-end."
     ),
     "Gain-to-pain ratio (monthly)": (
         "Net gain per dollar lost in down months: all monthly returns added together, divided by the "
@@ -13278,8 +13286,8 @@ PS_NOTE = (
     "Asymmetric Edge’s monthly figures tie to Fidelity’s reported returns. Its daily "
     "figures come from a close-only reconstruction and are approximate. Benchmarks are Yahoo "
     "Finance adjusted closes with dividends reinvested. Sortino and Martin use BIL as the risk-free rate. "
-    "The Sortino ratio uses completed months for both its return and its downside risk, so in a period "
-    "that ends mid-month it runs through the last month-end. "
+    "The Sortino, Calmar and Martin ratios use completed months for both their return and their risk, "
+    "so in a period that ends mid-month they run through the last month-end. "
     "Correlation rows read down each column: that portfolio against the S&amp;P 500 or against "
     "Asymmetric Edge, so a portfolio against itself reads 1.00. Before taxes and fees."
 )
@@ -13384,10 +13392,10 @@ def build_perf_summary_table(metrics_by_series, show_all):
             chip = _ps_chip(ae.get(key), bench.get(key), fmt, better) if (ae and bench) else ""
             text_row = ' class="ae-ps-text"' if fmt == "text" else ""
             help_attr = f' title="{_esc(PS_ROW_HELP[label])}"' if label in PS_ROW_HELP else ""
-            # When the range ends mid-month, the Sortino covers completed months only, so its
-            # row names the month-end it runs through (November 23, 2026).
+            # When the range ends mid-month, the Sortino, Calmar and Martin ratios cover completed
+            # months only, so their rows name the month-end they run through (November 23, 2026).
             label_note = ""
-            if key == "Sortino Ratio":
+            if key in ("Sortino Ratio", "Calmar Ratio", "Martin Ratio"):
                 src = ae or next((m for m in metrics_by_series.values() if m), {})
                 if src.get("Sortino Partial") and src.get("Sortino Through") is not None:
                     thru = pd.Timestamp(src["Sortino Through"])
