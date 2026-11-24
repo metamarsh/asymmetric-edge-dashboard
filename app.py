@@ -426,6 +426,12 @@ st.markdown("""
         color: """ + BRAND_PURPLE + """;
         font-variant-numeric: tabular-nums;
     }
+    [data-testid="stMarkdownContainer"] .ae-hero p.ae-tile-note {
+        margin: -2px 0 0;
+        font-size: 12px;
+        line-height: 1.35;
+        color: """ + TEXT_MUTED + """;
+    }
     .ae-tile-foot {
         display: flex;
         flex-wrap: wrap;
@@ -1347,6 +1353,9 @@ def compute_summary_metrics(daily_series, rf_monthly=None, start_date=None, end_
       - Total Return is the monthly cumulative product (matches Adaptive),
         so it includes the full calendar month of start_date.
       - Sortino uses BIL monthly returns as the risk-free rate when available.
+        Its return and its downside deviation both use completed months only
+        (November 23, 2026), so for a range that ends mid-month it runs through
+        the last month-end ("Sortino Through").
     """
     s_full = daily_series.dropna()
     if len(s_full) < 2:
@@ -1433,7 +1442,27 @@ def compute_summary_metrics(daily_series, rf_monthly=None, start_date=None, end_
     excess_downside = np.minimum(excess.values, 0.0)
     downside_var = np.mean(excess_downside ** 2)
     downside_dev = np.sqrt(downside_var) * np.sqrt(12)
-    sortino = (cagr - rf_annual) / downside_dev if downside_dev > 0 else 0.0
+
+    # Sortino over completed months only (November 23, 2026, Tyler's decision). The
+    # downside deviation and the T-bill rate above use completed calendar months, and
+    # since then so does the Sortino's return: the annualized return from the anchor to
+    # the last completed month-end, not to the latest close. A month in progress counts
+    # in neither part until it closes (the November 18 rule that a partial month's loss
+    # is not risk still holds). A range that ends on a month-end gives the same figures
+    # as before, because that month is complete. The Backtest Engine already stops
+    # every figure at the last completed month. CAGR (and Calmar and Martin, which use
+    # it) still run to the latest close.
+    sortino_through = monthly_values.index[-1]            # calendar month-end label, e.g. Oct 31
+    closed_daily = s_full[s_full.index <= sortino_through]
+    sortino_last_close = closed_daily.index[-1] if len(closed_daily) else sortino_through
+    sortino_total = float(monthly_values.iloc[-1]) / float(anchor_val) - 1.0
+    days_closed = (sortino_last_close - anchor_date).days
+    n_years_closed = days_closed / 365.25 if days_closed > 0 else len(monthly_returns) / 12.0
+    sortino_cagr = (1 + sortino_total) ** (1.0 / n_years_closed) - 1.0 if n_years_closed > 0 else 0.0
+    # True when the range runs past the last completed month (it ends mid-month), so
+    # the Sortino covers less than the range and is labeled with its own end date.
+    sortino_partial = bool(len(daily_in_range) and daily_in_range.index[-1] > sortino_last_close)
+    sortino = (sortino_cagr - rf_annual) / downside_dev if downside_dev > 0 else 0.0
 
     # Max drawdown (monthly basis)
     wealth = (1 + monthly_returns).cumprod()
@@ -1521,6 +1550,12 @@ def compute_summary_metrics(daily_series, rf_monthly=None, start_date=None, end_
     return {
         "Period": period_label,
         "Sortino Ratio": sortino,
+        # The Sortino's own return and end (November 23, 2026): annualized return over the
+        # completed months, the calendar month-end they run through, and whether the range
+        # runs past it (ends mid-month).
+        "Sortino CAGR": sortino_cagr,
+        "Sortino Through": sortino_through,
+        "Sortino Partial": sortino_partial,
         "CAGR": cagr,
         "Max Drawdown": max_dd,
         "Max Drawdown (Daily)": max_dd_daily,
@@ -8359,10 +8394,11 @@ def build_risk_return_figure(points, ref_point, measure="vol"):
     downside = measure == "downside"
     if downside:
         # Put downside deviation in the "vol" slot so the axis, break and label
-        # placement below work unchanged.
-        points = [dict(p, vol=p["dd"]) for p in points]
+        # placement below work unchanged. The return is the Sortino's own, over
+        # completed months (November 23, 2026), so every dot sits on its ratio's slope.
+        points = [dict(p, vol=p["dd"], cagr=p.get("cagr_s", p["cagr"])) for p in points]
         if ref_point:
-            ref_point = dict(ref_point, vol=ref_point["dd"])
+            ref_point = dict(ref_point, vol=ref_point["dd"], cagr=ref_point.get("cagr_s", ref_point["cagr"]))
     vmax = max(p["vol"] for p in points)
     in_max = max([p["vol"] for p in points if p["vol"] <= RR_OUTLIER_VOL] + [1.0])
     broken = vmax > RR_OUTLIER_VOL
@@ -8508,6 +8544,9 @@ def build_risk_return_figure(points, ref_point, measure="vol"):
                             line=dict(color="#ffffff" if solid else p["color"],
                                       width=2 if solid else 2.5)),
                 hovertemplate=(f"<b>{p['label']}</b><br>Annualized return %{{y:.1f}}%"
+                               + (f" through {pd.Timestamp(p['thru']):%b} {pd.Timestamp(p['thru']).day}, "
+                                  f"{pd.Timestamp(p['thru']).year}"
+                                  if downside and p.get("partial") and p.get("thru") is not None else "")
                                + ((f"<br>Downside deviation {p['vol']:.1f}%<br>Sortino ratio "
                                    + (f"{p['sortino']:.2f}" if p["vol"] >= 0.05
                                       else "n/a (never trailed T-bills)"))
@@ -8517,6 +8556,8 @@ def build_risk_return_figure(points, ref_point, measure="vol"):
             ))
     title = (("Annualized downside deviation" if downside else "Annualized volatility")
              + (" (compressed scale above 25%)" if broken else ""))
+    y_title = ("Annualized return, completed months"
+               if downside and any(p.get("partial") for p in points) else "Annualized return")
     fig.update_layout(
         **DARK_LAYOUT,
         xaxis=dict(range=[-0.005, 1.0], tickmode="array", tickvals=tickvals, ticktext=ticktext,
@@ -8525,7 +8566,7 @@ def build_risk_return_figure(points, ref_point, measure="vol"):
                    tickfont=dict(size=15, color=AXIS_TEXT)),
         yaxis=dict(range=y_range, ticksuffix="%", gridcolor=GRID_COLOR, zeroline=True,
                    zerolinecolor="#c9c9d3", tick0=0, dtick=y_step, fixedrange=True,
-                   title=dict(text="Annualized return", font=dict(size=15, color=TEXT_PRIMARY),
+                   title=dict(text=y_title, font=dict(size=15, color=TEXT_PRIMARY),
                               standoff=9),   # a little room between the title and the tick labels
                    tickfont=dict(size=15, color=AXIS_TEXT)),
         margin=dict(t=36, b=60, l=85, r=30),
@@ -8565,6 +8606,8 @@ def compute_risk_return_points(combined, start, end, hide=(), custom=None, custo
         p = {"label": label, "vol": m["Annualized Vol"] * 100.0, "cagr": m["CAGR"] * 100.0,
              "dd": m["Downside Dev"] * 100.0, "sortino": m["Sortino Ratio"],
              "rf": m["Risk-Free Annual"] * 100.0,
+             "cagr_s": m["Sortino CAGR"] * 100.0, "thru": m["Sortino Through"],
+             "partial": m["Sortino Partial"],
              "kind": "family", "color": color, "size": size, "text_color": text_color}
         if name not in hide_family:
             points.append(p)
@@ -8591,6 +8634,8 @@ def compute_risk_return_points(combined, start, end, hide=(), custom=None, custo
         return {"label": label, "vol": m["Annualized Vol"] * 100.0, "cagr": m["CAGR"] * 100.0,
                 "dd": m["Downside Dev"] * 100.0, "sortino": m["Sortino Ratio"],
                 "rf": m["Risk-Free Annual"] * 100.0,
+                "cagr_s": m["Sortino CAGR"] * 100.0, "thru": m["Sortino Through"],
+                "partial": m["Sortino Partial"],
                 "kind": kind, "color": color, "size": 12 if kind == "custom" else 12,
                 "text_color": color}
 
@@ -8725,8 +8770,16 @@ def render_risk_return_section(combined, latest_date):
     late = (" Assets that began trading after the period start are measured from their first day: "
             + "; ".join(late_start) + ".") if late_start else ""
     broken = max(p["dd" if downside else "vol"] for p in points) > RR_OUTLIER_VOL
+    # The Sortino view's return and downside risk both stop at the last completed month-end
+    # (November 23, 2026). When the period ends mid-month, the caption says so.
+    ref_thru = next((p for p in ([ref_point] if ref_point else []) + points if p and p.get("thru") is not None), None)
+    sortino_partial = downside and ref_thru is not None and any(p.get("partial") for p in points)
+    thru_end = pd.Timestamp(ref_thru["thru"]) if sortino_partial else end
     if downside:
-        lead = (f"Annualized return (CAGR) against annualized downside deviation, {period}. Downside "
+        lead = (f"Annualized return against annualized downside deviation, {period}"
+                + (f", both measured over completed months, so they run through {_long_date(thru_end)}"
+                   if sortino_partial else "")
+                + ". Downside "
                 "deviation counts only the months that trailed T-bills (BIL), so gains add no risk; it "
                 "is the denominator of the Sortino ratio, computed the same way as the Performance "
                 "Summary table. Up and to the left is better. The dashed line starts at the T-bill "
@@ -8764,7 +8817,9 @@ def render_risk_return_section(combined, latest_date):
         f"{'downside risk (annualized downside deviation)' if downside else 'annualized volatility'}, "
         f"{_cap_vs(fam_shown)}"
         + (", plus the funds in the strategy's universe" if assets_shown else "")
-        + f", {_cap_date(start)} through {_cap_date(end)}. " + NEWSLETTER_RETURNS_SENTENCES
+        + f", {_cap_date(start)} through {_cap_date(thru_end)}"
+        + (" (completed months)" if sortino_partial else "")
+        + ". " + NEWSLETTER_RETURNS_SENTENCES
     )
 
 
@@ -12271,6 +12326,9 @@ def render_performance_summary_section(ctx):
             f"return covers the full calendar month of the selected start date. "
             f"Sortino and Martin ratios use BIL (1-3 Month T-Bill ETF) as the risk-free rate where available; "
             f"months outside BIL's history default to 0%. "
+            f"The Sortino ratio uses completed calendar months for both parts: its annualized return runs to "
+            f"the last month-end, like its downside deviation, so a month in progress counts in neither until "
+            f"it closes. CAGR, and the return in Calmar and Martin, run to the end of the selected range. "
             f"Max DD (Daily), Worst/Best Single Day, and Worst/Best Week are computed from the daily series over the "
             f"literal selected range, with the date of occurrence shown beneath each figure (and on hover). Worst/Best "
             f"Week use week-ending (Friday) closes. Worst/Best Month use the anchored monthly returns. "
@@ -13174,7 +13232,9 @@ PS_ROW_HELP = {
     # The three risk-adjusted ratios in plain terms (November 8, 2026).
     "Sortino ratio": (
         "Return per unit of bad volatility: the yearly return above T-bills (BIL), divided by how "
-        "large the losing months typically were. Gains don't count against it. Higher is better."
+        "large the losing months typically were. Gains don't count against it. Higher is better. "
+        "Both the return and the downside risk use completed months, so when the period ends "
+        "mid-month the ratio runs through the last month-end."
     ),
     "Calmar ratio": (
         "Return per unit of worst loss: the yearly growth rate divided by the deepest month-end drop "
@@ -13218,6 +13278,8 @@ PS_NOTE = (
     "Asymmetric Edge’s monthly figures tie to Fidelity’s reported returns. Its daily "
     "figures come from a close-only reconstruction and are approximate. Benchmarks are Yahoo "
     "Finance adjusted closes with dividends reinvested. Sortino and Martin use BIL as the risk-free rate. "
+    "The Sortino ratio uses completed months for both its return and its downside risk, so in a period "
+    "that ends mid-month it runs through the last month-end. "
     "Correlation rows read down each column: that portfolio against the S&amp;P 500 or against "
     "Asymmetric Edge, so a portfolio against itself reads 1.00. Before taxes and fees."
 )
@@ -13230,7 +13292,8 @@ OVERVIEW_TILES = [
     ("Max drawdown", "Max Drawdown (Daily)", "pct", "higher", "depth",
      "Largest decline from a previous high, measured on daily closes"),
     ("Sortino ratio", "Sortino Ratio", "ratio", "higher", "signed",
-     "Return above T-bills (BIL) per unit of downside risk"),
+     "Return above T-bills (BIL) per unit of downside risk, both measured over completed months, "
+     "so it runs through the last month-end"),
 ]
 
 
@@ -13321,7 +13384,15 @@ def build_perf_summary_table(metrics_by_series, show_all):
             chip = _ps_chip(ae.get(key), bench.get(key), fmt, better) if (ae and bench) else ""
             text_row = ' class="ae-ps-text"' if fmt == "text" else ""
             help_attr = f' title="{_esc(PS_ROW_HELP[label])}"' if label in PS_ROW_HELP else ""
-            body.append(f'<tr{text_row}><th scope="row"{help_attr}>{_esc(label)}</th>{"".join(cells)}'
+            # When the range ends mid-month, the Sortino covers completed months only, so its
+            # row names the month-end it runs through (November 23, 2026).
+            label_note = ""
+            if key == "Sortino Ratio":
+                src = ae or next((m for m in metrics_by_series.values() if m), {})
+                if src.get("Sortino Partial") and src.get("Sortino Through") is not None:
+                    thru = pd.Timestamp(src["Sortino Through"])
+                    label_note = f'<span class="ae-ps-date">through {thru:%b} {thru.day}, {thru.year}</span>'
+            body.append(f'<tr{text_row}><th scope="row"{help_attr}>{_esc(label)}{label_note}</th>{"".join(cells)}'
                         f'<td class="ae-ps-vs">{chip}</td></tr>')
     # With an extra comparison ticker the table has a sixth column; tighter side padding keeps it
     # inside the page's width. With four series the HTML is what it always was.
@@ -13403,9 +13474,14 @@ def build_overview_summary_html(metrics_by_series, inception_date, latest_date):
         chip = _ps_chip(ae.get(key), bench.get(key), fmt, better, style) if bench else ""
         bench_text = (f'<span>{_esc(series_label(PRIMARY_BENCHMARK))} {_ps_value(bench.get(key), fmt)}</span>'
                       if bench else "")
+        # The Sortino tile names the month-end its completed months run through (November 23, 2026).
+        thru = ae.get("Sortino Through") if key == "Sortino Ratio" else None
+        note = (f'<p class="ae-tile-note">Completed months through '
+                f'{pd.Timestamp(thru):%b} {pd.Timestamp(thru).day}, {pd.Timestamp(thru).year}</p>'
+                if thru is not None else "")
         tiles.append(f'<div class="ae-tile" title="{_esc(hover)}"><p class="ae-tile-label">{_esc(label)}</p>'
                      f'<p class="ae-tile-value">{_ps_value(ae.get(key), fmt)}</p>'
-                     f'<div class="ae-tile-foot">{bench_text}{chip}</div></div>')
+                     f'<div class="ae-tile-foot">{bench_text}{chip}</div>{note}</div>')
     return ('<div class="ae-hero">'
             f'<p class="ae-hero-eyebrow">Live Fidelity account since {_long_date(inception_date)}</p>'
             f'<div class="ae-hero-title" role="heading" aria-level="1">{headline}</div>'
